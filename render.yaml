@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: nepse-pulse-feed
+    runtime: docker
+    rootDir: backend
+    healthCheckPath: /health
+    envVars:
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: CACHE_TTL_SECONDS
+        value: "30"
