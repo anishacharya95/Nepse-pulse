@@ -2,4 +2,4 @@
    After deploying the backend, put its HTTPS URL here, for example:
    window.NEPSE_PULSE_BACKEND_URL = 'https://your-service.onrender.com';
 */
-window.NEPSE_PULSE_BACKEND_URL = '';
+window.NEPSE_PULSE_BACKEND_URLconst API_BASE = "https://nepse-pulse.onrender.com"; = '';
