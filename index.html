@@ -2073,7 +2073,13 @@ const PulseFeedEngine = (()=>{
   };
   const refresh=()=>loadCore();
   const loadCompanies=async()=>{if(!state.companies.length)await refresh();return state.companies};
-  const loadFloorsheet=async()=>{try{const d=await fetchRoute('/Floorsheet');state.floorsheet=arr(d);emit();return state.floorsheet}catch(e){state.lastError=e.message;emit();return[]}};
+  const loadFloorsheet=async()=>{try{const d=await fetchRoute('/Floorsheet');let rows=arr(d);if(!rows.length&&d?.data)rows=arr(d.data);if(!rows.length){
+      // Static daily archive fallback: keeps the floorsheet alive even if the
+      // live NEPSE endpoint is temporarily unavailable. Try today and the
+      // most recent prior sessions.
+      const base='https://shubhamnpk.github.io/yonepse/data/floor_sheet/daily/';
+      for(let i=0;i<6&&!rows.length;i++){const dt=new Date(Date.now()-i*86400000).toISOString().slice(0,10);try{const r=await fetch(base+dt+'.json',{cache:'no-store'});if(!r.ok)continue;const j=await r.json();rows=arr(j);if(!rows.length&&j?.data)rows=arr(j.data);if(!rows.length&&j?.floorsheet)rows=arr(j.floorsheet);if(!rows.length&&j?.rows)rows=arr(j.rows)}catch(_){}}
+    }state.floorsheet=rows;emit();return state.floorsheet}catch(e){state.lastError=e.message;emit();return[]}};
   const checkHealth=async()=>{try{const d=await fetchRoute('/health');state.health=d;return true}catch(e){return false}};
   const start=async()=>{
     const hadCache=restore();
@@ -4295,10 +4301,14 @@ async function load(){
     const resp=await fetch(base+'/api/history/security/'+encodeURIComponent(s)+'?limit='+chartLimit(),{cache:'no-store',headers:{Accept:'application/json'},signal:controller.signal});
     if(!resp.ok)throw new Error('history HTTP '+resp.status);
     const d=await resp.json();
-    const h=Array.isArray(d?.data)?d.data:(Array.isArray(d)?d:[]);
+    let h=Array.isArray(d?.data)?d.data:(Array.isArray(d)?d:[]);
+    if(!h.length){
+      const urls=[`https://binayabaral.github.io/nepal-market-data/data/nepse/${encodeURIComponent(s)}.csv`,`https://raw.githubusercontent.com/binayabaral/nepal-market-data/main/data/nepse/${encodeURIComponent(s)}.csv`];
+      for(const u of urls){try{const rr=await fetch(u,{cache:'no-store'});if(!rr.ok)continue;const csv=await rr.text();const lines=csv.trim().split(/\r?\n/);if(lines.length<2)continue;const head=lines.shift().split(',').map(x=>x.trim());h=lines.map(line=>{const p=line.split(',');const o={};head.forEach((k,i)=>o[k]=p[i]);return {date:o.published_date||o.date,open:Number(o.open),high:Number(o.high),low:Number(o.low),close:Number(o.close),volume:Number(o.traded_quantity)} }).filter(x=>Number.isFinite(x.close));if(h.length)break}catch(_){}}
+    }
     if(!h.length)throw new Error('empty history');
-    record={...r,symbol:s,history:mergeLiveBar(h,r),historySource:d?.source||'history'};
-    $('pc8Legend').textContent=`${record.history.length} OHLCV points · ${d?.source||'live history'}`;
+    record={...r,symbol:s,history:mergeLiveBar(h,r),historySource:d?.source||'OHLCV archive'};
+    $('pc8Legend').textContent=`${record.history.length} OHLCV points · ${d?.source||'history'}`;
   }catch(e){
     $('pc8Legend').textContent=record.history?.length?`Showing cached chart · refresh pending`:'Chart history unavailable';
   }finally{clearTimeout(timer);pc8Loading=false;renderSide();draw()}

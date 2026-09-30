@@ -542,26 +542,63 @@ async def get_fundamentals(symbol: str):
 
 
 async def get_floorsheet(symbol: Optional[str] = None):
+    """Return normalized current-session floorsheet rows.
+
+    The UI expects a flat list.  Newer nepsepy versions return a wrapper such
+    as {"floorsheets": {"content": [...], "totalPages": ...}}, so returning
+    that wrapper directly makes the browser's generic array parser see zero
+    rows.  Prefer the client method, then the public REST service, and finally
+    the static daily archive when available.
+    """
     key = f"floorsheet:{symbol.upper().strip() if symbol else 'all'}"
+
     async def load():
-        # The current NEPSE public floor-sheet response is paginated under
-        # {"floorsheets": {"content": [...]}}.  nepsepy exposes the same
-        # public endpoint and handles the session/token for us.
-        # NEPSE can block the per-security floor-sheet route, so for a symbol
-        # request we fetch the verified session floor sheet and filter locally.
-        raw = await nepse_call(["floorsheets"])
-        rows = floor_rows(raw)
-        if symbol:
-            wanted = symbol.upper().strip()
-            return [r for r in rows if str(r.get("symbol") or "").upper() == wanted]
-        return raw
-    try:
-        return await cached(key, load)
-    except Exception:
-        # Keep the legacy public endpoint as a last-resort compatibility path.
-        if symbol:
-            return await public_get("/FloorsheetOf", {"symbol": symbol.upper()})
-        return await public_get("/Floorsheet")
+        errors = []
+        raw = None
+        # Prefer nepsepy's floorsheets() method.  It knows the current NEPSE
+        # session and current pagination format.
+        try:
+            if symbol:
+                company = await resolve_company(symbol)
+                sid = pick(company, ["id", "securityId", "security_id"])
+                if sid is not None:
+                    raw = await nepse_call(["floorsheets"], stock_id=int(sid))
+                else:
+                    raw = await nepse_call(["floorsheets"])
+            else:
+                raw = await nepse_call(["floorsheets"])
+            rows = floor_rows(raw)
+            if rows:
+                wanted = symbol.upper().strip() if symbol else None
+                if wanted:
+                    rows = [r for r in rows if str(r.get("symbol") or "").upper() == wanted]
+                return rows
+            errors.append("nepsepy floorsheets returned no rows")
+        except Exception as e:
+            errors.append(f"nepsepy floorsheets: {e}")
+
+        # Public compatibility service.  Its /Floorsheet response is also
+        # normalized locally so the frontend always receives a flat list.
+        for path, params in (
+            ("/FloorsheetOf", {"symbol": symbol.upper().strip()} if symbol else None),
+            ("/Floorsheet", None),
+        ):
+            if symbol is None and path == "/FloorsheetOf":
+                continue
+            try:
+                raw = await public_get(path, params)
+                rows = floor_rows(raw)
+                if rows:
+                    if symbol:
+                        rows = [r for r in rows if str(r.get("symbol") or "").upper() == symbol.upper().strip()]
+                    return rows
+                errors.append(f"{path} returned no rows")
+            except Exception as e:
+                errors.append(f"{path}: {e}")
+
+        return []
+
+    return await cached(key, load)
 
 
 def floor_rows(raw: Any) -> list[dict]:
@@ -764,6 +801,33 @@ def normalize_history_rows(raw: Any) -> list[dict]:
     return list(dedup.values())
 
 
+async def static_daily_history(symbol: str) -> list[dict]:
+    """Fast public static OHLCV archive used when NEPSE history endpoints fail."""
+    urls = [
+        f"https://binayabaral.github.io/nepal-market-data/data/nepse/{symbol}.csv",
+        f"https://raw.githubusercontent.com/binayabaral/nepal-market-data/main/data/nepse/{symbol}.csv",
+    ]
+    for url in urls:
+        try:
+            async with httpx.AsyncClient(timeout=8, follow_redirects=True) as client:
+                r = await client.get(url, headers={"Accept": "text/csv"})
+                if r.status_code != 200 or not r.text.strip():
+                    continue
+                reader = csv.DictReader(io.StringIO(r.text))
+                out=[]
+                for row in reader:
+                    c=num(row.get("close"))
+                    if c is None: continue
+                    o=num(row.get("open")) or c
+                    h=num(row.get("high")) or max(o,c)
+                    l=num(row.get("low")) or min(o,c)
+                    out.append({"date":row.get("published_date") or row.get("date") or "","open":o,"high":h,"low":l,"close":c,"volume":num(row.get("traded_quantity")),"turnover":num(row.get("traded_amount"))})
+                if out:
+                    return out
+        except Exception:
+            continue
+    return []
+
 async def github_daily_history(symbol: str) -> list[dict]:
     """Fast OHLCV fallback used when the live chart endpoint lacks OHLC fields."""
     url = f"https://raw.githubusercontent.com/binayabaral/nepal-market-data/main/data/nepse/{symbol}.csv"
@@ -829,7 +893,9 @@ async def get_history(symbol: str):
         except Exception as e:
             errors.append(f"public history: {e}")
 
-        backup = await github_daily_history(symbol)
+        backup = await static_daily_history(symbol)
+        if not backup:
+            backup = await github_daily_history(symbol)
         if backup:
             return {"ok": True, "symbol": symbol, "source": "Daily OHLCV archive fallback", "data": backup, "updatedAt": now_iso(), "errors": errors}
         return {"ok": False, "symbol": symbol, "source": None, "data": [], "updatedAt": now_iso(), "errors": errors}
@@ -885,10 +951,10 @@ def technical_from(values):
     return {"last":last,"sma20":s20,"sma50":s50,"ema20":e20,"rsi14":r,"trend":trend,"signal":signal}
 
 @app.get("/api/floorsheet")
-async def api_floorsheet(symbol: Optional[str]=None, limit:int=Query(250,ge=1,le=2000)):
-    d=await get_floorsheet(symbol)
-    rows=floor_rows(d)[:limit]
-    return {"ok":bool(rows),"source":"nepsepy/public floorsheet","symbol":symbol,"data":rows,"count":len(rows),"updatedAt":now_iso()}
+async def api_floorsheet(symbol: Optional[str]=None, limit:int=Query(2000,ge=1,le=5000)):
+    rows=await get_floorsheet(symbol)
+    rows=rows[:limit]
+    return {"ok":bool(rows),"source":"NEPSE floorsheet","symbol":symbol,"data":rows,"count":len(rows),"updatedAt":now_iso()}
 
 @app.get("/api/brokers")
 async def api_brokers():
