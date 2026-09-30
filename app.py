@@ -22,40 +22,13 @@ try:
 except Exception:
     ProductionNEPSE = None
 
-PRODUCTION_NEPSE = None
-PRODUCTION_SDK_ENABLED = False
-PRODUCTION_SDK_ERROR = None
-PRODUCTION_SDK_INIT_LOCK = asyncio.Lock()
-
-async def ensure_production_sdk():
-    global PRODUCTION_NEPSE, PRODUCTION_SDK_ENABLED, PRODUCTION_SDK_ERROR
-    if PRODUCTION_NEPSE is not None:
-        return PRODUCTION_NEPSE
-    if ProductionNEPSE is None:
-        PRODUCTION_SDK_ENABLED = False
-        PRODUCTION_SDK_ERROR = "nepse.py could not be imported"
-        raise RuntimeError(PRODUCTION_SDK_ERROR)
-    async with PRODUCTION_SDK_INIT_LOCK:
-        if PRODUCTION_NEPSE is not None:
-            return PRODUCTION_NEPSE
-        try:
-            # Initialize lazily so a transient NEPSE/bootstrap/network problem
-            # can never prevent FastAPI itself from starting.
-            client = await asyncio.to_thread(ProductionNEPSE, cache_ttl=30)
-            PRODUCTION_NEPSE = client
-            PRODUCTION_SDK_ENABLED = True
-            PRODUCTION_SDK_ERROR = None
-            return client
-        except Exception as exc:
-            PRODUCTION_SDK_ENABLED = False
-            PRODUCTION_SDK_ERROR = f"{type(exc).__name__}: {exc}"
-            raise
+PRODUCTION_NEPSE = ProductionNEPSE(cache_ttl=30) if ProductionNEPSE else None
+PRODUCTION_SDK_ENABLED = PRODUCTION_NEPSE is not None
 
 async def production_call(method: str, *args, **kwargs):
-    client = await ensure_production_sdk()
-    fn = getattr(client, method, None)
-    if fn is None:
-        raise RuntimeError(f"nepse.py method not available: {method}")
+    if PRODUCTION_NEPSE is None:
+        raise RuntimeError("production nepse.py is not installed")
+    fn = getattr(PRODUCTION_NEPSE, method)
     return await asyncio.to_thread(fn, *args, **kwargs)
 
 
@@ -1131,33 +1104,19 @@ async def api_stock_xray(symbol:str):
 
 @app.get("/api/production/status")
 async def production_status():
-    try:
-        await ensure_production_sdk()
-        cache = await production_call("cache_info")
-        return {"ok": True, "sdk": "nepse.py", "cache": cache, "error": None}
-    except Exception as exc:
-        return {"ok": False, "sdk": "nepse.py", "cache": {}, "error": PRODUCTION_SDK_ERROR or str(exc)}
+    return {"ok": PRODUCTION_SDK_ENABLED, "sdk": "nepse.py", "cache": await production_call("cache_info") if PRODUCTION_SDK_ENABLED else {}}
 
 @app.get("/api/production/market")
 async def production_market():
-    try:
-        vals = await asyncio.gather(
-            production_call("market_status"), production_call("market_summary"),
-            production_call("live_market"), production_call("indices"),
-            production_call("top_gainers"), production_call("top_losers"),
-            production_call("top_turnover"), production_call("top_trade"),
-            production_call("top_transaction"), production_call("companies"),
-        )
-        keys = ["status","summary","live","indices","gainers","losers","turnover","trades","transactions","companies"]
-        return {"ok": True, "source":"nepse.py production data layer", **dict(zip(keys, vals)), "updatedAt": now_iso()}
-    except Exception as exc:
-        # Never blank the main feed just because the optional production SDK
-        # layer is unavailable. The proven central market loader remains the
-        # authoritative fallback.
-        data = await get_market()
-        if isinstance(data, dict):
-            data.setdefault("diagnostics", {})["productionSdkError"] = str(exc)
-        return data
+    vals = await asyncio.gather(
+        production_call("market_status"), production_call("market_summary"),
+        production_call("live_market"), production_call("indices"),
+        production_call("top_gainers"), production_call("top_losers"),
+        production_call("top_turnover"), production_call("top_trade"),
+        production_call("top_transaction"), production_call("companies"),
+    )
+    keys = ["status","summary","live","indices","gainers","losers","turnover","trades","transactions","companies"]
+    return {"ok": True, "source":"nepse.py production data layer", **dict(zip(keys, vals)), "updatedAt": now_iso()}
 
 @app.get("/api/production/company/{symbol}")
 async def production_company(symbol: str):
