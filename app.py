@@ -562,11 +562,10 @@ async def get_floorsheet(symbol: Optional[str] = None):
                 company_id = pick(company, ["id", "securityId", "security_id"])
 
             page_size = 500
-            first = await nepse_call(
-                ["floorsheets"], page=1, size=page_size,
-                stock_id=int(company_id) if company_id is not None else None,
-                sort_by="contractId", sort_order="desc"
-            )
+            kwargs = {"page": 1, "size": page_size}
+            if company_id is not None:
+                kwargs["stock_id"] = int(company_id)
+            first = await nepse_call(["floorsheets"], **kwargs)
             first_rows = floor_rows(first)
             wrapper = first.get("floorsheets") if isinstance(first, dict) else None
             total_pages = 1
@@ -584,11 +583,10 @@ async def get_floorsheet(symbol: Optional[str] = None):
             # Guard against a malformed server response claiming an absurd page count.
             total_pages = min(total_pages, 500)
             for page in range(2, total_pages + 1):
-                data = await nepse_call(
-                    ["floorsheets"], page=page, size=page_size,
-                    stock_id=int(company_id) if company_id is not None else None,
-                    sort_by="contractId", sort_order="desc"
-                )
+                kwargs = {"page": page, "size": page_size}
+                if company_id is not None:
+                    kwargs["stock_id"] = int(company_id)
+                data = await nepse_call(["floorsheets"], **kwargs)
                 page_rows = floor_rows(data)
                 if not page_rows:
                     break
