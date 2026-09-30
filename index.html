@@ -4771,3 +4771,9 @@ body{background:var(--bg)!important;color:var(--text)!important}
 input,select{background:#fff!important;color:var(--text)!important}
 .muted,.subtle{color:var(--muted)!important}
 </style>
+  <script>
+document.addEventListener('click',function(e){
+  var b=e.target.closest('[data-mover-tab]');
+  if(b){window.NEPSE_PULSE_MOVER_MODE=b.dataset.moverTab;}
+},true);
+</script>
