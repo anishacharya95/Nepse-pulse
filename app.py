@@ -13,7 +13,7 @@ try:
 except Exception:
     AsyncNepseClient = None
 
-APP_VERSION = "V26-REAL-FEATURE-DATA-ENGINE"
+APP_VERSION = "V26-REAL-FEATURE-DATA-ENGINE-2"
 PUBLIC_API = "https://nepseapi.surajrimal.dev"
 STATIC_API = "https://shubhamnpk.github.io/yonepse/data"
 OPEN_DATA = "https://raw.githubusercontent.com/socrateai-official/nepse-open-data/main"
@@ -38,6 +38,37 @@ app.add_middleware(
 
 CACHE: dict[str, tuple[float, Any]] = {}
 LOCKS: dict[str, asyncio.Lock] = {}
+
+# Keep ONE AsyncNepseClient alive for the whole FastAPI process.
+# nepsepy stores the temporary NEPSE token inside the client and serializes
+# requests per client. Creating a fresh client for every endpoint call throws
+# away that session and can trigger repeated bootstraps/rate limits.
+NEPSE_CLIENT: Optional[AsyncNepseClient] = None
+NEPSE_CLIENT_INIT_LOCK = asyncio.Lock()
+NEPSE_CALL_LOCK = asyncio.Lock()
+
+
+async def get_nepse_client() -> AsyncNepseClient:
+    global NEPSE_CLIENT
+    if AsyncNepseClient is None:
+        raise RuntimeError("nepsepy is not installed")
+    if NEPSE_CLIENT is None:
+        async with NEPSE_CLIENT_INIT_LOCK:
+            if NEPSE_CLIENT is None:
+                NEPSE_CLIENT = AsyncNepseClient()
+    return NEPSE_CLIENT
+
+
+@app.on_event("shutdown")
+async def close_nepse_client():
+    global NEPSE_CLIENT
+    client = NEPSE_CLIENT
+    NEPSE_CLIENT = None
+    if client is not None:
+        try:
+            await client.close()
+        except Exception:
+            pass
 
 
 def now_iso() -> str:
@@ -132,24 +163,28 @@ async def first_ok(callables):
 
 
 async def nepse_call(methods: list[str], *args, **kwargs):
-    if AsyncNepseClient is None:
-        raise RuntimeError("nepsepy is not installed")
-    async with AsyncNepseClient() as client:
+    client = await get_nepse_client()
+    errors = []
+    # One shared client is important for the NEPSE token/session. The current
+    # nepsepy client also serializes calls internally, so this outer lock keeps
+    # our method fallbacks from racing each other during a refresh burst.
+    async with NEPSE_CALL_LOCK:
         for name in methods:
             fn = getattr(client, name, None)
             if fn is None:
                 continue
             try:
                 return await fn(*args, **kwargs)
-            except TypeError:
-                # Some versions differ in optional parameter names.
+            except TypeError as e:
+                # Some installed nepsepy versions differ in optional args.
                 try:
                     return await fn(*args)
-                except Exception:
-                    continue
-            except Exception:
-                continue
-    raise RuntimeError("No compatible nepsepy method succeeded")
+                except Exception as e2:
+                    errors.append(f"{name}: {e2}")
+            except Exception as e:
+                errors.append(f"{name}: {e}")
+    detail = "; ".join(errors[-4:])
+    raise RuntimeError("No compatible nepsepy method succeeded" + (f": {detail}" if detail else ""))
 
 
 async def get_market():

@@ -1,41 +1,30 @@
-# NEPSE Pulse V20 — Self-Hosted Central Feed
+# NEPSE Pulse V26 — Real Feature Data Engine
 
-This build keeps the existing NEPSE Pulse mobile UI and replaces the unreliable free hosted API dependency with a self-hosted FastAPI feed service.
+V26 upgrades the V25.1 central backend so feature modules are independently sourced and normalized.
 
-## Architecture
+## Included
+- Central market/index/history feed
+- Floorsheet endpoint with normalized trade rows
+- Broker analysis calculated from floorsheet trades
+- Sector endpoint
+- Company/fundamental endpoint with financials, dividends and corporate-action attempts
+- Historical price endpoint
+- Technical endpoint calculating SMA20, SMA50, EMA20 and RSI14 from returned history
+- Stock X-Ray aggregation endpoint
+- Command Center with independent datasets and diagnostics
+- Verified-source policy: unavailable data stays unavailable; no demo values are generated
 
-NEPSE public frontend data → `nepsepy` backend → `/api/market` → NEPSE Pulse
+## Deploy
 
-The backend uses `nepsepy==1.0.2`, a current public/read-only NEPSE client. It performs the public session bootstrap used by the NEPSE frontend and does not require user credentials. It is unofficial and data may be delayed/corrected.
+1. Push `app.py`, `index.html`, `requirements.txt`, `config.js`, `render.yaml`, `auth-config.js`, and `splash.png` to the repository.
+2. Create/redeploy the Render web service from `render.yaml`. The service starts with `uvicorn app:app --host 0.0.0.0 --port $PORT` and uses `/health` as its health check.
+3. Confirm the Render service URL. If Render assigns a different URL than `https://nepse-pulse.onrender.com`, update `config.js` with that exact URL.
+4. After deployment, test these endpoints in the browser: `/health`, `/api/market`, `/api/command-center`, `/api/floorsheet`, `/api/brokers`, `/api/sectors`, `/api/stock-xray/NABIL`, and `/api/diagnostics`.
+5. Hard-refresh the frontend so the browser uses the new central-feed code.
 
-## Deploy backend
+### Central feed architecture
 
-### Render
-1. Create a new Web Service from this package/repository.
-2. Set the service root directory to `backend`.
-3. Render will use `backend/Dockerfile`.
-4. Wait for `/health` to return JSON with `status: healthy`.
+The browser uses the configured Render backend as the single market-data source. The FastAPI process keeps one persistent `AsyncNepseClient` session so the temporary NEPSE token is reused instead of creating a new session for every metric request.
 
-### Docker
-
-`cd backend`
-
-`docker build -t nepse-pulse-feed .`
-
-`docker run -p 8000:8000 nepse-pulse-feed`
-
-Then open `http://localhost:8000/health` and `/api/market`.
-
-## Connect the Android app
-
-After the backend has an HTTPS URL, edit `config.js`:
-
-`window.NEPSE_PULSE_BACKEND_URL = 'https://YOUR-BACKEND-URL';`
-
-Then deploy the frontend folder to Netlify/GitHub Pages or another HTTPS host.
-
-The frontend still retains its existing UI and local cache. No demo market values are generated.
-
-## Important
-
-The backend does not claim that 461 rows are always returned. `461` is kept as the listed-security universe reference; `coveredRows` reports how many records the upstream actually returned. Missing data remains missing rather than being filled with fake zeros.
+## Data sources
+Primary source is the public NEPSE frontend through `nepsepy`. The backend can use public API/static fallbacks when a primary call is unavailable. `nepsepy` documents market, floorsheet, index, company, financial report, dividend and corporate-action access. Public open datasets provide OHLC/floorsheet/reference data for historical fallback.

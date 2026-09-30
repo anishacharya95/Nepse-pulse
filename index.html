@@ -1701,7 +1701,7 @@ window.PULSE_FEED_STATUS='CONNECTING'; window.PULSE_FEED_TIMESTAMP='—';
    Cache: last successful normalized snapshot.
    ========================= */
 const PULSE_FEED_CONFIG = {
-  apiBase: window.NEPSE_PULSE_BACKEND_URL || 'https://nepseapi.surajrimal.dev',
+  apiBase: window.NEPSE_PULSE_BACKEND_URL || 'https://nepse-pulse.onrender.com',
   proxyBase: '/api/nepse',
   wsUrl: 'wss://nepseapiws.surajrimal.dev/',
   pollMs: 60000,
@@ -1720,7 +1720,7 @@ try {
 }catch(e){}
 
 const PulseFeedEngine = (()=>{
-  const state={status:'CONNECTING',updatedAt:null,lastError:null,summary:null,index:null,live:[],gainers:[],losers:[],companies:[],floorsheet:[],health:null,source:'NEPSE API',providerType:'Unofficial NEPSE REST API',marketOpen:null,diagnostics:{listedSymbols:461,coveredRows:0,api:'nepseapi.surajrimal.dev'}};
+  const state={status:'CONNECTING',updatedAt:null,lastError:null,summary:null,index:null,live:[],gainers:[],losers:[],companies:[],floorsheet:[],health:null,source:'NEPSE API',providerType:'Unofficial NEPSE REST API',marketOpen:null,diagnostics:{listedSymbols:461,coveredRows:0,api:'nepse-pulse.onrender.com'}};
   const subscribers=new Set(); let pollTimer=null;
   const emit=()=>subscribers.forEach(fn=>{try{fn({...state})}catch(e){}});
   const num=v=>{if(v===null||v===undefined||v==='')return null;const n=Number(String(v).replace(/,/g,''));return Number.isFinite(n)?n:null};
@@ -1751,7 +1751,13 @@ const PulseFeedEngine = (()=>{
     const d=await r.json(); if(d&&d.ok===false)throw new Error(d.error||'Feed proxy error'); return d.data!==undefined?d.data:d;
   },path);
   const fetchRoute=async(path,query='')=>{
-    // HTTPS deployments use the server-side proxy first; standalone content:// uses direct API.
+    // Central backend is the single source for hosted builds. This prevents
+    // different panels from silently reading different feeds.
+    const backend=String(window.NEPSE_PULSE_BACKEND_URL||'').replace(/\/$/,'');
+    if(backend){
+      return await directFetchFrom(backend,path,query);
+    }
+    // Legacy standalone fallback only when no central backend is configured.
     const isFile=location.protocol==='file:'||location.protocol==='content:';
     if(!isFile){try{return await proxyFetch(path,query)}catch(_e){}}
     try{return await directFetch(path,query)}catch(e){
@@ -1759,16 +1765,16 @@ const PulseFeedEngine = (()=>{
       try{return await proxyFetch(path,query)}catch(e2){throw new Error(e2.message+'; direct: '+e.message)}
     }
   };
+  const directFetchFrom=async(base,path,query='')=>withTimeout(async(signal)=>{
+    const url=base+path+(query?((path.includes('?')?'&':'?')+query):'');
+    const r=await fetch(url,{cache:'no-store',signal,headers:{Accept:'application/json'}});
+    if(!r.ok)throw new Error('NEPSE Pulse backend HTTP '+r.status+' '+path);
+    return await r.json();
+  },path);
   const fetchJSON=async(path='/market')=>{
-    /* V20 self-hosted backend: GitHub Pages must use Render directly.
-       The old /api/nepse Netlify proxy is not present in this deployment. */
+    /* Central backend route. /market is exposed as /api/market by the backend. */
     if(path==='/market' && window.NEPSE_PULSE_BACKEND_URL){
-      const base=String(window.NEPSE_PULSE_BACKEND_URL).replace(/\/$/,'');
-      const c=await withTimeout(async(signal)=>{
-        const r=await fetch(base+'/api/market',{cache:'no-store',signal,headers:{Accept:'application/json'}});
-        if(!r.ok) throw new Error('NEPSE Pulse backend HTTP '+r.status);
-        return await r.json();
-      },'/api/market');
+      const c=await fetchRoute('/api/market');
       if(!c || c.ok!==true) throw new Error(c && c.error ? c.error : 'Backend returned no market data');
       return c;
     }
