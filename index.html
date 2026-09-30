@@ -1,10 +1,8 @@
 <!doctype html>
-<!-- NEPSE Pulse V26 — Central Feed Migration: Floorsheet + Sector Heatmap -->
-
 <html lang="en">
 <head>
-<script src="config.js?v=4"></script>
-<script src="config.js?v=4"></script>
+<script src="config.js?v=3"></script>
+<script src="auth-config.js?v=1"></script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#ffffff">
@@ -1094,8 +1092,28 @@ main>.hero, main>.search, main>.section-head, main>.market, main>.feed-debug{
 }
 </style>
 
+
+<style id="nepse-pulse-splash-css">
+#nepse-pulse-splash{position:fixed;inset:0;z-index:999999;background:#06183d;display:flex;align-items:center;justify-content:center;overflow:hidden;opacity:1;visibility:visible;transition:opacity .65s ease,visibility .65s ease;}
+#nepse-pulse-splash.is-hidden{opacity:0;visibility:hidden;pointer-events:none;}
+#nepse-pulse-splash>img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;}
+.np-splash-loader{position:absolute;left:50%;bottom:10.45%;transform:translateX(-50%);width:min(50%,430px);height:8px;border-radius:99px;overflow:hidden;background:rgba(8,40,95,.96);box-shadow:0 0 0 2px rgba(42,151,255,.42),0 0 18px rgba(0,210,255,.28);}
+.np-splash-progress{position:absolute;inset:0 auto 0 0;width:0;border-radius:inherit;background:linear-gradient(90deg,#168cff,#00d9ff,#19e879);box-shadow:0 0 14px rgba(0,217,255,.85);animation:npSplashProgress 3.2s cubic-bezier(.2,.8,.2,1) forwards;}
+.np-splash-shine{position:absolute;top:0;bottom:0;width:26%;left:-30%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.9),transparent);filter:blur(.4px);animation:npSplashShine 1.15s ease-in-out infinite;}
+.np-splash-loading{position:absolute;left:50%;bottom:7.7%;transform:translateX(-50%);color:#fff;font-size:14px;line-height:1;letter-spacing:5px;font-weight:600;text-shadow:0 1px 8px rgba(0,0,0,.45);white-space:nowrap;}
+@keyframes npSplashProgress{0%{width:0}35%{width:34%}68%{width:67%}90%{width:88%}100%{width:100%}}
+@keyframes npSplashShine{0%{left:-30%;opacity:0}15%{opacity:1}70%{opacity:1}100%{left:105%;opacity:0}}
+@media(max-width:480px){.np-splash-loader{width:50%;height:7px;bottom:10.45%}.np-splash-loading{bottom:7.55%;font-size:12px;letter-spacing:4px}}
+@media(prefers-reduced-motion:reduce){.np-splash-progress{animation-duration:1.2s}.np-splash-shine{animation:none;display:none}.np-splash-loader{transition:none}}
+</style>
 </head>
 <body>
+<div id="nepse-pulse-splash" aria-label="NEPSE Pulse loading">
+  <img src="splash.png" alt="NEPSE Pulse — Real Time Nepal Share Market">
+  <div class="np-splash-loader" aria-hidden="true"><div class="np-splash-progress"></div><div class="np-splash-shine"></div></div>
+  <div class="np-splash-loading" aria-live="polite">LOADING...</div>
+</div>
+
 <div class="app">
 <header class="topbar">
   <div class="toprow">
@@ -1346,7 +1364,7 @@ main>.hero, main>.search, main>.section-head, main>.market, main>.feed-debug{
       <button class="feature-item" onclick="openFeatureWorkspace('floorsheet-broker-v4','🏦 Floorsheet & Brokers')"><b>🏦 Floorsheet & Brokers</b><small>Transactions, broker flow, bulk and unusual activity</small></button>
       <button class="feature-item" onclick="openFeatureWorkspace('sector-breadth-v5','🗺️ Sector Heatmap')"><b>🗺️ Sector Heatmap</b><small>Sector performance, breadth and constituent drill-down</small></button>
       <button class="feature-item" onclick="openFeatureWorkspace('portfolioZone','💼 Portfolio')"><b>💼 Portfolio</b><small>Holdings, average cost, P/L and dividends</small></button>
-      <div class="feature-group">CENTRAL FEED MIGRATED</div><div class="feature-item" style="cursor:default"><b>🔄 Floorsheet + Sector Heatmap</b><small>Both now consume the single Central Feed snapshot, including cached data when available.</small></div><div class="feature-group">WATCHLIST & QUANT</div>
+      <div class="feature-group">WATCHLIST & QUANT</div>
       <button class="feature-item" onclick="openFeatureWorkspace('alerts-watchlist-v6','🔔 Alerts & Watchlist')"><b>🔔 Alerts & Watchlist</b><small>Watchlist and price/volume/technical alerts</small></button>
       <button class="feature-item" onclick="openFeatureWorkspace('screen-quant-v3','🧮 Screener & Quant')"><b>🧮 Screener & Quant</b><small>Market filters, RSI, trends and quantitative scans</small></button>
       <button class="feature-item" onclick="openFeatureWorkspace('quantZone','⚡ Quant & Watchlist')"><b>⚡ Quant & Watchlist</b><small>Additional central-feed screening and watch tools</small></button>
@@ -1557,8 +1575,8 @@ const PULSE_FEED_CONFIG = {
   proxyBase: '/api/nepse',
   wsUrl: 'wss://nepseapiws.surajrimal.dev/',
   pollMs: 30000,
-  timeoutMs: 9000,
-  cacheKey: 'nepsePulseCentralFeedV27',
+  timeoutMs: 12000,
+  cacheKey: 'nepsePulseCentralFeedV19',
   listedSymbols: 461
 };
 
@@ -1575,7 +1593,7 @@ const PulseFeedEngine = (()=>{
     const pct=num(pick(o,['percentchange','percentagechange','changepercent','perchange','pct']));
     const prev=num(pick(o,['previousclose','previousclosingprice','prevclose','previousprice']));
     const change=num(pick(o,['change','pointchange','changevalue'])) ?? (ltp!==null&&prev!==null?ltp-prev:null);
-    return {...o,sector:String(pick(o,['sector','Sector','sectorName','SectorName','industry','Industry'])||'').trim()||'Unclassified',symbol:String(pick(o,['symbol','stocksymbol','securitysymbol','ticker','code'])||'').trim().toUpperCase(),company:String(pick(o,['name','companyname','company','securityname'])||''),ltp,pct,prev,volume:num(pick(o,['volume','tradedshares','quantity','totaltradedshares'])),turnover:num(pick(o,['turnover','totalturnover','amount'])),transactions:num(pick(o,['transactions','totaltransactions','numberoftransactions','nooftransactions'])),change};
+    return {...o,symbol:String(pick(o,['symbol','stocksymbol','securitysymbol','ticker','code'])||'').trim().toUpperCase(),company:String(pick(o,['name','companyname','company','securityname'])||''),ltp,pct,prev,volume:num(pick(o,['volume','tradedshares','quantity','totaltradedshares'])),turnover:num(pick(o,['turnover','totalturnover','amount'])),transactions:num(pick(o,['transactions','totaltransactions','numberoftransactions','nooftransactions'])),change};
   }).filter(x=>x.symbol);
   const normalizeIndex=v=>arr(v).length?arr(v):[v].filter(x=>x&&typeof x==='object');
   const withTimeout=async(promise,label)=>{const c=new AbortController();const t=setTimeout(()=>c.abort(),PULSE_FEED_CONFIG.timeoutMs);try{return await promise(c.signal)}catch(e){if(e.name==='AbortError')throw new Error(label+' timeout');throw e}finally{clearTimeout(t)}};
@@ -1616,7 +1634,7 @@ const PulseFeedEngine = (()=>{
     if(path==='/market'){
       const routes=[
         ['summary','/Summary'],['index','/NepseIndex'],['live','/LiveMarket'],['gainers','/TopGainers'],['losers','/TopLosers'],
-        ['companies','/CompanyList'],['status','/IsNepseOpen'],['subindices','/NepseSubIndices'],['floorsheet','/Floorsheet'],['turnover','/TopTenTurnoverScrips'],['transactions','/TopTenTransactionScrips'],['trades','/TopTenTradeScrips']
+        ['companies','/CompanyList'],['status','/IsNepseOpen'],['subindices','/NepseSubIndices'],['turnover','/TopTenTurnoverScrips'],['transactions','/TopTenTransactionScrips'],['trades','/TopTenTradeScrips']
       ];
       const settled=await Promise.allSettled(routes.map(([,p])=>fetchRoute(p)));
       const data={}; let failures=[];
@@ -1642,7 +1660,7 @@ const PulseFeedEngine = (()=>{
       const d=await fetchJSON('/market');
       const rows=normalizeLive(d.live);
       if(!rows.length)throw new Error('NEPSE API returned 0 stock rows');
-      state.live=rows; state.companies=arr(d.companies).length?d.companies:rows; state.floorsheet=arr(d.floorsheet); state.gainers=normalizeLive(d.gainers); state.losers=normalizeLive(d.losers); state.index=normalizeIndex(d.index); state.summary=d.summary||{}; state.health=d.status||null; state.marketOpen=d.marketOpen; state.updatedAt=d.updatedAt||new Date().toISOString(); state.source='NEPSE API'; state.providerType='Unofficial NEPSE REST API'; state.diagnostics=d.diagnostics||{}; state.diagnostics.listedSymbols=Math.max(461,Number(state.diagnostics.listedSymbols)||461); state.diagnostics.coveredRows=rows.length; state.diagnostics.apiBase=PULSE_FEED_CONFIG.apiBase; state.lastError=state.diagnostics.failures?.length?state.diagnostics.failures.join(' | '):null;
+      state.live=rows; state.companies=arr(d.companies).length?d.companies:rows; state.gainers=normalizeLive(d.gainers); state.losers=normalizeLive(d.losers); state.index=normalizeIndex(d.index); state.summary=d.summary||{}; state.health=d.status||null; state.marketOpen=d.marketOpen; state.updatedAt=d.updatedAt||new Date().toISOString(); state.source='NEPSE API'; state.providerType='Unofficial NEPSE REST API'; state.diagnostics=d.diagnostics||{}; state.diagnostics.listedSymbols=Math.max(461,Number(state.diagnostics.listedSymbols)||461); state.diagnostics.coveredRows=rows.length; state.diagnostics.apiBase=PULSE_FEED_CONFIG.apiBase; state.lastError=state.diagnostics.failures?.length?state.diagnostics.failures.join(' | '):null;
       persist(); setStatus('LIVE','NEPSE API · '+rows.length+' market rows · '+new Date(state.updatedAt).toLocaleTimeString()); return true;
     }catch(e){state.lastError=e.message;if(!restore())setStatus('OFFLINE','NEPSE API unavailable · '+e.message);else setStatus('CACHED','Using last saved NEPSE API data · '+e.message);return false}
   };
@@ -1809,15 +1827,6 @@ function closeProfile(){document.getElementById('profileModal').classList.remove
 function authReady(){
   return Boolean(PULSE_AUTH_CONFIG.supabaseUrl && PULSE_AUTH_CONFIG.supabaseAnonKey && window.supabase);
 }
-async function ensureSupabaseClient(){
-  if(window.__NEPSE_PULSE_SUPABASE) return window.__NEPSE_PULSE_SUPABASE;
-  if(!PULSE_AUTH_CONFIG.supabaseUrl||!PULSE_AUTH_CONFIG.supabaseAnonKey) return null;
-  if(!window.supabase){
-    await new Promise((resolve,reject)=>{const sc=document.createElement("script");sc.src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2";sc.onload=resolve;sc.onerror=reject;document.head.appendChild(sc)});
-  }
-  window.__NEPSE_PULSE_SUPABASE=window.supabase.createClient(PULSE_AUTH_CONFIG.supabaseUrl,PULSE_AUTH_CONFIG.supabaseAnonKey);
-  return window.__NEPSE_PULSE_SUPABASE;
-}
 function setAuthUser(user){
   pulseSession = user || null;
   const userBox=document.getElementById('authUser'), login=document.getElementById('loginBtn');
@@ -1852,32 +1861,28 @@ function toggleTheme(){
 })();
 
 async function initPulseAuth(){
-  await ensureSupabaseClient().catch(()=>null);
   if(!authReady()){
     document.getElementById('profileStatus').textContent='Authentication is not configured yet. Add your Supabase URL and anon key in PULSE_AUTH_CONFIG, then enable Google, Facebook and Phone providers in Supabase.';
     return;
   }
   try{
-    const {data:{session}}=await window.__NEPSE_PULSE_SUPABASE.auth.getSession();
+    const {data:{session}}=await window.supabase.auth.getSession();
     setAuthUser(session?.user || null);
-    window.__NEPSE_PULSE_SUPABASE.auth.onAuthStateChange((_event,session)=>setAuthUser(session?.user || null));
+    window.supabase.auth.onAuthStateChange((_event,session)=>setAuthUser(session?.user || null));
   }catch(e){toast('Authentication connection failed. Check provider configuration.')}
 }
 async function pulseOAuth(provider){
-  if(!authReady()){toast('Authentication is not configured. Check auth-config.js.');return}
-  const redirectTo=location.origin+location.pathname;
+  if(!authReady()){toast('Connect the authentication provider first. No sign-in was faked.');return}
   try{
-    const {data,error}=await window.__NEPSE_PULSE_SUPABASE.auth.signInWithOAuth({provider,options:{redirectTo}});
-    if(error) throw error;
-    if(data?.url) location.assign(data.url);
-  }catch(e){toast('Could not start '+provider+' sign-in: '+(e.message||'OAuth error'));}
+    await window.supabase.auth.signInWithOAuth({provider,options:{redirectTo:window.location.href}});
+  }catch(e){toast('Could not start '+provider+' sign-in.')}
 }
 async function pulsePhoneOtp(){
   const p=document.getElementById('phone').value.replace(/\D/g,'');
   if(!/^\d{10}$/.test(p)){toast('Enter a valid 10-digit Nepal mobile number.');return}
   if(!authReady()){document.getElementById('otpBox').style.display='block';toast('OTP UI is ready; configure Supabase Phone Auth to send a real OTP.');return}
   try{
-    const {error}=await window.__NEPSE_PULSE_SUPABASE.auth.signInWithOtp({phone:'+977'+p});
+    const {error}=await window.supabase.auth.signInWithOtp({phone:'+977'+p});
     if(error) throw error;
     document.getElementById('otpBox').style.display='block';
     toast('OTP sent. Check your phone.');
@@ -1889,13 +1894,13 @@ async function verifyPulseOtp(){
   if(!/^\d{10}$/.test(p)||!/^\d{6}$/.test(token)){toast('Enter the phone number and 6-digit OTP.');return}
   if(!authReady()){toast('Configure Supabase Phone Auth before verifying a real OTP.');return}
   try{
-    const {data,error}=await window.__NEPSE_PULSE_SUPABASE.auth.verifyOtp({phone:'+977'+p,token,type:'sms'});
+    const {data,error}=await window.supabase.auth.verifyOtp({phone:'+977'+p,token,type:'sms'});
     if(error) throw error;
     closeLogin(); setAuthUser(data.user); toast('Welcome to NEPSE Pulse.');
   }catch(e){toast('OTP verification failed.')}
 }
 async function signOutPulse(){
-  if(authReady()){try{await window.__NEPSE_PULSE_SUPABASE.auth.signOut()}catch(e){}}
+  if(authReady()){try{await window.supabase.auth.signOut()}catch(e){}}
   setAuthUser(null); closeProfile(); toast('Signed out.');
 }
 
@@ -3194,7 +3199,7 @@ function normalizeSector(x){
 function extract(st){
  const stockCandidates=[st?.live,st?.liveMarket,st?.securities,st?.data?.liveMarket,st?.data?.LiveMarket,st?.data?.securities];
  let stocks=(stockCandidates.find(Array.isArray)||[]).map(normalizeStock).filter(x=>x.symbol||x.name);
- const sectorCandidates=[st?.sectors,st?.sectorIndices,st?.subindices,st?.data?.sectors,st?.data?.sectorIndices,st?.data?.SectorIndices,st?.data?.subindices,st?.data?.SubIndices];
+ const sectorCandidates=[st?.sectors,st?.sectorIndices,st?.data?.sectors,st?.data?.sectorIndices,st?.data?.SectorIndices];
  let secs=(sectorCandidates.find(Array.isArray)||[]).map(normalizeSector);
  if(!secs.length && st?.sector_indices)secs=(Array.isArray(st.sector_indices)?st.sector_indices:[]).map(normalizeSector);
  const map={};
@@ -4563,7 +4568,7 @@ window.addEventListener('error', function(e){
     set('[data-summary="turnover"]',money(totalTurn)); set('[data-summary="volume"]',money(summary(d,['totaltradedshares','tradedshares','totalvolume']))); set('[data-summary="transactions"]',money(summary(d,['totaltransactions','transactions']))); set('[data-summary="scrips"]',money(summary(d,['totalscripstraded','scripstraded'])??rows.length)); set('[data-summary="marketcap"]',money(summary(d,['totalmarketcapitalization','marketcapitalization']))); set('[data-summary="floatcap"]',money(summary(d,['totalfloatmarketcapitalization','floatmarketcapitalization'])));
     window.NEPSE_PULSE_LIVE_DATA=d;
   }
-  async function load(){try{const r=await fetch(base+'/api/market?force=true',{cache:'no-store',headers:{Accept:'application/json'}});const d=await r.json();render(d);}catch(e){console.warn('V20 backend bridge',e);}}
+  async function load(){try{const r=await fetch(base+'/api/market?force=true',{cache:'no-store',headers:{Accept:'application/json'}});const d=await r.json();render(d);window.dispatchEvent(new CustomEvent('nepse:pulse-ready',{detail:{ok:!!d?.ok}}));}catch(e){console.warn('V20 backend bridge',e);window.dispatchEvent(new CustomEvent('nepse:pulse-ready',{detail:{ok:false}}));}}
   window.addEventListener('load',()=>{load();setInterval(load,30000);});
   document.addEventListener('click',e=>{if(e.target.closest('[data-mover-tab]'))setTimeout(load,0);});
 })();
@@ -4691,8 +4696,7 @@ header.topbar .feature-btn{
     if(!window.supabase){
       await new Promise((resolve,reject)=>{const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';s.onload=resolve;s.onerror=reject;document.head.appendChild(s)}).catch(()=>{const x=document.getElementById('v22-auth-status');if(x)x.textContent='Could not load authentication service.'});
     }
-    if(window.supabase)sb=window.__NEPSE_PULSE_SUPABASE || window.supabase.createClient(AUTH_CFG.supabaseUrl,AUTH_CFG.supabaseAnonKey);
-    if(sb) window.__NEPSE_PULSE_SUPABASE=sb;
+    if(window.supabase)sb=window.supabase.createClient(AUTH_CFG.supabaseUrl,AUTH_CFG.supabaseAnonKey);
     return sb;
   }
   async function pullCloud(){
@@ -4717,8 +4721,8 @@ header.topbar .feature-btn{
   window.v22OpenAuth=function(){const m=document.getElementById('v22-auth-modal');m?.classList.add('show');m?.setAttribute('aria-hidden','false')};
   window.v22CloseAuth=function(){const m=document.getElementById('v22-auth-modal');m?.classList.remove('show');m?.setAttribute('aria-hidden','true')};
   function status(t,bad){const x=document.getElementById('v22-auth-status');if(x){x.textContent=t;x.style.color=bad?'#c63f48':'#667085'}}
-  window.v22Google=()=>pulseOAuth('google');
-  window.v22Facebook=()=>pulseOAuth('facebook');
+  window.v22Google=async function(){const c=await loadSb();if(!c)return;const {error}=await c.auth.signInWithOAuth({provider:'google',options:{redirectTo:location.href}});if(error)status(error.message,true)};
+  window.v22Facebook=async function(){const c=await loadSb();if(!c)return;const {error}=await c.auth.signInWithOAuth({provider:'facebook',options:{redirectTo:location.href}});if(error)status(error.message,true)};
   window.v22SendOtp=async function(){const phone=(document.getElementById('v22-phone')?.value||'').trim();if(!/^\+\d{8,15}$/.test(phone)){status('Enter your mobile number with country code, e.g. +97798XXXXXXXX.',true);return}const c=await loadSb();if(!c)return;const {error}=await c.auth.signInWithOtp({phone});if(error){status(error.message,true);return}otpPhone=phone;document.getElementById('v22-otp-row').style.display='grid';status('OTP sent. Enter the 6-digit code.')};
   window.v22VerifyOtp=async function(){const token=(document.getElementById('v22-otp')?.value||'').trim();if(!/^\d{6}$/.test(token)){status('Enter the 6-digit OTP.',true);return}const c=await loadSb();if(!c)return;const {data,error}=await c.auth.verifyOtp({phone:otpPhone,token,type:'sms'});if(error){status(error.message,true);return}if(data?.session){updateProfile(data.session.user);await pullCloud();status('Signed in successfully.');setTimeout(v22CloseAuth,500)}};
   function updateProfile(u){currentUser=u||null;const body=document.getElementById('v22-profile-body');if(!body)return;if(!u){body.innerHTML='<div class="v22-avatar">G</div><div><div class="v22-profile-name">Guest</div><div class="v22-profile-sub">Sign in to sync Watchlist and future Portfolio/Alerts.</div></div><button class="v22-auth-btn" type="button" onclick="v22OpenAuth()">Sign in</button>';render();return}const label=u.user_metadata?.full_name||u.user_metadata?.name||u.email||u.phone||'Pulse user';const avatar=(label[0]||'P').toUpperCase();body.innerHTML='<div class="v22-avatar">'+esc(avatar)+'</div><div><div class="v22-profile-name">'+esc(label)+'</div><div class="v22-profile-sub">'+esc(u.email||u.phone||'Signed in')+'</div></div><button class="v22-auth-btn" type="button" onclick="v22SignOut()">Sign out</button>';render()}
@@ -4740,6 +4744,27 @@ header.topbar .feature-btn{
 })();
 </script>
 
+
+<script id="nepse-pulse-splash-controller">
+(function(){
+  const splash=document.getElementById('nepse-pulse-splash');
+  if(!splash)return;
+  const start=Date.now();
+  let ready=false, hidden=false;
+  function hide(){
+    if(hidden)return; hidden=true;
+    const elapsed=Date.now()-start;
+    const wait=Math.max(0,1800-elapsed);
+    setTimeout(function(){
+      splash.classList.add('is-hidden');
+      setTimeout(function(){splash.remove()},700);
+    },wait);
+  }
+  window.addEventListener('nepse:pulse-ready',function(){ready=true;hide()},{once:true});
+  // Never trap the user on the splash if the market backend is slow/offline.
+  setTimeout(function(){if(!ready)hide()},5200);
+})();
+</script>
 </body>
 </html><script>
 // NEPSE Pulse Professional Charting V1 extension
@@ -4771,64 +4796,3 @@ body{background:var(--bg)!important;color:var(--text)!important}
 input,select{background:#fff!important;color:var(--text)!important}
 .muted,.subtle{color:var(--muted)!important}
 </style>
-  <script>
-document.addEventListener('click',function(e){
-  var b=e.target.closest('[data-mover-tab]');
-  if(b){window.NEPSE_PULSE_MOVER_MODE=b.dataset.moverTab;}
-},true);
-</script>
-  <script>
-(function(){
-  var mode='turnover';
-  var K={
-    turnover:['turnover','totalTradedValue','value','amount'],
-    volume:['volume','totalTradedQuantity','tradedShares','totalTradedShares','quantity','shares'],
-    transactions:['transactions','totalTransactions','numberOfTransactions','noOfTransactions','totalTrades','tradeCount','trades'],
-    price:['ltp','lastPrice','lastTradedPrice','close','price','closePrice'],
-    symbol:['symbol','stockSymbol','securitySymbol','ticker']
-  };
-  function num(v){if(v===null||v===undefined||v==='')return null;var n=Number(String(v).replace(/,/g,''));return isFinite(n)?n:null;}
-  function pick(o,keys){
-    if(!o||typeof o!=='object')return null;
-    var m={};Object.keys(o).forEach(function(k){m[k.toLowerCase().replace(/[^a-z0-9]/g,'')]=o[k];});
-    for(var i=0;i<keys.length;i++){var v=m[keys[i].toLowerCase().replace(/[^a-z0-9]/g,'')];if(v!==undefined&&v!==null&&v!=='')return v;}
-    return null;
-  }
-  function money(v){if(v===null)return '—';if(Math.abs(v)>=1e9)return (v/1e9).toFixed(2)+' Arab';if(Math.abs(v)>=1e7)return (v/1e7).toFixed(2)+' Crore';return v.toLocaleString(undefined,{maximumFractionDigits:0});}
-  function whole(v){return v===null?'—':v.toLocaleString(undefined,{maximumFractionDigits:0});}
-  function rows(){
-    var d=window.NEPSE_PULSE_LIVE_DATA;
-    if(d&&Array.isArray(d.live)&&d.live.length)return d.live;
-    try{var s=PulseFeedEngine.state();if(s&&Array.isArray(s.live))return s.live;}catch(e){}
-    return [];
-  }
-  function render(){
-    var box=document.getElementById('pulseLiquidityRows');
-    var r=rows();
-    if(!box||!r.length)return;
-    var list=r.map(function(o){
-      return {s:String(pick(o,K.symbol)||'—'),v:num(pick(o,K[mode])),p:num(pick(o,K.price))};
-    }).filter(function(x){return x.v!==null;})
-      .sort(function(a,b){return b.v-a.v;}).slice(0,10);
-    box.innerHTML=list.length?list.map(function(x){
-      return '<div class="pulse-table-row" data-liq="'+mode+'"><span>'+x.s+'</span><span>'+(mode==='turnover'?money(x.v):whole(x.v))+'</span><span>'+(x.p===null?'—':x.p.toFixed(2))+'</span></div>';
-    }).join(''):'<div class="empty-feed" data-liq="'+mode+'">The API returned no '+mode+' data.</div>';
-  }
-  document.addEventListener('click',function(e){
-    var b=e.target.closest('[data-liq-tab]');
-    if(!b)return;
-    mode=b.getAttribute('data-liq-tab');
-    document.querySelectorAll('[data-liq-tab]').forEach(function(x){x.classList.toggle('active',x===b);});
-    setTimeout(render,50);
-  },true);
-  var box0=document.getElementById('pulseLiquidityRows');
-  if(box0&&window.MutationObserver){
-    new MutationObserver(function(){
-      var f=box0.firstElementChild;
-      if(f&&f.getAttribute('data-liq')===mode)return;
-      render();
-    }).observe(box0,{childList:true});
-  }
-  setTimeout(render,1500);
-})();
-</script>
