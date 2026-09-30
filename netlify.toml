@@ -1,0 +1,8 @@
+[functions]
+  directory = "netlify/functions"
+
+[[redirects]]
+  from = "/api/nepse"
+  to = "/.netlify/functions/nepse"
+  status = 200
+  force = true
