@@ -1672,8 +1672,8 @@ const PulseFeedEngine = (()=>{
       // Only restore a verified market snapshot. Never fall back to a security master list,
       // because that list contains prices but is not live market data.
       const cachedRows = c && Array.isArray(c.live) ? normalizeLive(c.live) : [];
-      const usable = cachedRows.filter(x=>x.ltp!==null && (x.pct!==null || x.prev!==null || x.change!==null));
-      if(c&&usable.length>=50){
+      const usable = cachedRows.filter(x=>x.ltp!==null);
+      if(c&&usable.length>=20){
         Object.assign(state,c,{live:usable,status:'CACHED'});
         window.PULSE_FEED_STATUS='CACHED'; window.PULSE_FEED_TIMESTAMP=state.updatedAt||'—';
         emit();
@@ -1686,13 +1686,13 @@ const PulseFeedEngine = (()=>{
   const setStatus=(s,e)=>{state.status=s;state.lastError=e||null;window.PULSE_FEED_STATUS=s;window.PULSE_FEED_TIMESTAMP=state.updatedAt||'—';emit()};
   const applySnapshot=(d)=>{
     const rows=normalizeLive(d.live);
-    const usable=rows.filter(x=>x.ltp!==null && (x.pct!==null || x.prev!==null || x.change!==null));
-    if(usable.length<50)throw new Error('NEPSE API returned insufficient verified live rows ('+usable.length+')');
+    const usable=rows.filter(x=>x.ltp!==null);
+    if(usable.length<20)throw new Error('NEPSE API returned insufficient live price rows ('+usable.length+')');
     const rowsToStore=usable;
     // Quality gate: never replace a healthy snapshot with a suspiciously
     // small/partial response. Keep the last known-good market visible.
     const previousCount=Array.isArray(state.live)?state.live.length:0;
-    const minimumAcceptable=previousCount>0 ? Math.max(50, Math.floor(previousCount*0.50)) : 50;
+    const minimumAcceptable=previousCount>0 ? Math.max(20, Math.floor(previousCount*0.35)) : 20;
     if(rowsToStore.length < minimumAcceptable){
       throw new Error('Feed returned an incomplete snapshot ('+rows.length+' rows; keeping '+previousCount+' cached rows)');
     }
