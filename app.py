@@ -654,7 +654,83 @@ async def command_center():
         if traded is not None:
             breadth['unchanged'] = max(int(traded) - breadth['advancing'] - breadth['declining'], 0)
     def clean(xs): return arr(xs)[:50]
-    return {"ok":True,"updatedAt":now_iso(),"summary":summary,"breadth":breadth,"nepse":idx,"movers":{"gainers":clean(results.get('gainers')) or arr(m.get('gainers')),"losers":clean(results.get('losers')) or arr(m.get('losers'))},"activity":{"turnover":clean(results.get('turnover')) or arr(m.get('topTurnover')),"volume":clean(results.get('volume')) or arr(m.get('topTraded')),"transactions":clean(results.get('transactions')) or arr(m.get('topTransactions'))},"sectors":arr((results.get('sectors') or {}).get('data')) if isinstance(results.get('sectors'),dict) else arr(results.get('sectors')),"brokers":arr((results.get('brokers') or {}).get('data')) if isinstance(results.get('brokers'),dict) else arr(results.get('brokers')),"counts":{"live":len(live),"gainers":len(clean(results.get('gainers')) or arr(m.get('gainers'))),"losers":len(clean(results.get('losers')) or arr(m.get('losers'))),"sectors":len(arr((results.get('sectors') or {}).get('data')) if isinstance(results.get('sectors'),dict) else arr(results.get('sectors')))},"diagnostics":{"errors":errors,"marketSource":m.get('source') if isinstance(m,dict) else None}}
+
+    # Normalize the three activity feeds to one canonical schema. NEPSE's
+    # public endpoints do not always return the same field names, and the
+    # top-* endpoints may omit quantity/value fields that are available in
+    # the live/today-price rows. Enrich by symbol so the Command Center can
+    # show the actual metrics instead of dashes or zeroes.
+    def activity_rows(xs, kind):
+        source = clean(xs)
+        live_by_symbol = {}
+        for row in live:
+            sym = pick(row, ["symbol", "ticker", "securitySymbol"])
+            if sym:
+                live_by_symbol[str(sym).upper()] = row
+
+        def first_value(row, keys, positive=False):
+            values = []
+            for key in keys:
+                v = pick(row, [key])
+                n = num(v)
+                if n is not None:
+                    values.append((v, n))
+                    if (not positive) or n > 0:
+                        return v
+            return values[0][0] if values else None
+
+        out = []
+        for row in source:
+            if not isinstance(row, dict):
+                continue
+            symbol = pick(row, ["symbol", "ticker", "securitySymbol"])
+            live_row = live_by_symbol.get(str(symbol).upper()) if symbol else None
+            merged = {}
+            if isinstance(live_row, dict):
+                merged.update(live_row)
+            merged.update(row)
+
+            quantity = first_value(merged, [
+                "sharesTraded", "shareTraded", "totalTradeQuantity",
+                "totalTradedQuantity", "tradeQuantity", "quantity",
+                "volume", "tradedShares"
+            ], positive=True)
+            value = first_value(merged, [
+                "turnover", "totalTurnover", "totalTradeValue",
+                "tradedValue", "amount", "value", "totalAmount"
+            ], positive=True)
+            transactions = first_value(merged, [
+                "transactions", "totalTransactions", "totalTrades",
+                "transactionCount", "trades"
+            ], positive=True)
+
+            item = dict(row)
+            if symbol is not None:
+                item["symbol"] = symbol
+            if quantity is not None:
+                item["quantity"] = quantity
+                item["volume"] = quantity
+                item["sharesTraded"] = quantity
+            if value is not None:
+                item["value"] = value
+                item["turnover"] = value
+                item["totalTradeValue"] = value
+            if transactions is not None:
+                item["transactions"] = transactions
+                item["totalTransactions"] = transactions
+                item["totalTrades"] = transactions
+            out.append(item)
+        return out
+
+    turnover_rows = activity_rows(results.get('turnover') or arr(m.get('topTurnover')), 'turnover')
+    volume_rows = activity_rows(results.get('volume') or arr(m.get('topTraded')), 'volume')
+    transaction_rows = activity_rows(results.get('transactions') or arr(m.get('topTransactions')), 'transactions')
+    gainers_rows = clean(results.get('gainers')) or arr(m.get('gainers'))
+    losers_rows = clean(results.get('losers')) or arr(m.get('losers'))
+    sector_rows = arr((results.get('sectors') or {}).get('data')) if isinstance(results.get('sectors'),dict) else arr(results.get('sectors'))
+    broker_rows = arr((results.get('brokers') or {}).get('data')) if isinstance(results.get('brokers'),dict) else arr(results.get('brokers'))
+
+    return {"ok":True,"updatedAt":now_iso(),"summary":summary,"breadth":breadth,"nepse":idx,"movers":{"gainers":gainers_rows,"losers":losers_rows},"activity":{"turnover":turnover_rows,"volume":volume_rows,"transactions":transaction_rows},"sectors":sector_rows,"brokers":broker_rows,"counts":{"live":len(live),"gainers":len(gainers_rows),"losers":len(losers_rows),"sectors":len(sector_rows)},"diagnostics":{"errors":errors,"marketSource":m.get('source') if isinstance(m,dict) else None}}
 
 @app.get("/api/diagnostics")
 async def diagnostics():
