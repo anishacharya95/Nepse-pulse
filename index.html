@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <script src="config.js?v=3"></script>
+<script src="auth-config.js?v=1"></script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#ffffff">
@@ -758,6 +759,339 @@ nav.bottom-nav, .bottom-nav, .mobile-bottom-nav, [class*="bottom-nav"]{
 .nepse-caret,.nepse-chevron,.nepse-dropdown-caret {display:none!important;content:none!important}
 </style>
 
+
+<style id="v20-market-table-layout-fix">
+/* V20 mobile market tables: keep every field in its own column. */
+#pulse-home-market-dashboard .pulse-table-row{
+  display:grid!important;
+  grid-template-columns:1.35fr .72fr .82fr .72fr!important;
+  gap:6px!important;
+  align-items:center!important;
+  padding:10px 8px!important;
+  border-top:1px solid #edf0f3!important;
+  font-size:13px!important;
+  line-height:1.25!important;
+  min-height:38px;
+}
+#pulse-home-market-dashboard .pulse-table-row > span{
+  min-width:0;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+#pulse-home-market-dashboard .pulse-table-row > span:not(:first-child){
+  text-align:right;
+}
+#pulse-home-market-dashboard .pulse-liquidity-card .pulse-table-row{
+  grid-template-columns:1.35fr 1fr .95fr!important;
+}
+#pulse-home-market-dashboard .pulse-table-row:first-child{
+  border-top:0!important;
+}
+@media(max-width:380px){
+  #pulse-home-market-dashboard .pulse-table-row{
+    grid-template-columns:1.25fr .78fr .88fr .78fr!important;
+    gap:4px!important;
+    padding-left:7px!important;
+    padding-right:7px!important;
+    font-size:12px!important;
+  }
+  #pulse-home-market-dashboard .pulse-liquidity-card .pulse-table-row{
+    grid-template-columns:1.25fr 1fr .95fr!important;
+  }
+}
+</style>
+
+
+<style id="v21-sharehub-ui">
+:root{
+  --v21-teal:#073f40;
+  --v21-teal-2:#0a5655;
+  --v21-green:#39a55a;
+  --v21-red:#d84c55;
+  --v21-blue:#198bd4;
+  --v21-bg:#f3f6f8;
+}
+body{background:var(--v21-bg)!important}
+.topbar{
+  background:var(--v21-teal)!important;
+  color:#fff!important;
+  border-bottom:0!important;
+  position:sticky!important;
+}
+.topbar .toprow{
+  min-height:92px!important;
+  padding:0 18px!important;
+}
+.brand{
+  color:#fff!important;
+  font-size:28px!important;
+  font-weight:850!important;
+}
+.brand .pulse{color:#62d978!important}
+.feed{
+  border:1px solid rgba(255,255,255,.32)!important;
+  background:rgba(255,255,255,.06)!important;
+  color:#d9fff0!important;
+}
+.feed .dot{background:#62d978!important}
+.feature-btn{
+  display:none!important;
+}
+.auth-user,.login-btn{display:none!important}
+
+/* Keep the main dashboard compact like the reference app. */
+main>.hero, main>.search, main>.section-head, main>.market, main>.feed-debug{
+  display:none!important;
+}
+#pulse-home-market-dashboard{
+  max-width:760px!important;
+  margin:0 auto!important;
+  padding:10px 12px 125px!important;
+}
+#pulse-home-market-dashboard .pulse-market-strip{
+  margin-top:0!important;
+  border-radius:22px!important;
+  padding:18px 14px!important;
+}
+#pulse-home-market-dashboard .pulse-market-name{font-size:24px!important}
+#pulse-home-market-dashboard .pulse-market-arrow{display:none!important}
+#pulse-home-market-dashboard .pulse-market-values{
+  grid-template-columns:1.35fr .8fr .8fr .85fr!important;
+  align-items:stretch!important;
+}
+#pulse-home-market-dashboard .pulse-market-box{
+  background:transparent!important;
+  min-height:62px!important;
+  padding:5px 8px!important;
+  border-right:1px solid #dbe3e8!important;
+}
+#pulse-home-market-dashboard .pulse-market-box:first-child{
+  font-size:25px!important;
+  font-weight:850!important;
+}
+#pulse-home-market-dashboard .pulse-market-status{
+  grid-column:auto!important;
+  min-height:62px!important;
+  border-radius:18px!important;
+  background:#28b878!important;
+  color:#fff!important;
+}
+#pulse-home-market-dashboard .pulse-breadth-row{display:none!important}
+.nepse-chart-card{display:none!important}
+
+/* Cards */
+#pulse-home-market-dashboard .pulse-home-grid{
+  display:block!important;
+  margin-top:12px!important;
+}
+#pulse-home-market-dashboard .pulse-home-card{
+  border-radius:20px!important;
+  padding:16px 12px 17px!important;
+  margin-bottom:12px!important;
+}
+#pulse-home-market-dashboard .pulse-card-top{
+  margin-bottom:11px!important;
+}
+#pulse-home-market-dashboard .pulse-card-top h2{
+  font-size:22px!important;
+}
+#pulse-home-market-dashboard .pulse-card-top p{display:none!important}
+#pulse-home-market-dashboard .pulse-card-icon{display:none!important}
+
+/* Reference-style segmented controls */
+#pulse-home-market-dashboard .pulse-segment{
+  background:#e7eef1!important;
+  padding:4px!important;
+  margin-bottom:15px!important;
+}
+#pulse-home-market-dashboard .pulse-segment button{
+  font-size:17px!important;
+  padding:9px 10px!important;
+}
+#pulse-home-market-dashboard .pulse-segment button.active{
+  background:#61bc70!important;
+}
+#pulse-home-market-dashboard .pulse-liquidity-card .pulse-segment button.active{
+  background:#168ddd!important;
+}
+
+/* Company-logo rows */
+#pulse-home-market-dashboard .pulse-table-head,
+#pulse-home-market-dashboard .pulse-row,
+#pulse-home-market-dashboard .pulse-table-row{
+  grid-template-columns:minmax(0,1.45fr) .72fr .82fr .72fr!important;
+  align-items:center!important;
+}
+#pulse-home-market-dashboard .pulse-table-head{
+  font-size:13px!important;
+  padding:4px 4px 9px!important;
+}
+#pulse-home-market-dashboard .pulse-row,
+#pulse-home-market-dashboard .pulse-table-row{
+  min-height:48px!important;
+  padding:8px 4px!important;
+  border-top:1px solid #edf0f3!important;
+  font-size:15px!important;
+}
+#pulse-home-market-dashboard .pulse-row:first-child,
+#pulse-home-market-dashboard .pulse-table-row:first-child{
+  border-top:0!important;
+}
+.v21-company{
+  display:flex;
+  align-items:center;
+  gap:9px;
+  min-width:0;
+}
+.v21-company-logo{
+  width:32px;height:32px;border-radius:50%;
+  object-fit:contain;
+  background:#fff;
+  border:1px solid #dfe6eb;
+  flex:0 0 32px;
+}
+.v21-company-name{
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  line-height:1.08;
+}
+.v21-symbol{font-weight:800;color:#111827}
+.v21-name{font-size:11px;color:#708090;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#pulse-home-market-dashboard .pulse-row b{font-size:15px!important}
+#pulse-home-market-dashboard .pulse-row>span:not(:first-child),
+#pulse-home-market-dashboard .pulse-table-row>span:not(:first-child){text-align:right!important}
+#pulse-home-market-dashboard .pulse-liquidity-card .pulse-table-head,
+#pulse-home-market-dashboard .pulse-liquidity-card .pulse-table-row{
+  grid-template-columns:minmax(0,1.45fr) 1fr .95fr!important;
+}
+#pulse-home-market-dashboard .pulse-liquidity-card .pulse-table-head span:nth-child(2){text-align:right}
+#pulse-home-market-dashboard .pulse-liquidity-card .pulse-table-head span:nth-child(3){text-align:right}
+
+/* Summary follows the same card language. */
+#pulse-home-market-dashboard .pulse-summary-grid{gap:8px!important}
+#pulse-home-market-dashboard .pulse-summary-grid>div{min-height:66px!important}
+
+/* Simple bottom nav */
+#v21-bottom-nav{
+  position:fixed;
+  left:12px;right:12px;bottom:10px;
+  z-index:10000;
+  display:grid;
+  grid-template-columns:repeat(5,1fr);
+  gap:2px;
+  background:rgba(255,255,255,.97);
+  border:1px solid #dce3e8;
+  border-radius:24px;
+  padding:7px 4px 6px;
+  box-shadow:0 8px 30px rgba(16,24,40,.12);
+  backdrop-filter:blur(12px);
+}
+#v21-bottom-nav button{
+  border:0;background:transparent;color:#475467;
+  min-height:54px;border-radius:17px;
+  font-size:11px;font-weight:650;
+}
+#v21-bottom-nav button.active{background:#edf5f5;color:#073f40}
+#v21-bottom-nav .v21-icon{display:block;font-size:22px;line-height:22px;margin-bottom:4px}
+@media(max-width:430px){
+  #pulse-home-market-dashboard{padding-left:8px!important;padding-right:8px!important}
+  #pulse-home-market-dashboard .pulse-market-values{grid-template-columns:1.25fr .78fr .78fr .82fr!important}
+  #pulse-home-market-dashboard .pulse-market-box:first-child{font-size:22px!important}
+  #pulse-home-market-dashboard .pulse-market-box,#pulse-home-market-dashboard .pulse-market-status{font-size:12px!important}
+  .v21-name{font-size:10px}
+}
+</style>
+
+
+<style id="v22-watchlist-profile-auth">
+/* V22: Watchlist + Profile + authentication */
+.v22-section{
+  max-width:760px;margin:12px auto 0;padding:0 8px;
+}
+.v22-card{
+  background:#fff;border:1px solid #e3e8ec;border-radius:22px;
+  padding:18px 16px;box-shadow:0 5px 20px rgba(20,35,45,.05);
+}
+.v22-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+.v22-head h2{margin:0;font-size:23px;letter-spacing:-.3px;color:#111827}
+.v22-head p{margin:4px 0 0;color:#7b8794;font-size:13px}
+.v22-link{
+  border:0;background:#edf5f5;color:#073f40;border-radius:12px;
+  padding:9px 12px;font-weight:750;min-height:40px;
+}
+.v22-watch-empty{
+  padding:20px 10px;text-align:center;color:#7b8794;font-size:14px;
+}
+.v22-watch-row{
+  display:grid;grid-template-columns:minmax(0,1.4fr) .75fr .8fr 38px;
+  gap:7px;align-items:center;padding:11px 4px;border-top:1px solid #edf0f3;
+}
+.v22-watch-row:first-child{border-top:0}
+.v22-stock{display:flex;align-items:center;gap:9px;min-width:0}
+.v22-stock-logo{
+  width:34px;height:34px;border-radius:50%;object-fit:contain;
+  border:1px solid #dfe6eb;background:#fff;flex:0 0 34px;
+}
+.v22-stock-symbol{font-weight:850;color:#101828}
+.v22-stock-name{font-size:10px;color:#7b8794;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.v22-value{text-align:right;font-size:13px;font-weight:700}
+.v22-up{color:#369657}.v22-down{color:#d04b54}.v22-flat{color:#667085}
+.v22-star{
+  border:0;background:#f1f5f6;color:#667085;border-radius:12px;
+  width:38px;height:38px;font-size:20px;line-height:1;
+}
+.v22-star.active{background:#e8f7ec;color:#e0a400}
+.v22-profile{
+  display:grid;grid-template-columns:52px minmax(0,1fr) auto;gap:12px;align-items:center;
+}
+.v22-avatar{
+  width:52px;height:52px;border-radius:50%;display:grid;place-items:center;
+  background:#073f40;color:#fff;font-weight:850;font-size:20px;
+}
+.v22-profile-name{font-weight:850;color:#101828}
+.v22-profile-sub{font-size:12px;color:#7b8794;margin-top:4px;overflow:hidden;text-overflow:ellipsis}
+.v22-auth-btn{
+  border:0;border-radius:12px;padding:10px 13px;font-weight:800;
+  background:#073f40;color:#fff;min-height:42px;
+}
+.v22-modal-backdrop{
+  position:fixed;inset:0;background:rgba(4,18,25,.48);z-index:20000;
+  display:none;align-items:flex-end;justify-content:center;padding:12px;
+}
+.v22-modal-backdrop.show{display:flex}
+.v22-modal{
+  width:min(520px,100%);background:#fff;border-radius:26px 26px 18px 18px;
+  padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.22);
+}
+.v22-modal h2{margin:0;color:#101828;font-size:25px}
+.v22-modal p{color:#667085;font-size:13px;line-height:1.45}
+.v22-provider{
+  width:100%;border:1px solid #dbe2e8;background:#fff;color:#172033;
+  border-radius:14px;min-height:48px;margin-top:9px;font-size:15px;font-weight:800;
+}
+.v22-provider.google{border-color:#dadce0}
+.v22-provider.facebook{background:#1877f2;color:#fff;border-color:#1877f2}
+.v22-phone-row{display:grid;grid-template-columns:1fr 110px;gap:8px;margin-top:12px}
+.v22-input{
+  width:100%;box-sizing:border-box;border:1px solid #d8e0e6;border-radius:12px;
+  padding:12px;font-size:16px;outline:none;background:#fff;
+}
+.v22-input:focus{border-color:#0a6b6a;box-shadow:0 0 0 3px rgba(10,107,106,.12)}
+.v22-close{
+  width:100%;border:0;background:#f1f4f5;color:#344054;border-radius:12px;
+  min-height:44px;margin-top:10px;font-weight:750;
+}
+.v22-status{margin-top:10px;font-size:13px;color:#667085;min-height:20px}
+@media(max-width:420px){
+  .v22-watch-row{grid-template-columns:minmax(0,1.35fr) .7fr .8fr 36px;gap:4px}
+  .v22-value{font-size:12px}
+  .v22-profile{grid-template-columns:48px minmax(0,1fr)}
+  .v22-profile .v22-auth-btn{grid-column:1/-1;width:100%}
+}
+</style>
+
 </head>
 <body>
 <div class="app">
@@ -937,7 +1271,46 @@ nav.bottom-nav, .bottom-nav, .mobile-bottom-nav, [class*="bottom-nav"]{
   </div>
 </section>
 
+
+
+  <section class="v22-section" id="v22-watchlist-section">
+    <div class="v22-card">
+      <div class="v22-head">
+        <div><h2>Watchlist</h2><p>Your saved NEPSE securities</p></div>
+        <button class="v22-link" type="button" onclick="v22OpenWatchlist()">Manage</button>
+      </div>
+      <div id="v22-watchlist-body" class="v22-watch-empty">Sign in to sync your watchlist across devices.</div>
+    </div>
+  </section>
+
+  <section class="v22-section" id="v22-profile-section">
+    <div class="v22-card">
+      <div class="v22-head">
+        <div><h2>Profile</h2><p>Account and synced Pulse data</p></div>
+      </div>
+      <div id="v22-profile-body" class="v22-profile">
+        <div class="v22-avatar">G</div>
+        <div><div class="v22-profile-name">Guest</div><div class="v22-profile-sub">Sign in to sync Watchlist and future Portfolio/Alerts.</div></div>
+        <button class="v22-auth-btn" type="button" onclick="v22OpenAuth()">Sign in</button>
+      </div>
+    </div>
+  </section>
+
 </main>
+</div>
+
+
+<div class="v22-modal-backdrop" id="v22-auth-modal" aria-hidden="true" onclick="if(event.target===this)v22CloseAuth()">
+  <div class="v22-modal" role="dialog" aria-modal="true" aria-labelledby="v22-auth-title">
+    <div class="v22-head"><div><h2 id="v22-auth-title">Sign in to NEPSE Pulse</h2><p>Use Google, Facebook, or your Nepal mobile number.</p></div><button class="v22-close" style="width:auto;padding:9px 12px;margin:0" type="button" onclick="v22CloseAuth()">Close</button></div>
+    <button class="v22-provider google" type="button" onclick="v22Google()">Continue with Google</button>
+    <button class="v22-provider facebook" type="button" onclick="v22Facebook()">Continue with Facebook</button>
+    <div style="margin:14px 0 6px;color:#98a2b3;font-size:12px;text-align:center">OR MOBILE OTP</div>
+    <div class="v22-phone-row"><input id="v22-phone" class="v22-input" inputmode="tel" autocomplete="tel" placeholder="+97798XXXXXXXX" aria-label="Mobile number"><button class="v22-auth-btn" type="button" onclick="v22SendOtp()">Send OTP</button></div>
+    <div id="v22-otp-row" class="v22-phone-row" style="display:none"><input id="v22-otp" class="v22-input" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6-digit OTP" aria-label="OTP"><button class="v22-auth-btn" type="button" onclick="v22VerifyOtp()">Verify</button></div>
+    <div id="v22-auth-status" class="v22-status" aria-live="polite">Authentication is ready for Supabase configuration.</div>
+    <button class="v22-close" type="button" onclick="v22CloseAuth()">Cancel</button>
+  </div>
 </div>
 
 <div class="bottom"><nav class="nav">
@@ -1425,11 +1798,7 @@ async function renderTraderScan(name){
   box.innerHTML=`<div class="scan-results">${out||'<div class="empty-feed">No qualifying securities were returned by this scan.</div>'}</div>`;
 }
 
-const PULSE_AUTH_CONFIG = {
-  // Fill these for production. Do not commit secret/service-role keys.
-  supabaseUrl: "",
-  supabaseAnonKey: ""
-};
+const PULSE_AUTH_CONFIG = window.NEPSE_PULSE_AUTH || {supabaseUrl:'',supabaseAnonKey:''};
 let pulseSession = null;
 
 function openProfile(){document.getElementById('profileModal').classList.add('open')}
@@ -4184,6 +4553,177 @@ window.addEventListener('error', function(e){
   document.addEventListener('click',e=>{if(e.target.closest('[data-mover-tab]'))setTimeout(load,0);});
 })();
 </script>
+
+<script id="v21-logo-and-company-enhancer">
+(function(){
+  const companies={
+    DLBS:{name:'Dabur Nepal',domain:'dabur.com.np'},
+    PHCL:{name:'Panchakanya Heat.',domain:'panchakanya.com'},
+    CIT:{name:'Citizen Investment',domain:'cit.com.np'},
+    NYADI:{name:'Nyadi Hydropower',domain:'nyadihydropower.com'},
+    SHLB:{name:'Shree Hari Leather',domain:'shreeharileather.com'},
+    SBL:{name:'Siddhartha Bank',domain:'siddharthabank.com'},
+    SHPC:{name:'Sanima Hydro',domain:'sanima-hydro.com'},
+    HDL:{name:'Himalayan Distillery',domain:'himalayandistillery.com'},
+    SHIVM:{name:'Shivam Cement',domain:'shivamcement.com.np'}
+  };
+  function logo(sym){
+    const x=companies[sym];
+    return x ? 'https://www.google.com/s2/favicons?domain='+encodeURIComponent(x.domain)+'&sz=128' : '';
+  }
+  function decorate(){
+    document.querySelectorAll('#pulseMoversRows .pulse-table-row').forEach(row=>{
+      const first=row.querySelector('span');
+      if(!first || first.querySelector('.v21-company')) return;
+      const sym=(first.textContent||'').trim().toUpperCase();
+      const x=companies[sym]||{name:'NEPSE listed security',domain:''};
+      first.innerHTML='<span class="v21-company">'+
+        (logo(sym)?'<img class="v21-company-logo" src="'+logo(sym)+'" alt="">':'<span class="v21-company-logo" aria-hidden="true"></span>')+
+        '<span class="v21-company-name"><span class="v21-symbol">'+sym+'</span><span class="v21-name">'+x.name+'</span></span></span>';
+    });
+    document.querySelectorAll('#pulseLiquidityRows .pulse-table-row').forEach(row=>{
+      const first=row.querySelector('span');
+      if(!first || first.querySelector('.v21-company')) return;
+      const sym=(first.textContent||'').trim().toUpperCase();
+      const x=companies[sym]||{name:'NEPSE listed security',domain:''};
+      first.innerHTML='<span class="v21-company">'+
+        (logo(sym)?'<img class="v21-company-logo" src="'+logo(sym)+'" alt="">':'<span class="v21-company-logo" aria-hidden="true"></span>')+
+        '<span class="v21-company-name"><span class="v21-symbol">'+sym+'</span><span class="v21-name">'+x.name+'</span></span></span>';
+    });
+  }
+  new MutationObserver(decorate).observe(document.body,{subtree:true,childList:true});
+  window.addEventListener('load',decorate);
+  setInterval(decorate,1500);
+})();
+</script>
+
+
+<style id="v21-1-header-final">
+/* FINAL OVERRIDE: keep the ShareHub-style header visible after legacy light-mode rules. */
+header.topbar{
+  background:#073f40!important;
+  color:#ffffff!important;
+  border-bottom:0!important;
+  box-shadow:none!important;
+}
+header.topbar .toprow{
+  background:#073f40!important;
+  color:#ffffff!important;
+}
+header.topbar .brand{
+  color:#ffffff!important;
+  -webkit-text-fill-color:#ffffff!important;
+  opacity:1!important;
+  visibility:visible!important;
+  font-size:28px!important;
+  font-weight:850!important;
+  letter-spacing:-.6px!important;
+}
+header.topbar .brand::first-letter{
+  color:#ffffff!important;
+}
+header.topbar .brand .pulse{
+  color:#62d978!important;
+  -webkit-text-fill-color:#62d978!important;
+  opacity:1!important;
+}
+header.topbar .feed{
+  color:#eafff3!important;
+  background:rgba(255,255,255,.08)!important;
+  border-color:rgba(255,255,255,.35)!important;
+}
+header.topbar .feed .dot{
+  background:#62d978!important;
+}
+header.topbar .feature-btn{
+  display:block!important;
+  color:#172033!important;
+  background:#ffffff!important;
+  border:1px solid #dbe3e8!important;
+}
+</style>
+
+
+
+
+
+<script id="v23-cloud-sync-script">
+(function(){
+  'use strict';
+  const KEY='nepsePulseV22Watchlist';
+  const AUTH_CFG=window.NEPSE_PULSE_AUTH||{supabaseUrl:'',supabaseAnonKey:''};
+  let sb=null, otpPhone='', currentUser=null, syncTimer=null;
+  const getList=()=>{try{return JSON.parse(localStorage.getItem(KEY)||'[]').filter(Boolean)}catch(e){return[]}};
+  const saveList=x=>localStorage.setItem(KEY,JSON.stringify([...new Set(x)]));
+  const pick=(o,ks)=>{for(const k of ks)if(o&&o[k]!=null&&o[k]!=='')return o[k];return null};
+  const num=x=>{const n=Number(String(x??'').replace(/,/g,''));return Number.isFinite(n)?n:null};
+  const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  function rows(){const st=(window.PulseFeedEngine&&PulseFeedEngine.state)?PulseFeedEngine.state():{};return Array.isArray(st.live)?st.live:(Array.isArray(st.liveMarket)?st.liveMarket:[])}
+  function stock(sym){return rows().find(r=>String(pick(r,['symbol','Symbol','ticker'])||'').toUpperCase()===String(sym).toUpperCase())||{}}
+  function render(){
+    const body=document.getElementById('v22-watchlist-body'); if(!body)return;
+    const list=getList();
+    if(!list.length){body.innerHTML=currentUser?'No stocks saved yet. Tap ☆ on a Market Movers row to add one.':'Sign in to sync your watchlist across devices.';return}
+    body.innerHTML=list.map(sym=>{
+      const r=stock(sym),ltp=num(pick(r,['ltp','LTP','lastPrice','price','closePrice'])),pct=num(pick(r,['pct','percentageChange','percentChange','changePercent','changePct','pChange']));
+      const cls=pct>0?'v22-up':pct<0?'v22-down':'v22-flat';
+      return '<div class="v22-watch-row"><div class="v22-stock"><span class="v22-stock-logo" aria-hidden="true"></span><span><span class="v22-stock-symbol">'+esc(sym)+'</span><span class="v22-stock-name">NEPSE listed security</span></span></div><span class="v22-value">'+(ltp==null?'—':ltp.toLocaleString())+'</span><span class="v22-value '+cls+'">'+(pct==null?'—':(pct>0?'+':'')+pct.toFixed(2)+'%')+'</span><button class="v22-star active" type="button" aria-label="Remove '+esc(sym)+'" onclick="v23Toggle(\''+esc(sym)+'\')">★</button></div>';
+    }).join('');
+  }
+  async function loadSb(){
+    if(sb)return sb;
+    if(!AUTH_CFG.supabaseUrl||!AUTH_CFG.supabaseAnonKey){const x=document.getElementById('v22-auth-status');if(x)x.textContent='Add your Supabase URL and anon key in auth-config.js to enable sign-in.';return null}
+    if(!window.supabase){
+      await new Promise((resolve,reject)=>{const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';s.onload=resolve;s.onerror=reject;document.head.appendChild(s)}).catch(()=>{const x=document.getElementById('v22-auth-status');if(x)x.textContent='Could not load authentication service.'});
+    }
+    if(window.supabase)sb=window.supabase.createClient(AUTH_CFG.supabaseUrl,AUTH_CFG.supabaseAnonKey);
+    return sb;
+  }
+  async function pullCloud(){
+    if(!sb||!currentUser)return;
+    const {data,error}=await sb.from('watchlists').select('symbol').eq('user_id',currentUser.id).order('symbol');
+    if(error)return;
+    const cloud=(data||[]).map(x=>String(x.symbol).toUpperCase()).filter(Boolean);saveList(cloud);render();
+  }
+  async function syncCloud(){
+    if(!sb||!currentUser)return;
+    const list=getList().map(symbol=>({user_id:currentUser.id,symbol:String(symbol).toUpperCase()}));
+    const {error:delError}=await sb.from('watchlists').delete().eq('user_id',currentUser.id);
+    if(delError)return;
+    if(list.length)await sb.from('watchlists').insert(list);
+  }
+  window.v23Toggle=async function(sym){
+    const list=getList(),i=list.indexOf(sym);if(i>=0)list.splice(i,1);else list.push(sym);saveList(list);render();
+    if(currentUser)await syncCloud();
+  };
+  window.v22Toggle=window.v23Toggle;
+  window.v22OpenWatchlist=function(){document.getElementById('v22-watchlist-section')?.scrollIntoView({behavior:'smooth',block:'start'})};
+  window.v22OpenAuth=function(){const m=document.getElementById('v22-auth-modal');m?.classList.add('show');m?.setAttribute('aria-hidden','false')};
+  window.v22CloseAuth=function(){const m=document.getElementById('v22-auth-modal');m?.classList.remove('show');m?.setAttribute('aria-hidden','true')};
+  function status(t,bad){const x=document.getElementById('v22-auth-status');if(x){x.textContent=t;x.style.color=bad?'#c63f48':'#667085'}}
+  window.v22Google=async function(){const c=await loadSb();if(!c)return;const {error}=await c.auth.signInWithOAuth({provider:'google',options:{redirectTo:location.href}});if(error)status(error.message,true)};
+  window.v22Facebook=async function(){const c=await loadSb();if(!c)return;const {error}=await c.auth.signInWithOAuth({provider:'facebook',options:{redirectTo:location.href}});if(error)status(error.message,true)};
+  window.v22SendOtp=async function(){const phone=(document.getElementById('v22-phone')?.value||'').trim();if(!/^\+\d{8,15}$/.test(phone)){status('Enter your mobile number with country code, e.g. +97798XXXXXXXX.',true);return}const c=await loadSb();if(!c)return;const {error}=await c.auth.signInWithOtp({phone});if(error){status(error.message,true);return}otpPhone=phone;document.getElementById('v22-otp-row').style.display='grid';status('OTP sent. Enter the 6-digit code.')};
+  window.v22VerifyOtp=async function(){const token=(document.getElementById('v22-otp')?.value||'').trim();if(!/^\d{6}$/.test(token)){status('Enter the 6-digit OTP.',true);return}const c=await loadSb();if(!c)return;const {data,error}=await c.auth.verifyOtp({phone:otpPhone,token,type:'sms'});if(error){status(error.message,true);return}if(data?.session){updateProfile(data.session.user);await pullCloud();status('Signed in successfully.');setTimeout(v22CloseAuth,500)}};
+  function updateProfile(u){currentUser=u||null;const body=document.getElementById('v22-profile-body');if(!body)return;if(!u){body.innerHTML='<div class="v22-avatar">G</div><div><div class="v22-profile-name">Guest</div><div class="v22-profile-sub">Sign in to sync Watchlist and future Portfolio/Alerts.</div></div><button class="v22-auth-btn" type="button" onclick="v22OpenAuth()">Sign in</button>';render();return}const label=u.user_metadata?.full_name||u.user_metadata?.name||u.email||u.phone||'Pulse user';const avatar=(label[0]||'P').toUpperCase();body.innerHTML='<div class="v22-avatar">'+esc(avatar)+'</div><div><div class="v22-profile-name">'+esc(label)+'</div><div class="v22-profile-sub">'+esc(u.email||u.phone||'Signed in')+'</div></div><button class="v22-auth-btn" type="button" onclick="v22SignOut()">Sign out</button>';render()}
+  window.v22SignOut=async function(){if(sb)await sb.auth.signOut();currentUser=null;updateProfile(null)};
+  async function init(){
+    const c=await loadSb();
+    if(!c){render();return}
+    const {data}=await c.auth.getSession();if(data?.session){currentUser=data.session.user;updateProfile(currentUser);await pullCloud()}else updateProfile(null);
+    c.auth.onAuthStateChange(async(event,session)=>{currentUser=session?.user||null;updateProfile(currentUser);if(currentUser)await pullCloud()});
+    if(syncTimer)clearInterval(syncTimer);syncTimer=setInterval(()=>{if(currentUser)syncCloud()},15000);
+  }
+  function decorateMovers(){
+    document.querySelectorAll('#pulseMoversRows .pulse-table-row').forEach(row=>{
+      if(row.dataset.v23done)return;const first=row.querySelector('span');if(!first)return;const sym=(first.textContent||'').trim().split(/\s+/)[0].toUpperCase();if(!sym)return;row.dataset.v23done='1';
+      const cell=document.createElement('button');cell.className='v22-star';cell.type='button';const active=getList().includes(sym);cell.textContent=active?'★':'☆';if(active)cell.classList.add('active');cell.title='Add to watchlist';cell.onclick=()=>window.v23Toggle(sym);row.appendChild(cell);row.style.gridTemplateColumns='minmax(0,1.35fr) .7fr .8fr .7fr 38px';
+    });
+  }
+  window.addEventListener('load',()=>{render();init();decorateMovers();setInterval(()=>{render();decorateMovers()},2500)});
+})();
+</script>
+
 </body>
 </html><script>
 // NEPSE Pulse Professional Charting V1 extension
