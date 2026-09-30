@@ -4957,7 +4957,81 @@ header.topbar .feature-btn{
   setTimeout(function(){if(!ready)hide()},5200);
 })();
 </script>
-\n<style id="v24-7-nepse-index-chart-fix">\n/* V24.7: compact NEPSE market card + screenshot-inspired chart controls */\n#pulse-home-market-dashboard .pulse-market-strip{position:relative;background:#fff;border:1px solid #e1e7eb;border-radius:24px;padding:22px 22px 18px;box-shadow:0 8px 28px rgba(14,30,37,.06)}\n#pulse-home-market-dashboard .pulse-market-head{margin-bottom:12px}\n#pulse-home-market-dashboard .pulse-market-name{font-size:22px;font-weight:800;color:#172033}\n#pulse-home-market-dashboard .pulse-market-arrow{display:none}\n#pulse-home-market-dashboard .pulse-market-values{display:grid;grid-template-columns:1.2fr 1fr 1fr auto;gap:10px;align-items:stretch}\n#pulse-home-market-dashboard .pulse-market-box{min-width:0;background:#f4f7f8;border-radius:16px;padding:14px 12px;font-size:22px;font-weight:800;color:#172033;text-align:left}\n#pulse-home-market-dashboard .pulse-market-status{display:flex;align-items:center;justify-content:center;min-width:92px;border-radius:16px;padding:0 16px;font-weight:800;color:#fff;background:#ff5b60}\n#pulse-home-market-dashboard .pulse-market-meta{display:flex;justify-content:space-between;gap:10px;margin-top:14px;font-size:13px;font-weight:700;color:#5c6673}\n.nepse-chart-card{position:relative;overflow:hidden;background:#fff}\n.nepse-chart-head{padding-right:150px}\n.nepse-chart-switch{position:absolute;right:18px;top:18px;display:flex;background:#e8eff1;border-radius:999px;padding:3px;z-index:2}\n.nepse-chart-switch button{border:0;background:transparent;padding:10px 20px;border-radius:999px;font-weight:800;font-size:15px;cursor:pointer}\n.nepse-chart-switch button.active{background:#073f40;color:#fff}\n.nepse-chart-wrap{height:300px;background:#fff;margin-top:12px}\n.nepse-chart-ranges{display:flex;gap:10px;overflow-x:auto;padding:12px 4px 4px;scrollbar-width:none}\n.nepse-chart-ranges::-webkit-scrollbar{display:none}\n.nepse-chart-ranges button{border:0;background:#e8eff1;border-radius:14px;padding:12px 18px;font-weight:800;font-size:15px;white-space:nowrap}\n.nepse-chart-ranges button.active{background:#073f40;color:#fff}\n@media(max-width:640px){\n #pulse-home-market-dashboard .pulse-market-values{grid-template-columns:1.25fr 1fr 1fr;gap:8px}\n #pulse-home-market-dashboard .pulse-market-status{grid-column:3;grid-row:1;min-height:48px}\n #pulse-home-market-dashboard .pulse-market-box{font-size:20px;padding:13px 10px}\n #pulse-home-market-dashboard .pulse-market-values .pulse-market-status{font-size:14px}\n .nepse-chart-head{padding-right:0;min-height:62px}\n .nepse-chart-switch{position:relative;right:auto;top:auto;width:max-content;margin:0 0 4px auto}\n .nepse-chart-switch button{padding:9px 18px}\n .nepse-chart-wrap{height:290px}\n}\n</style>\n<script id="v24-7-index-bridge">\n(function(){\n  'use strict';\n  const API='https://nepseapi.surajrimal.dev';\n  let idxData=null;\n  const n=v=>{if(v===null||v===undefined||v==='')return null;const x=Number(String(v).replace(/,/g,''));return Number.isFinite(x)?x:null};\n  const pick=(o,keys)=>{if(!o||typeof o!=='object')return null;const m={};Object.keys(o).forEach(k=>m[k.toLowerCase().replace(/[^a-z0-9]/g,'')]=o[k]);for(const k of keys){const v=m[k.toLowerCase().replace(/[^a-z0-9]/g,'')];if(v!==undefined&&v!==null)return v}return null};\n  const arr=v=>{if(Array.isArray(v))return v;if(!v||typeof v!=='object')return[];for(const k of ['data','result','results','content','records','rows','items'])if(Array.isArray(v[k]))return v[k];return Object.values(v).filter(x=>x&&typeof x==='object')};\n  const money=v=>{const x=n(v);if(x===null)return '—';if(x>=1000000000)return (x/1000000000).toFixed(2)+' Arab';if(x>=10000000)return (x/10000000).toFixed(2)+' Cr';if(x>=100000)return (x/100000).toFixed(2)+' Lakh';return x.toLocaleString(undefined,{maximumFractionDigits:2})};\n  function extract(raw){\n    let candidates=arr(raw);\n    const nepse=candidates.find(x=>String(pick(x,['index','name','indexname','symbol'])||'').toLowerCase().replace(/[^a-z]/g,'').includes('nepse'))||candidates[0]||raw;\n    return {value:n(pick(nepse,['close','currentvalue','value','indexvalue','latest','current'])),change:n(pick(nepse,['change','pointchange','changevalue','difference'])),pct:n(pick(nepse,['perchange','percentchange','percentagechange','changepercent','pchange'])),date:pick(nepse,['businessdate','date','timestamp','time'])};\n  }\n  function paint(){\n    if(!idxData)return;\n    const d=idxData;\n    const set=(sel,text)=>{const e=document.querySelector(sel);if(e)e.textContent=text};\n    set('[data-market="index"]',d.value===null?'—':d.value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}));\n    set('[data-market="points"]',d.change===null?'—':(d.change>=0?'+':'')+d.change.toFixed(2));\n    set('[data-market="percent"]',d.pct===null?'—':(d.pct>=0?'+':'')+d.pct.toFixed(2)+'%');\n    set('#nepseIndexValue',d.value===null?'—':d.value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}));\n    const c=document.getElementById('nepseIndexChange'); if(c){c.textContent=(d.change===null?'Index change unavailable':(d.change>=0?'+':'')+d.change.toFixed(2)+(d.pct===null?'':' ('+(d.pct>=0?'+':'')+d.pct.toFixed(2)+'%)'));c.className='market-label change '+(d.change>0?'up':d.change<0?'down':'')}\n    const sub=document.getElementById('nepseChartSubtitle'); if(sub)sub.textContent=d.value===null?'Index performance':'NEPSE '+d.value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})+(d.pct===null?'':' · '+(d.pct>=0?'+':'')+d.pct.toFixed(2)+'%');\n  }\n  async function load(){\n    try{\n      const r=await fetch(API+'/NepseIndex',{cache:'no-store',headers:{Accept:'application/json'}});\n      if(!r.ok)throw new Error('index '+r.status);\n      idxData=extract(await r.json());\n      paint();\n      window.PULSE_LIVE_INDEX=idxData;\n      window.dispatchEvent(new CustomEvent('pulse-index-ready',{detail:idxData}));\n    }catch(e){\n      // Keep existing feed/cache visible; never blank the market card on index failure.\n    }\n  }\n  window.addEventListener('pulse-central-snapshot',paint);\n  load();\n  setInterval(load,60000);\n})();\n</script>\n
+
+<style id="v24-7-nepse-index-chart-fix">
+/* V24.7: compact NEPSE market card + screenshot-inspired chart controls */
+#pulse-home-market-dashboard .pulse-market-strip{position:relative;background:#fff;border:1px solid #e1e7eb;border-radius:24px;padding:22px 22px 18px;box-shadow:0 8px 28px rgba(14,30,37,.06)}
+#pulse-home-market-dashboard .pulse-market-head{margin-bottom:12px}
+#pulse-home-market-dashboard .pulse-market-name{font-size:22px;font-weight:800;color:#172033}
+#pulse-home-market-dashboard .pulse-market-arrow{display:none}
+#pulse-home-market-dashboard .pulse-market-values{display:grid;grid-template-columns:1.2fr 1fr 1fr auto;gap:10px;align-items:stretch}
+#pulse-home-market-dashboard .pulse-market-box{min-width:0;background:#f4f7f8;border-radius:16px;padding:14px 12px;font-size:22px;font-weight:800;color:#172033;text-align:left}
+#pulse-home-market-dashboard .pulse-market-status{display:flex;align-items:center;justify-content:center;min-width:92px;border-radius:16px;padding:0 16px;font-weight:800;color:#fff;background:#ff5b60}
+#pulse-home-market-dashboard .pulse-market-meta{display:flex;justify-content:space-between;gap:10px;margin-top:14px;font-size:13px;font-weight:700;color:#5c6673}
+.nepse-chart-card{position:relative;overflow:hidden;background:#fff}
+.nepse-chart-head{padding-right:150px}
+.nepse-chart-switch{position:absolute;right:18px;top:18px;display:flex;background:#e8eff1;border-radius:999px;padding:3px;z-index:2}
+.nepse-chart-switch button{border:0;background:transparent;padding:10px 20px;border-radius:999px;font-weight:800;font-size:15px;cursor:pointer}
+.nepse-chart-switch button.active{background:#073f40;color:#fff}
+.nepse-chart-wrap{height:300px;background:#fff;margin-top:12px}
+.nepse-chart-ranges{display:flex;gap:10px;overflow-x:auto;padding:12px 4px 4px;scrollbar-width:none}
+.nepse-chart-ranges::-webkit-scrollbar{display:none}
+.nepse-chart-ranges button{border:0;background:#e8eff1;border-radius:14px;padding:12px 18px;font-weight:800;font-size:15px;white-space:nowrap}
+.nepse-chart-ranges button.active{background:#073f40;color:#fff}
+@media(max-width:640px){
+ #pulse-home-market-dashboard .pulse-market-values{grid-template-columns:1.25fr 1fr 1fr;gap:8px}
+ #pulse-home-market-dashboard .pulse-market-status{grid-column:3;grid-row:1;min-height:48px}
+ #pulse-home-market-dashboard .pulse-market-box{font-size:20px;padding:13px 10px}
+ #pulse-home-market-dashboard .pulse-market-values .pulse-market-status{font-size:14px}
+ .nepse-chart-head{padding-right:0;min-height:62px}
+ .nepse-chart-switch{position:relative;right:auto;top:auto;width:max-content;margin:0 0 4px auto}
+ .nepse-chart-switch button{padding:9px 18px}
+ .nepse-chart-wrap{height:290px}
+}
+</style>
+<script id="v24-7-index-bridge">
+(function(){
+  'use strict';
+  const API='https://nepseapi.surajrimal.dev';
+  let idxData=null;
+  const n=v=>{if(v===null||v===undefined||v==='')return null;const x=Number(String(v).replace(/,/g,''));return Number.isFinite(x)?x:null};
+  const pick=(o,keys)=>{if(!o||typeof o!=='object')return null;const m={};Object.keys(o).forEach(k=>m[k.toLowerCase().replace(/[^a-z0-9]/g,'')]=o[k]);for(const k of keys){const v=m[k.toLowerCase().replace(/[^a-z0-9]/g,'')];if(v!==undefined&&v!==null)return v}return null};
+  const arr=v=>{if(Array.isArray(v))return v;if(!v||typeof v!=='object')return[];for(const k of ['data','result','results','content','records','rows','items'])if(Array.isArray(v[k]))return v[k];return Object.values(v).filter(x=>x&&typeof x==='object')};
+  const money=v=>{const x=n(v);if(x===null)return '—';if(x>=1000000000)return (x/1000000000).toFixed(2)+' Arab';if(x>=10000000)return (x/10000000).toFixed(2)+' Cr';if(x>=100000)return (x/100000).toFixed(2)+' Lakh';return x.toLocaleString(undefined,{maximumFractionDigits:2})};
+  function extract(raw){
+    let candidates=arr(raw);
+    const nepse=candidates.find(x=>String(pick(x,['index','name','indexname','symbol'])||'').toLowerCase().replace(/[^a-z]/g,'').includes('nepse'))||candidates[0]||raw;
+    return {value:n(pick(nepse,['close','currentvalue','value','indexvalue','latest','current'])),change:n(pick(nepse,['change','pointchange','changevalue','difference'])),pct:n(pick(nepse,['perchange','percentchange','percentagechange','changepercent','pchange'])),date:pick(nepse,['businessdate','date','timestamp','time'])};
+  }
+  function paint(){
+    if(!idxData)return;
+    const d=idxData;
+    const set=(sel,text)=>{const e=document.querySelector(sel);if(e)e.textContent=text};
+    set('[data-market="index"]',d.value===null?'—':d.value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}));
+    set('[data-market="points"]',d.change===null?'—':(d.change>=0?'+':'')+d.change.toFixed(2));
+    set('[data-market="percent"]',d.pct===null?'—':(d.pct>=0?'+':'')+d.pct.toFixed(2)+'%');
+    set('#nepseIndexValue',d.value===null?'—':d.value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}));
+    const c=document.getElementById('nepseIndexChange'); if(c){c.textContent=(d.change===null?'Index change unavailable':(d.change>=0?'+':'')+d.change.toFixed(2)+(d.pct===null?'':' ('+(d.pct>=0?'+':'')+d.pct.toFixed(2)+'%)'));c.className='market-label change '+(d.change>0?'up':d.change<0?'down':'')}
+    const sub=document.getElementById('nepseChartSubtitle'); if(sub)sub.textContent=d.value===null?'Index performance':'NEPSE '+d.value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})+(d.pct===null?'':' · '+(d.pct>=0?'+':'')+d.pct.toFixed(2)+'%');
+  }
+  async function load(){
+    try{
+      const r=await fetch(API+'/NepseIndex',{cache:'no-store',headers:{Accept:'application/json'}});
+      if(!r.ok)throw new Error('index '+r.status);
+      idxData=extract(await r.json());
+      paint();
+      window.PULSE_LIVE_INDEX=idxData;
+      window.dispatchEvent(new CustomEvent('pulse-index-ready',{detail:idxData}));
+    }catch(e){
+      // Keep existing feed/cache visible; never blank the market card on index failure.
+    }
+  }
+  window.addEventListener('pulse-central-snapshot',paint);
+  load();
+  setInterval(load,60000);
+})();
+</script>
+
 
 <style id="v24-8-nepse-visible-fix">
 /* V24.8: the previous mobile rules accidentally hid the index chart. */
@@ -5010,6 +5084,50 @@ header.topbar .feature-btn{
    }
  }
  load();setInterval(load,60000);
+})();
+</script>
+
+
+<style id="v25-central-feature-engine">
+.v25-data-shell{position:fixed;inset:0;z-index:100000;background:#f5f7fb;color:#172033;overflow:auto;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+.v25-data-head{position:sticky;top:0;z-index:2;background:rgba(255,255,255,.96);backdrop-filter:blur(16px);border-bottom:1px solid #e2e7ef;padding:14px 16px;display:flex;align-items:center;gap:10px}
+.v25-data-head h2{margin:0;font-size:20px;flex:1}.v25-back{border:1px solid #d9e1eb;background:#fff;border-radius:11px;padding:9px 11px;font-weight:800}.v25-refresh{border:1px solid #d9e1eb;background:#fff;border-radius:11px;padding:9px 11px;font-weight:800}
+.v25-wrap{max-width:720px;margin:auto;padding:14px 16px 90px}.v25-status{background:#fff;border:1px solid #e2e7ef;border-radius:17px;padding:14px;margin-bottom:12px}.v25-statusline{display:flex;justify-content:space-between;gap:10px;align-items:center}.v25-pill{font-size:10px;font-weight:900;border-radius:999px;padding:5px 8px;background:#e9eef7}.v25-pill.ok{background:#dcfce7;color:#166534}.v25-pill.bad{background:#fee2e2;color:#991b1b}.v25-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.v25-card{background:#fff;border:1px solid #e2e7ef;border-radius:16px;padding:13px}.v25-card h3{font-size:14px;margin:0 0 5px}.v25-card p{font-size:11px;color:#667085;line-height:1.45;margin:0}.v25-card button{margin-top:10px;width:100%;padding:10px;border-radius:10px;background:#172033;color:#fff;font-weight:800}.v25-data{margin-top:12px;background:#fff;border:1px solid #e2e7ef;border-radius:17px;padding:14px;overflow:auto}.v25-data table{width:100%;border-collapse:collapse;font-size:11px}.v25-data th,.v25-data td{padding:8px 5px;border-bottom:1px solid #edf0f4;text-align:left;white-space:nowrap}.v25-data th{font-size:9px;text-transform:uppercase;color:#667085}.v25-note{font-size:10px;color:#667085;line-height:1.45;margin-top:10px}
+@media(max-width:420px){.v25-grid{grid-template-columns:1fr}.v25-wrap{padding-left:12px;padding-right:12px}}
+</style>
+<script id="v25-central-feature-bridge">
+(function(){
+ 'use strict';
+ const API=(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse.onrender.com').replace(/\/$/,'');
+ const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+ const num=v=>{const x=Number(String(v??'').replace(/,/g,''));return Number.isFinite(x)?x:null};
+ const arr=v=>Array.isArray(v)?v:(v&&typeof v==='object'?Object.values(v).filter(x=>x&&typeof x==='object'):[]);
+ const pick=(o,keys)=>{if(!o||typeof o!=='object')return null;const m={};Object.keys(o).forEach(k=>m[k.toLowerCase().replace(/[^a-z0-9]/g,'')]=o[k]);for(const k of keys){const v=m[k.toLowerCase().replace(/[^a-z0-9]/g,'')];if(v!==undefined&&v!==null&&v!=='')return v}return null};
+ async function get(path){const r=await fetch(API+path,{cache:'no-store',headers:{Accept:'application/json'}});if(!r.ok)throw new Error(path+' HTTP '+r.status);return r.json()}
+ function close(){document.getElementById('v25DataShell')?.remove()}
+ function shell(title){close();const e=document.createElement('div');e.id='v25DataShell';e.className='v25-data-shell';e.innerHTML=`<div class="v25-data-head"><button class="v25-back" type="button">←</button><h2>${esc(title)}</h2><button class="v25-refresh" type="button">↻</button></div><div class="v25-wrap"><div id="v25Body"><div class="v25-status">Loading verified data…</div></div></div>`;document.body.appendChild(e);e.querySelector('.v25-back').onclick=close;e.querySelector('.v25-refresh').onclick=()=>window.__v25Reload&&window.__v25Reload();return e.querySelector('#v25Body')}
+ function statusCard(ok,detail){return `<div class="v25-status"><div class="v25-statusline"><b>Central Feed</b><span class="v25-pill ${ok?'ok':'bad'}">${ok?'CONNECTED':'UNAVAILABLE'}</span></div><div class="v25-note">${esc(detail||'Verified source only. Missing datasets are not replaced with demo values.')}</div></div>`}
+ function table(headers,rows){return `<div class="v25-data"><table><thead><tr>${headers.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map(v=>`<td>${esc(v)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`}
+ function money(v){const x=num(v);if(x===null)return '—';if(x>=1e9)return (x/1e9).toFixed(2)+' Arab';if(x>=1e7)return (x/1e7).toFixed(2)+' Cr';return x.toLocaleString(undefined,{maximumFractionDigits:2})}
+ async function render(title,loader){const body=shell(title);try{body.innerHTML=statusCard(true,'Loading from NEPSE Pulse Central Data Engine…')+await loader();}catch(e){body.innerHTML=statusCard(false,e.message)} }
+ async function floorsheet(){return render('Floorsheet',async()=>{const d=await get('/api/floorsheet?limit=250');const a=arr(d.data||d);const rows=a.slice(0,150).map(x=>[pick(x,['symbol','stockSymbol','securitySymbol'])||'—',pick(x,['buyerBroker','buyer','buyerBrokerCode'])||'—',pick(x,['sellerBroker','seller','sellerBrokerCode'])||'—',pick(x,['quantity','contractQuantity','tradedQuantity'])||'—',pick(x,['rate','price','contractPrice'])||'—',money(pick(x,['amount','turnover','totalAmount','contractAmount']))]);return table(['Symbol','Buyer','Seller','Qty','Rate','Amount'],rows)||'<div class="v25-data">No verified floorsheet rows returned.</div>'})}
+ async function brokers(){return render('Broker Analysis',async()=>{const d=await get('/api/brokers');const a=arr(d.data||d);const rows=a.slice(0,100).map(x=>[pick(x,['broker','brokerId','name'])||'—',money(pick(x,['buyValue','buy'])) ,money(pick(x,['sellValue','sell'])),money(pick(x,['net','netFlow'])),pick(x,['trades','transactions'])||'—']);return table(['Broker','Buy','Sell','Net','Trades'],rows)||'<div class="v25-data">No broker flow is available.</div>'})}
+ async function sectors(){return render('Sector Heatmap',async()=>{const d=await get('/api/sectors');const a=arr(d.data||d);const rows=a.map(x=>[pick(x,['sector','index','name'])||'—',pick(x,['change','pointChange'])??'—',pick(x,['changePercent','percentageChange','perChange'])??'—',money(pick(x,['turnover','totalTurnover'])),pick(x,['advancing','advancers'])??'—',pick(x,['declining','decliners'])??'—']);return table(['Sector','Change','%','Turnover','Adv','Dec'],rows)||'<div class="v25-data">No sector data returned.</div>'})}
+ async function command(){return render('Command Center',async()=>{const d=await get('/api/command-center');const s=d.summary||{};return `<div class="v25-grid">${[['NEPSE',s.nepse],['Turnover',money(s.turnover)],['Volume',s.volume??'—'],['Transactions',s.transactions??'—'],['Advancing',s.advancing??'—'],['Declining',s.declining??'—'],['Unchanged',s.unchanged??'—'],['Scrips Traded',s.scripsTraded??'—']].map(x=>`<div class="v25-card"><h3>${esc(x[0])}</h3><p style="font-size:18px;font-weight:850;color:#172033">${esc(x[1]??'—')}</p></div>`).join('')}</div><div class="v25-note">Command Center is powered by the same central snapshot used by Home. No synthetic market values are generated.</div>`})}
+ async function fundamentals(){return render('Fundamental Analysis',async()=>`<div class="v25-status"><b>Search a symbol from Stock X-Ray</b><div class="v25-note">The central engine now exposes <code>/api/fundamentals/{symbol}</code>. It combines the connected company profile with available financial fields and leaves unavailable fields blank.</div></div><div class="v25-card"><h3>Available endpoints</h3><p>/api/fundamentals/{symbol}<br>/api/company/{symbol}<br>/api/stock-xray/{symbol}</p></div>`)}
+ window.PULSE_V25_OPEN_FEATURE=async function(name){
+   const n=String(name||'').toLowerCase();
+   if(n.includes('floor'))return floorsheet();
+   if(n.includes('broker'))return brokers();
+   if(n.includes('sector'))return sectors();
+   if(n.includes('command'))return command();
+   if(n.includes('fundamental'))return fundamentals();
+   if(n.includes('stock x-ray')){if(typeof openStockXRay==='function')return openStockXRay();}
+   if(n.includes('diagnostic'))return render('Feed Diagnostics',async()=>{const d=await get('/api/diagnostics');return `<div class="v25-grid">${Object.entries(d).map(([k,v])=>`<div class="v25-card"><h3>${esc(k)}</h3><p>${esc(typeof v==='object'?JSON.stringify(v):v)}</p></div>`).join('')}</div>`});
+   return command();
+ };
+ const oldOpen=window.openFeatureWorkspace;
+ window.openFeatureWorkspace=function(id,title){const label=String(title||id||'');if(/Command Center|Floorsheet|Brokers|Sector Heatmap|Fundamental/i.test(label)){return window.PULSE_V25_OPEN_FEATURE(label.replace(/^[^\w]+/,'').trim())}if(typeof oldOpen==='function')return oldOpen.apply(this,arguments);return window.PULSE_V25_OPEN_FEATURE(label)};
 })();
 </script>
 
