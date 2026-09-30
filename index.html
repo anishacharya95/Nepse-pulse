@@ -5113,7 +5113,36 @@ header.topbar .feature-btn{
  async function floorsheet(){return render('Floorsheet',async()=>{const d=await get('/api/floorsheet?limit=250');const a=arr(d.data||d);const rows=a.slice(0,150).map(x=>[pick(x,['symbol','stockSymbol','securitySymbol'])||'—',pick(x,['buyerBroker','buyer','buyerBrokerCode'])||'—',pick(x,['sellerBroker','seller','sellerBrokerCode'])||'—',pick(x,['quantity','contractQuantity','tradedQuantity'])||'—',pick(x,['rate','price','contractPrice'])||'—',money(pick(x,['amount','turnover','totalAmount','contractAmount']))]);return table(['Symbol','Buyer','Seller','Qty','Rate','Amount'],rows)||'<div class="v25-data">No verified floorsheet rows returned.</div>'})}
  async function brokers(){return render('Broker Analysis',async()=>{const d=await get('/api/brokers');const a=arr(d.data||d);const rows=a.slice(0,100).map(x=>[pick(x,['broker','brokerId','name'])||'—',money(pick(x,['buyValue','buy'])) ,money(pick(x,['sellValue','sell'])),money(pick(x,['net','netFlow'])),pick(x,['trades','transactions'])||'—']);return table(['Broker','Buy','Sell','Net','Trades'],rows)||'<div class="v25-data">No broker flow is available.</div>'})}
  async function sectors(){return render('Sector Heatmap',async()=>{const d=await get('/api/sectors');const a=arr(d.data||d);const rows=a.map(x=>[pick(x,['sector','index','name'])||'—',pick(x,['change','pointChange'])??'—',pick(x,['changePercent','percentageChange','perChange'])??'—',money(pick(x,['turnover','totalTurnover'])),pick(x,['advancing','advancers'])??'—',pick(x,['declining','decliners'])??'—']);return table(['Sector','Change','%','Turnover','Adv','Dec'],rows)||'<div class="v25-data">No sector data returned.</div>'})}
- async function command(){return render('Command Center',async()=>{const d=await get('/api/command-center');const s=d.summary||{};return `<div class="v25-grid">${[['NEPSE',s.nepse],['Turnover',money(s.turnover)],['Volume',s.volume??'—'],['Transactions',s.transactions??'—'],['Advancing',s.advancing??'—'],['Declining',s.declining??'—'],['Unchanged',s.unchanged??'—'],['Scrips Traded',s.scripsTraded??'—']].map(x=>`<div class="v25-card"><h3>${esc(x[0])}</h3><p style="font-size:18px;font-weight:850;color:#172033">${esc(x[1]??'—')}</p></div>`).join('')}</div><div class="v25-note">Command Center is powered by the same central snapshot used by Home. No synthetic market values are generated.</div>`})}
+ async function command(){return render('Command Center',async()=>{
+   const d=await get('/api/command-center');
+   if(!d || d.ok===false) throw new Error('Central Command Center returned no verified market snapshot');
+   const s=d.summary||{}, b=d.breadth||{}, n=d.nepse||{};
+   const nVal=pick(n,['close','currentValue','indexValue','value','latest','current']);
+   const nCh=pick(n,['change','pointChange','changeValue','difference']);
+   const nPct=pick(n,['perChange','percentChange','percentageChange','changePercent','pChange']);
+   const top=(d.movers||{}).gainers||[], low=(d.movers||{}).losers||[];
+   const turnover=(d.activity||{}).turnover||[], volume=(d.activity||{}).volume||[], transactions=(d.activity||{}).transactions||[];
+   const sectors=d.sectors||[];
+   const moverRows=a=>a.slice(0,5).map(x=>[pick(x,['symbol','ticker'])||'—',pick(x,['ltp','lastPrice','price','close'])??'—',pick(x,['perChange','percentChange','percentageChange','changePercent','pChange'])??'—']);
+   const activityRows=a=>a.slice(0,5).map(x=>[pick(x,['symbol','ticker'])||'—',money(pick(x,['turnover','amount','value','totalTurnover','totalAmount'])),pick(x,['quantity','volume','tradedShares','tradeQuantity'])??'—']);
+   const sectorRows=sectors.slice(0,8).map(x=>[pick(x,['sector','index','indexName','name'])||'—',pick(x,['changePercent','percentageChange','perChange','change'])??'—',money(pick(x,['turnover','totalTurnover']))]);
+   const cards=[
+     ['NEPSE',nVal===null?'—':Number(nVal).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})],
+     ['Change',nCh===null?'—':(Number(nCh)>=0?'+':'')+Number(nCh).toFixed(2)],
+     ['Change %',nPct===null?'—':(Number(nPct)>=0?'+':'')+Number(nPct).toFixed(2)+'%'],
+     ['Turnover',money(s.turnover)],['Volume',s.volume??'—'],['Transactions',s.transactions??'—'],
+     ['Advancing',b.advancing??'—'],['Declining',b.declining??'—'],['Unchanged',b.unchanged??'—'],['Scrips Traded',s.scripsTraded??'—']
+   ];
+   return `<div class="v25-grid">${cards.map(x=>`<div class="v25-card"><h3>${esc(x[0])}</h3><p style="font-size:18px;font-weight:850;color:#172033">${esc(x[1])}</p></div>`).join('')}</div>
+     <div class="v25-status"><div class="v25-statusline"><b>Central Feed</b><span class="v25-pill ${d.diagnostics?.errors?.length?'bad':'ok'}">${d.diagnostics?.errors?.length?'PARTIAL':'VERIFIED'}</span></div><div class="v25-note">${esc((d.counts?.live||0)+' live rows · '+(d.counts?.sectors||0)+' sectors · '+(d.counts?.gainers||0)+' gainers · '+(d.counts?.losers||0)+' losers')}</div></div>
+     <div class="v25-data"><h3 style="margin:0 0 8px">Top Gainers</h3>${table(['Symbol','LTP','CH %'],moverRows(top))}</div>
+     <div class="v25-data"><h3 style="margin:0 0 8px">Top Losers</h3>${table(['Symbol','LTP','CH %'],moverRows(low))}</div>
+     <div class="v25-data"><h3 style="margin:0 0 8px">Top Turnover</h3>${table(['Symbol','Value','Qty'],activityRows(turnover))}</div>
+     <div class="v25-data"><h3 style="margin:0 0 8px">Top Volume</h3>${table(['Symbol','Value','Qty'],activityRows(volume))}</div>
+     <div class="v25-data"><h3 style="margin:0 0 8px">Top Transactions</h3>${table(['Symbol','Value','Qty'],activityRows(transactions))}</div>
+     <div class="v25-data"><h3 style="margin:0 0 8px">Sector Snapshot</h3>${table(['Sector','CH %','Turnover'],sectorRows)}</div>
+     <div class="v25-note">Verified-source policy: the Command Center does not generate demo values. If a source is unavailable, that dataset remains empty and the feed reports the failure.</div>`
+ })}
  async function fundamentals(){return render('Fundamental Analysis',async()=>`<div class="v25-status"><b>Search a symbol from Stock X-Ray</b><div class="v25-note">The central engine now exposes <code>/api/fundamentals/{symbol}</code>. It combines the connected company profile with available financial fields and leaves unavailable fields blank.</div></div><div class="v25-card"><h3>Available endpoints</h3><p>/api/fundamentals/{symbol}<br>/api/company/{symbol}<br>/api/stock-xray/{symbol}</p></div>`)}
  window.PULSE_V25_OPEN_FEATURE=async function(name){
    const n=String(name||'').toLowerCase();

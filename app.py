@@ -575,30 +575,94 @@ async def api_stock_xray(symbol: str):
     return await get_xray(symbol)
 
 
-@app.get("/api/command-center")
-async def api_command_center():
-    m = await get_market()
-    summary_rows = arr(m.get("summary"))
+async def _command_market_snapshot():
+    # Build the Command Center from independent verified endpoints.
+    # A failure in one optional dataset must not blank the whole dashboard.
+    errors = []
+    result = {}
+    async def one(key, loader, default):
+        try:
+            result[key] = await loader()
+        except Exception as e:
+            result[key] = default
+            errors.append(f"{key}: {e}")
+    await asyncio.gather(
+        one("status", lambda: nepse_call(["market_status"]), {"isOpen": None}),
+        one("summary", lambda: nepse_call(["market_summary"]), []),
+        one("live", lambda: nepse_call(["live_market"]), []),
+        one("gainers", lambda: nepse_call(["top_gainers"], True), []),
+        one("losers", lambda: nepse_call(["top_losers"], True), []),
+        one("turnover", lambda: nepse_call(["top_turnover"], True), []),
+        one("trades", lambda: nepse_call(["top_traded_shares", "top_active"], True), []),
+        one("transactions", lambda: nepse_call(["top_transactions"], True), []),
+        one("index", lambda: get_index(), []),
+        one("sectors", lambda: get_sectors(), {"ok": False, "data": []}),
+    )
+    # If nepsepy is unavailable for an individual call, fill only that dataset from
+    # the public compatibility API rather than replacing good data with blanks.
+    public_routes = {
+        "status": "/IsNepseOpen", "summary": "/Summary", "live": "/LiveMarket",
+        "gainers": "/TopGainers", "losers": "/TopLosers",
+        "turnover": "/TopTenTurnoverScrips", "trades": "/TopTenTradeScrips",
+        "transactions": "/TopTenTransactionScrips", "index": "/NepseIndex",
+    }
+    for key, path in public_routes.items():
+        bad = result.get(key) in (None, []) or (key == "status" and result.get(key, {}).get("isOpen") is None)
+        if bad:
+            try:
+                result[key] = await public_get(path)
+            except Exception as e:
+                errors.append(f"fallback {key}: {e}")
+
+    summary_rows = arr(result.get("summary"))
     summary = {}
     for x in summary_rows:
         label = str(pick(x, ["detail", "label", "name"], "")).lower()
         val = pick(x, ["value", "val"])
         if "turnover" in label: summary["turnover"] = val
-        elif "shares" in label: summary["volume"] = val
+        elif "traded shares" in label or ("shares" in label and "capital" not in label): summary["volume"] = val
         elif "transaction" in label: summary["transactions"] = val
         elif "scrip" in label: summary["scripsTraded"] = val
-    live = arr(m.get("live"))
+        elif "market capitalization" in label and "float" not in label: summary["marketCap"] = val
+        elif "float market" in label: summary["floatMarketCap"] = val
+
+    live = arr(result.get("live"))
     adv = dec = unchanged = 0
     for x in live:
         p = num(pick(x, ["percentageChange", "percentChange", "perChange", "pChange"]))
         if p is None:
-            ch = num(pick(x, ["change", "pointChange"]))
-            p = ch
+            # Prefer actual previous-close/LTP difference when available.
+            ltp = num(pick(x, ["ltp", "lastPrice", "closePrice", "price"]))
+            prev = num(pick(x, ["previousClose", "previousClosingPrice", "prevClose"]))
+            p = (ltp - prev) if ltp is not None and prev is not None else None
         if p is None or p == 0: unchanged += 1
         elif p > 0: adv += 1
         else: dec += 1
-    summary.update({"advancing": adv, "declining": dec, "unchanged": unchanged, "nepse": await get_index()})
-    return {"ok": True, "updatedAt": now_iso(), "summary": summary, "market": m}
+
+    idx = result.get("index")
+    index_rows = arr(idx)
+    nepse_row = next((x for x in index_rows if "nepse" in str(pick(x, ["index", "indexName", "name"], "")).lower()), None)
+    if nepse_row is None and isinstance(idx, dict): nepse_row = idx
+
+    sectors = result.get("sectors")
+    sector_rows = arr(sectors.get("data") if isinstance(sectors, dict) else sectors)
+    return {
+        "ok": bool(summary_rows or live or index_rows or result.get("gainers")),
+        "updatedAt": now_iso(),
+        "summary": summary,
+        "breadth": {"advancing": adv, "declining": dec, "unchanged": unchanged},
+        "nepse": nepse_row or {},
+        "movers": {"gainers": arr(result.get("gainers")), "losers": arr(result.get("losers"))},
+        "activity": {"turnover": arr(result.get("turnover")), "volume": arr(result.get("trades")), "transactions": arr(result.get("transactions"))},
+        "sectors": sector_rows,
+        "marketOpen": pick(result.get("status"), ["isOpen", "marketOpen"]),
+        "counts": {"live": len(live), "gainers": len(arr(result.get("gainers"))), "losers": len(arr(result.get("losers"))), "sectors": len(sector_rows)},
+        "diagnostics": {"errors": errors, "listedSymbols": 461, "verifiedOnly": True},
+    }
+
+@app.get("/api/command-center")
+async def api_command_center():
+    return await cached("command:center", _command_market_snapshot)
 
 
 @app.get("/api/diagnostics")
