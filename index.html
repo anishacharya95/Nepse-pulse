@@ -1,7 +1,8 @@
 <!doctype html>
 <html lang="en">
 <head>
-<script src="config.js?v=3"></script>
+<script>window.NEPSE_PULSE_BACKEND_URL = 'https://nepse-pulse-1.onrender.com';</script>
+<script src="config.js?v=4"></script>
 <script src="auth-config.js?v=1"></script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
@@ -1895,7 +1896,7 @@ window.PULSE_FEED_STATUS='CONNECTING'; window.PULSE_FEED_TIMESTAMP='—';
    Cache: last successful normalized snapshot.
    ========================= */
 const PULSE_FEED_CONFIG = {
-  apiBase: window.NEPSE_PULSE_BACKEND_URL || 'https://nepse-pulse.onrender.com',
+  apiBase: window.NEPSE_PULSE_BACKEND_URL || 'https://nepse-pulse-1.onrender.com',
   proxyBase: '/api/nepse',
   wsUrl: 'wss://nepseapiws.surajrimal.dev/',
   pollMs: 60000,
@@ -4977,15 +4978,7 @@ document.addEventListener('DOMContentLoaded',()=>{
 
 <script>
 window.addEventListener('error', function(e){
-  try {
-    window.PULSE_FEED_STATUS = 'OFFLINE';
-    const el = document.getElementById('feedState');
-    if (el) el.textContent = 'OFFLINE';
-    const ms = document.getElementById('marketStatusValue');
-    if (ms) ms.textContent = 'OFFLINE';
-    const md = document.getElementById('marketStatusDetail');
-    if (md) md.textContent = (e && e.message) ? e.message : 'Feed initialization error';
-  } catch (_) {}
+  console.warn('NEPSE Pulse frontend error:', e && e.message ? e.message : e);
 });
 </script>
 
