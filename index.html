@@ -1106,6 +1106,136 @@ main>.hero, main>.search, main>.section-head, main>.market, main>.feed-debug{
 @media(max-width:480px){.np-splash-loader{width:50%;height:7px;bottom:10.45%}.np-splash-loading{bottom:7.55%;font-size:12px;letter-spacing:4px}}
 @media(prefers-reduced-motion:reduce){.np-splash-progress{animation-duration:1.2s}.np-splash-shine{animation:none;display:none}.np-splash-loader{transition:none}}
 </style>
+
+<style id="v24-4-liquidity-row-fix">
+/* V24.4: keep Market Activity VALUE and LTP on the same horizontal row. */
+#pulse-home-market-dashboard .pulse-liquidity-card #pulseLiquidityRows .pulse-row {
+  display:grid!important;
+  grid-template-columns:minmax(0,1.45fr) minmax(88px,1fr) minmax(78px,.95fr)!important;
+  grid-auto-flow:column!important;
+  align-items:center!important;
+  column-gap:10px!important;
+  row-gap:0!important;
+  min-width:0!important;
+  white-space:nowrap!important;
+}
+#pulse-home-market-dashboard .pulse-liquidity-card #pulseLiquidityRows .pulse-row > b,
+#pulse-home-market-dashboard .pulse-liquidity-card #pulseLiquidityRows .pulse-row > span {
+  min-width:0!important;
+  white-space:nowrap!important;
+  overflow:hidden!important;
+  text-overflow:ellipsis!important;
+  display:block!important;
+}
+#pulse-home-market-dashboard .pulse-liquidity-card #pulseLiquidityRows .pulse-row > span:nth-child(2),
+#pulse-home-market-dashboard .pulse-liquidity-card #pulseLiquidityRows .pulse-row > span:nth-child(3) {
+  text-align:right!important;
+}
+#pulse-home-market-dashboard .pulse-liquidity-card #pulseLiquidityRows .pulse-row > span:nth-child(3) {
+  overflow:visible!important;
+  text-overflow:clip!important;
+}
+@media(max-width:380px){
+  #pulse-home-market-dashboard .pulse-liquidity-card #pulseLiquidityRows .pulse-row {
+    grid-template-columns:minmax(0,1.28fr) minmax(78px,1fr) minmax(72px,.95fr)!important;
+    column-gap:7px!important;
+    padding-left:4px!important;
+    padding-right:4px!important;
+    font-size:13px!important;
+  }
+}
+</style>
+
+<style id="v24-5-movers-row-fix">
+/* V24.5: keep Market Movers symbol/change/change%/LTP on one stable row. */
+#pulse-home-market-dashboard .pulse-movers-card .pulse-row{
+  display:grid!important;
+  grid-template-columns:minmax(0,1.35fr) .72fr .82fr .72fr!important;
+  gap:6px!important;
+  align-items:center!important;
+  width:100%!important;
+  box-sizing:border-box!important;
+  min-height:48px!important;
+  padding:9px 4px!important;
+  border-top:1px solid #edf0f3!important;
+  font-size:15px!important;
+  line-height:1.2!important;
+}
+#pulse-home-market-dashboard .pulse-movers-card .pulse-row:first-child{border-top:0!important}
+#pulse-home-market-dashboard .pulse-movers-card .pulse-row > b,
+#pulse-home-market-dashboard .pulse-movers-card .pulse-row > span{
+  min-width:0!important;
+  white-space:nowrap!important;
+  overflow:hidden!important;
+  text-overflow:ellipsis!important;
+}
+#pulse-home-market-dashboard .pulse-movers-card .pulse-row > span{text-align:right!important}
+#pulse-home-market-dashboard .pulse-movers-card .pulse-row > b{font-weight:700!important}
+#pulse-home-market-dashboard .pulse-movers-card .v22-star{
+  display:inline-flex!important;
+  width:22px!important; height:22px!important;
+  min-width:22px!important;
+  padding:0!important; margin-left:6px!important;
+  align-items:center!important; justify-content:center!important;
+  border:0!important; background:transparent!important;
+  font-size:16px!important; line-height:1!important;
+  vertical-align:middle!important;
+}
+@media(max-width:380px){
+  #pulse-home-market-dashboard .pulse-movers-card .pulse-row{
+    grid-template-columns:minmax(0,1.25fr) .78fr .88fr .78fr!important;
+    gap:4px!important; padding-left:7px!important; padding-right:7px!important; font-size:13px!important;
+  }
+}
+</style>
+
+
+<style id="v24-6-exact-movers-columns">
+/* V24.6: exact Market Movers order: SYMBOL | CH | CH % | LTP */
+#pulse-home-market-dashboard .pulse-movers-card .pulse-table-head,
+#pulse-home-market-dashboard .pulse-movers-card .pulse-row {
+  display:grid !important;
+  grid-template-columns: minmax(0,1.55fr) minmax(48px,.78fr) minmax(58px,.88fr) minmax(58px,.82fr) !important;
+  column-gap:8px !important;
+  align-items:center !important;
+  width:100% !important;
+  box-sizing:border-box !important;
+}
+#pulse-home-market-dashboard .pulse-movers-card .pulse-table-head span,
+#pulse-home-market-dashboard .pulse-movers-card .pulse-row > span,
+#pulse-home-market-dashboard .pulse-movers-card .pulse-row > b {
+  min-width:0 !important;
+  white-space:nowrap !important;
+  overflow:hidden !important;
+  text-overflow:ellipsis !important;
+}
+#pulse-home-market-dashboard .pulse-movers-card .pulse-table-head span:not(:first-child),
+#pulse-home-market-dashboard .pulse-movers-card .pulse-row > span {
+  text-align:right !important;
+}
+#pulse-home-market-dashboard .pulse-movers-card .pulse-table-head span:first-child,
+#pulse-home-market-dashboard .pulse-movers-card .pulse-row > b {
+  text-align:left !important;
+}
+#pulse-home-market-dashboard .pulse-movers-card .pulse-row {
+  min-height:48px !important;
+  padding:9px 4px !important;
+  line-height:1.2 !important;
+}
+#pulse-home-market-dashboard .pulse-movers-card .v22-star {
+  display:none !important;
+}
+@media(max-width:380px){
+  #pulse-home-market-dashboard .pulse-movers-card .pulse-table-head,
+  #pulse-home-market-dashboard .pulse-movers-card .pulse-row {
+    grid-template-columns:minmax(0,1.35fr) minmax(42px,.76fr) minmax(54px,.86fr) minmax(54px,.80fr) !important;
+    column-gap:5px !important;
+    padding-left:4px !important; padding-right:4px !important;
+    font-size:13px !important;
+  }
+}
+</style>
+
 </head>
 <body>
 <div id="nepse-pulse-splash" aria-label="NEPSE Pulse loading">
@@ -4414,14 +4544,20 @@ document.addEventListener('DOMContentLoaded',()=>{
     }
     return null;
   };
-  const normalize=v=>arr(v).map(o=>({
-    date:String(pick(o,['date','businessdate','timestamp','tradedate','time'])||''),
-    open:n(pick(o,['open','openingprice'])),
-    high:n(pick(o,['high','highprice','dayhigh'])),
-    low:n(pick(o,['low','lowprice','daylow'])),
-    close:n(pick(o,['close','closingprice','ltp','lasttradedprice','price','index','value'])),
-    volume:n(pick(o,['volume','tradedshares','quantity']))
-  })).filter(x=>x.close!==null || (x.open!==null&&x.high!==null&&x.low!==null));
+  const normalize=v=>arr(v).map((o)=>{
+    if(Array.isArray(o)){
+      const ts=n(o[0]); const val=n(o[1]);
+      return {date:ts?new Date(ts).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}):'',open:null,high:null,low:null,close:val,volume:null};
+    }
+    return {
+      date:String(pick(o,['date','businessdate','timestamp','tradedate','time'])||''),
+      open:n(pick(o,['open','openingprice'])),
+      high:n(pick(o,['high','highprice','dayhigh'])),
+      low:n(pick(o,['low','lowprice','daylow'])),
+      close:n(pick(o,['close','closingprice','ltp','lasttradedprice','price','index','value'])),
+      volume:n(pick(o,['volume','tradedshares','quantity']))
+    };
+  }).filter(x=>x.close!==null || (x.open!==null&&x.high!==null&&x.low!==null));
 
   function getState(){
     try{
@@ -4563,7 +4699,7 @@ document.addEventListener('DOMContentLoaded',()=>{
     // YONEPSE publishes the historical market-summary series at this endpoint.
     try{
       if(window.PULSE_FEED_ENGINE?.fetchJSON){
-        raw=await window.PULSE_FEED_ENGINE.fetchJSON('/MarketHistory');
+        raw=await fetch('https://nepseapi.surajrimal.dev/DailyNepseIndexGraph',{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw new Error('index graph HTTP '+r.status);return r.json();});
       }
     }catch(e){}
 
@@ -4799,7 +4935,7 @@ header.topbar .feature-btn{
   function decorateMovers(){
     document.querySelectorAll('#pulseMoversRows .pulse-table-row').forEach(row=>{
       if(row.dataset.v23done)return;const first=row.querySelector('span');if(!first)return;const sym=(first.textContent||'').trim().split(/\s+/)[0].toUpperCase();if(!sym)return;row.dataset.v23done='1';
-      const cell=document.createElement('button');cell.className='v22-star';cell.type='button';const active=getList().includes(sym);cell.textContent=active?'★':'☆';if(active)cell.classList.add('active');cell.title='Add to watchlist';cell.onclick=()=>window.v23Toggle(sym);row.appendChild(cell);row.style.gridTemplateColumns='minmax(0,1.35fr) .7fr .8fr .7fr 38px';
+      const cell=document.createElement('button');cell.className='v22-star';cell.type='button';const active=getList().includes(sym);cell.textContent=active?'★':'☆';if(active)cell.classList.add('active');cell.title='Add to watchlist';cell.onclick=()=>window.v23Toggle(sym);const firstCell=row.querySelector('b'); if(firstCell) firstCell.appendChild(cell);
     });
   }
   window.addEventListener('load',()=>{render();init();decorateMovers();});
@@ -4828,6 +4964,7 @@ header.topbar .feature-btn{
   setTimeout(function(){if(!ready)hide()},5200);
 })();
 </script>
+\n<style id="v24-7-nepse-index-chart-fix">\n/* V24.7: compact NEPSE market card + screenshot-inspired chart controls */\n#pulse-home-market-dashboard .pulse-market-strip{position:relative;background:#fff;border:1px solid #e1e7eb;border-radius:24px;padding:22px 22px 18px;box-shadow:0 8px 28px rgba(14,30,37,.06)}\n#pulse-home-market-dashboard .pulse-market-head{margin-bottom:12px}\n#pulse-home-market-dashboard .pulse-market-name{font-size:22px;font-weight:800;color:#172033}\n#pulse-home-market-dashboard .pulse-market-arrow{display:none}\n#pulse-home-market-dashboard .pulse-market-values{display:grid;grid-template-columns:1.2fr 1fr 1fr auto;gap:10px;align-items:stretch}\n#pulse-home-market-dashboard .pulse-market-box{min-width:0;background:#f4f7f8;border-radius:16px;padding:14px 12px;font-size:22px;font-weight:800;color:#172033;text-align:left}\n#pulse-home-market-dashboard .pulse-market-status{display:flex;align-items:center;justify-content:center;min-width:92px;border-radius:16px;padding:0 16px;font-weight:800;color:#fff;background:#ff5b60}\n#pulse-home-market-dashboard .pulse-market-meta{display:flex;justify-content:space-between;gap:10px;margin-top:14px;font-size:13px;font-weight:700;color:#5c6673}\n.nepse-chart-card{position:relative;overflow:hidden;background:#fff}\n.nepse-chart-head{padding-right:150px}\n.nepse-chart-switch{position:absolute;right:18px;top:18px;display:flex;background:#e8eff1;border-radius:999px;padding:3px;z-index:2}\n.nepse-chart-switch button{border:0;background:transparent;padding:10px 20px;border-radius:999px;font-weight:800;font-size:15px;cursor:pointer}\n.nepse-chart-switch button.active{background:#073f40;color:#fff}\n.nepse-chart-wrap{height:300px;background:#fff;margin-top:12px}\n.nepse-chart-ranges{display:flex;gap:10px;overflow-x:auto;padding:12px 4px 4px;scrollbar-width:none}\n.nepse-chart-ranges::-webkit-scrollbar{display:none}\n.nepse-chart-ranges button{border:0;background:#e8eff1;border-radius:14px;padding:12px 18px;font-weight:800;font-size:15px;white-space:nowrap}\n.nepse-chart-ranges button.active{background:#073f40;color:#fff}\n@media(max-width:640px){\n #pulse-home-market-dashboard .pulse-market-values{grid-template-columns:1.25fr 1fr 1fr;gap:8px}\n #pulse-home-market-dashboard .pulse-market-status{grid-column:3;grid-row:1;min-height:48px}\n #pulse-home-market-dashboard .pulse-market-box{font-size:20px;padding:13px 10px}\n #pulse-home-market-dashboard .pulse-market-values .pulse-market-status{font-size:14px}\n .nepse-chart-head{padding-right:0;min-height:62px}\n .nepse-chart-switch{position:relative;right:auto;top:auto;width:max-content;margin:0 0 4px auto}\n .nepse-chart-switch button{padding:9px 18px}\n .nepse-chart-wrap{height:290px}\n}\n</style>\n<script id="v24-7-index-bridge">\n(function(){\n  'use strict';\n  const API='https://nepseapi.surajrimal.dev';\n  let idxData=null;\n  const n=v=>{if(v===null||v===undefined||v==='')return null;const x=Number(String(v).replace(/,/g,''));return Number.isFinite(x)?x:null};\n  const pick=(o,keys)=>{if(!o||typeof o!=='object')return null;const m={};Object.keys(o).forEach(k=>m[k.toLowerCase().replace(/[^a-z0-9]/g,'')]=o[k]);for(const k of keys){const v=m[k.toLowerCase().replace(/[^a-z0-9]/g,'')];if(v!==undefined&&v!==null)return v}return null};\n  const arr=v=>{if(Array.isArray(v))return v;if(!v||typeof v!=='object')return[];for(const k of ['data','result','results','content','records','rows','items'])if(Array.isArray(v[k]))return v[k];return Object.values(v).filter(x=>x&&typeof x==='object')};\n  const money=v=>{const x=n(v);if(x===null)return '—';if(x>=1000000000)return (x/1000000000).toFixed(2)+' Arab';if(x>=10000000)return (x/10000000).toFixed(2)+' Cr';if(x>=100000)return (x/100000).toFixed(2)+' Lakh';return x.toLocaleString(undefined,{maximumFractionDigits:2})};\n  function extract(raw){\n    let candidates=arr(raw);\n    const nepse=candidates.find(x=>String(pick(x,['index','name','indexname','symbol'])||'').toLowerCase().replace(/[^a-z]/g,'').includes('nepse'))||candidates[0]||raw;\n    return {value:n(pick(nepse,['close','currentvalue','value','indexvalue','latest','current'])),change:n(pick(nepse,['change','pointchange','changevalue','difference'])),pct:n(pick(nepse,['perchange','percentchange','percentagechange','changepercent','pchange'])),date:pick(nepse,['businessdate','date','timestamp','time'])};\n  }\n  function paint(){\n    if(!idxData)return;\n    const d=idxData;\n    const set=(sel,text)=>{const e=document.querySelector(sel);if(e)e.textContent=text};\n    set('[data-market="index"]',d.value===null?'—':d.value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}));\n    set('[data-market="points"]',d.change===null?'—':(d.change>=0?'+':'')+d.change.toFixed(2));\n    set('[data-market="percent"]',d.pct===null?'—':(d.pct>=0?'+':'')+d.pct.toFixed(2)+'%');\n    set('#nepseIndexValue',d.value===null?'—':d.value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}));\n    const c=document.getElementById('nepseIndexChange'); if(c){c.textContent=(d.change===null?'Index change unavailable':(d.change>=0?'+':'')+d.change.toFixed(2)+(d.pct===null?'':' ('+(d.pct>=0?'+':'')+d.pct.toFixed(2)+'%)'));c.className='market-label change '+(d.change>0?'up':d.change<0?'down':'')}\n    const sub=document.getElementById('nepseChartSubtitle'); if(sub)sub.textContent=d.value===null?'Index performance':'NEPSE '+d.value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})+(d.pct===null?'':' · '+(d.pct>=0?'+':'')+d.pct.toFixed(2)+'%');\n  }\n  async function load(){\n    try{\n      const r=await fetch(API+'/NepseIndex',{cache:'no-store',headers:{Accept:'application/json'}});\n      if(!r.ok)throw new Error('index '+r.status);\n      idxData=extract(await r.json());\n      paint();\n      window.PULSE_LIVE_INDEX=idxData;\n      window.dispatchEvent(new CustomEvent('pulse-index-ready',{detail:idxData}));\n    }catch(e){\n      // Keep existing feed/cache visible; never blank the market card on index failure.\n    }\n  }\n  window.addEventListener('pulse-central-snapshot',paint);\n  load();\n  setInterval(load,60000);\n})();\n</script>\n
 </body>
 </html><script>
 // NEPSE Pulse Professional Charting V1 extension
