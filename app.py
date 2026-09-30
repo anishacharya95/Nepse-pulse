@@ -201,6 +201,11 @@ async def get_market():
                 nepse_call(["top_traded_shares", "top_active"], True),
                 nepse_call(["top_transactions"], True),
             )
+            if not arr(live):
+                try:
+                    live = await nepse_call(["today_price"], page=1, size=500)
+                except Exception as e:
+                    errors.append(f"today_price: {e}")
             indices = await nepse_call(["nepse_indices", "nepse_index"])
             companies = await nepse_call(["companies", "securities"])
             return {
@@ -211,7 +216,7 @@ async def get_market():
                 "marketOpen": pick(status, ["isOpen", "marketOpen"], None),
                 "status": status,
                 "summary": summary,
-                "index": indices,
+                "index": normalize_index(indices),
                 "live": live,
                 "gainers": gainers,
                 "losers": losers,
@@ -255,10 +260,31 @@ async def get_market():
     return await cached("market:core", load)
 
 
+def normalize_index(raw: Any):
+    if isinstance(raw, dict):
+        # Some NEPSE responses wrap the index rows in data/content/results.
+        for key in ("data", "content", "results", "result", "items", "records", "rows"):
+            value = raw.get(key)
+            if isinstance(value, list):
+                for row in value:
+                    if isinstance(row, dict):
+                        return row
+            elif isinstance(value, dict):
+                return value
+        return raw
+    if isinstance(raw, list):
+        for row in raw:
+            if isinstance(row, dict):
+                # Prefer the actual NEPSE index (id 58 / symbol NEPSE) when present.
+                if str(pick(row, ["index", "symbol", "indexName", "name"], "")).upper() == "NEPSE" or str(pick(row, ["id", "indexId"], "")) == "58":
+                    return row
+        return next((row for row in raw if isinstance(row, dict)), {})
+    return {}
+
 async def get_index():
     async def load():
         try:
-            return await nepse_call(["nepse_indices", "nepse_index"])
+            return normalize_index(await nepse_call(["nepse_indices", "nepse_index"]))
         except Exception:
             return await public_get("/NepseIndex")
     return await cached("index:current", load)
@@ -619,6 +645,14 @@ async def command_center():
         if p>0: breadth['advancing']+=1
         elif p<0: breadth['declining']+=1
         else: breadth['unchanged']+=1
+    if not live:
+        # If the live snapshot is temporarily unavailable, use the verified
+        # top-gainer/top-loser counts and the session's traded-scrip total.
+        breadth['advancing'] = len(arr(results.get('gainers')) or arr(m.get('gainers')))
+        breadth['declining'] = len(arr(results.get('losers')) or arr(m.get('losers')))
+        traded = summary.get('scripsTraded')
+        if traded is not None:
+            breadth['unchanged'] = max(int(traded) - breadth['advancing'] - breadth['declining'], 0)
     def clean(xs): return arr(xs)[:50]
     return {"ok":True,"updatedAt":now_iso(),"summary":summary,"breadth":breadth,"nepse":idx,"movers":{"gainers":clean(results.get('gainers')) or arr(m.get('gainers')),"losers":clean(results.get('losers')) or arr(m.get('losers'))},"activity":{"turnover":clean(results.get('turnover')) or arr(m.get('topTurnover')),"volume":clean(results.get('volume')) or arr(m.get('topTraded')),"transactions":clean(results.get('transactions')) or arr(m.get('topTransactions'))},"sectors":arr((results.get('sectors') or {}).get('data')) if isinstance(results.get('sectors'),dict) else arr(results.get('sectors')),"brokers":arr((results.get('brokers') or {}).get('data')) if isinstance(results.get('brokers'),dict) else arr(results.get('brokers')),"counts":{"live":len(live),"gainers":len(clean(results.get('gainers')) or arr(m.get('gainers'))),"losers":len(clean(results.get('losers')) or arr(m.get('losers'))),"sectors":len(arr((results.get('sectors') or {}).get('data')) if isinstance(results.get('sectors'),dict) else arr(results.get('sectors')))},"diagnostics":{"errors":errors,"marketSource":m.get('source') if isinstance(m,dict) else None}}
 
