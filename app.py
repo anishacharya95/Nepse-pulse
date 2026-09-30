@@ -108,7 +108,7 @@ async def build_market(force: bool = False) -> dict:
         # Keep requests controlled: the library itself handles the public session/token.
         status = await call_optional(client, ["market_status"])
         summary = await call_optional(client, ["market_summary", "get_market_summary"])
-        index = await call_optional(client, ["nepse_index", "get_nepse_index"])
+        index = await call_optional(client, ["nepse_indices", "nepse_index", "get_nepse_index"])
         prices = await call_optional(client, ["today_price"], page=1, size=500)
         if isinstance(prices, dict) and "__error__" in prices:
             prices = []
@@ -126,8 +126,8 @@ async def build_market(force: bool = False) -> dict:
             call_optional(client, ["top_losers"]),
             call_optional(client, ["nepse_subindices", "sub_indices", "get_sub_indices"]),
             call_optional(client, ["top_turnover"]),
-            call_optional(client, ["top_transaction"]),
-            call_optional(client, ["top_trade"]),
+            call_optional(client, ["top_transactions", "top_transaction"]),
+            call_optional(client, ["top_traded_shares", "top_trade"]),
         )
 
     def clean(name: str, value: Any):
