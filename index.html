@@ -4777,3 +4777,58 @@ document.addEventListener('click',function(e){
   if(b){window.NEPSE_PULSE_MOVER_MODE=b.dataset.moverTab;}
 },true);
 </script>
+  <script>
+(function(){
+  var mode='turnover';
+  var K={
+    turnover:['turnover','totalTradedValue','value','amount'],
+    volume:['volume','totalTradedQuantity','tradedShares','totalTradedShares','quantity','shares'],
+    transactions:['transactions','totalTransactions','numberOfTransactions','noOfTransactions','totalTrades','tradeCount','trades'],
+    price:['ltp','lastPrice','lastTradedPrice','close','price','closePrice'],
+    symbol:['symbol','stockSymbol','securitySymbol','ticker']
+  };
+  function num(v){if(v===null||v===undefined||v==='')return null;var n=Number(String(v).replace(/,/g,''));return isFinite(n)?n:null;}
+  function pick(o,keys){
+    if(!o||typeof o!=='object')return null;
+    var m={};Object.keys(o).forEach(function(k){m[k.toLowerCase().replace(/[^a-z0-9]/g,'')]=o[k];});
+    for(var i=0;i<keys.length;i++){var v=m[keys[i].toLowerCase().replace(/[^a-z0-9]/g,'')];if(v!==undefined&&v!==null&&v!=='')return v;}
+    return null;
+  }
+  function money(v){if(v===null)return '—';if(Math.abs(v)>=1e9)return (v/1e9).toFixed(2)+' Arab';if(Math.abs(v)>=1e7)return (v/1e7).toFixed(2)+' Crore';return v.toLocaleString(undefined,{maximumFractionDigits:0});}
+  function whole(v){return v===null?'—':v.toLocaleString(undefined,{maximumFractionDigits:0});}
+  function rows(){
+    var d=window.NEPSE_PULSE_LIVE_DATA;
+    if(d&&Array.isArray(d.live)&&d.live.length)return d.live;
+    try{var s=PulseFeedEngine.state();if(s&&Array.isArray(s.live))return s.live;}catch(e){}
+    return [];
+  }
+  function render(){
+    var box=document.getElementById('pulseLiquidityRows');
+    var r=rows();
+    if(!box||!r.length)return;
+    var list=r.map(function(o){
+      return {s:String(pick(o,K.symbol)||'—'),v:num(pick(o,K[mode])),p:num(pick(o,K.price))};
+    }).filter(function(x){return x.v!==null;})
+      .sort(function(a,b){return b.v-a.v;}).slice(0,10);
+    box.innerHTML=list.length?list.map(function(x){
+      return '<div class="pulse-table-row" data-liq="'+mode+'"><span>'+x.s+'</span><span>'+(mode==='turnover'?money(x.v):whole(x.v))+'</span><span>'+(x.p===null?'—':x.p.toFixed(2))+'</span></div>';
+    }).join(''):'<div class="empty-feed" data-liq="'+mode+'">The API returned no '+mode+' data.</div>';
+  }
+  document.addEventListener('click',function(e){
+    var b=e.target.closest('[data-liq-tab]');
+    if(!b)return;
+    mode=b.getAttribute('data-liq-tab');
+    document.querySelectorAll('[data-liq-tab]').forEach(function(x){x.classList.toggle('active',x===b);});
+    setTimeout(render,50);
+  },true);
+  var box0=document.getElementById('pulseLiquidityRows');
+  if(box0&&window.MutationObserver){
+    new MutationObserver(function(){
+      var f=box0.firstElementChild;
+      if(f&&f.getAttribute('data-liq')===mode)return;
+      render();
+    }).observe(box0,{childList:true});
+  }
+  setTimeout(render,1500);
+})();
+</script>
