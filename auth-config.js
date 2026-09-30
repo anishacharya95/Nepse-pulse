@@ -1,6 +1,7 @@
 // NEPSE Pulse V23 authentication configuration.
-// Public Supabase project URL + anon key only. Never put a service_role/secret key here.
+// Use the Supabase PROJECT URL and PUBLIC ANON KEY only.
+// Never put a Supabase service_role key in this file.
 window.NEPSE_PULSE_AUTH = {
-  supabaseUrl: 'https://kymqmcgzjvbbgngfxnig.supabase.co',
-  supabaseAnonKey: 'sb_publishable_-b-1p648j1ULm1tc15UtZA_COawFIPK'
+  supabaseUrl: '',
+  supabaseAnonKey: ''
 };
