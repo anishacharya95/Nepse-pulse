@@ -4683,35 +4683,25 @@ document.addEventListener('DOMContentLoaded',()=>{
       });
     }
 
-    // Current value label
-    const last=data[data.length-1]?.close;
-    if(last!==null&&last!==undefined){
-      ctx.fillStyle='#0b4e4b';
-      ctx.font='700 12px system-ui,sans-serif';
-      ctx.fillText('NEPSE  '+fmt(last),left+5,12);
-    }
+
   }
 
   async function loadHistory(){
-    const state=getState();
     let raw=null;
-
-    // YONEPSE publishes the historical market-summary series at this endpoint.
+    let ok=false;
+    const backend=(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse.onrender.com').replace(/\/$/,'');
     try{
-      const backend=(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse.onrender.com').replace(/\/$/,'');
-      try{
+      if(range==='1D'){
+        raw=await fetch(backend+'/DailyNepseIndexGraph',{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw new Error('intraday graph HTTP '+r.status);return r.json();});
+      }else{
         raw=await fetch(backend+'/api/history?index=58',{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw new Error('history HTTP '+r.status);return r.json();});
-      }catch(e){
-        raw=await fetch('https://nepseapi.surajrimal.dev/DailyNepseIndexGraph',{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw new Error('index graph HTTP '+r.status);return r.json();});
       }
-    }catch(e){}
-
-    history=normalize(raw);
-
-    // If the history endpoint is unavailable, fall back to the index snapshot.
-    if(!history.length && state.index){
-      history=normalize(state.index);
+      ok=true;
+    }catch(e){
+      console.warn('NEPSE real chart unavailable:',e);
     }
+    history=ok?normalize(raw):[];
+    if(subtitle) subtitle.textContent=history.length ? (range==='1D'?'Verified intraday NEPSE index':'Verified NEPSE index history') : 'Real market history unavailable';
     draw();
   }
 
@@ -4723,7 +4713,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   $('[data-nepse-range]').forEach(b=>b.addEventListener('click',()=>{
     range=b.dataset.nepseRange;
     $('[data-nepse-range]').forEach(x=>x.classList.toggle('active',x===b));
-    draw();
+    loadHistory();
   }));
 
   window.addEventListener('pulse-central-snapshot',()=>{loadHistory()});
