@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: nepse-pulse
+    name: Nepse-pulse-1
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
