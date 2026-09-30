@@ -1574,9 +1574,10 @@ const PULSE_FEED_CONFIG = {
   apiBase: window.NEPSE_PULSE_BACKEND_URL || 'https://nepseapi.surajrimal.dev',
   proxyBase: '/api/nepse',
   wsUrl: 'wss://nepseapiws.surajrimal.dev/',
-  pollMs: 30000,
-  timeoutMs: 12000,
-  cacheKey: 'nepsePulseCentralFeedV19',
+  pollMs: 60000,
+  closedPollMs: 180000,
+  timeoutMs: 9000,
+  cacheKey: 'nepsePulseCentralFeedV24',
   listedSymbols: 461
 };
 
@@ -1624,7 +1625,7 @@ const PulseFeedEngine = (()=>{
     if(path==='/market' && window.NEPSE_PULSE_BACKEND_URL){
       const base=String(window.NEPSE_PULSE_BACKEND_URL).replace(/\/$/,'');
       const c=await withTimeout(async(signal)=>{
-        const r=await fetch(base+'/api/market?force=true',{cache:'no-store',signal,headers:{Accept:'application/json'}});
+        const r=await fetch(base+'/api/market',{cache:'no-store',signal,headers:{Accept:'application/json'}});
         if(!r.ok) throw new Error('NEPSE Pulse backend HTTP '+r.status);
         return await r.json();
       },'/api/market');
@@ -1651,27 +1652,88 @@ const PulseFeedEngine = (()=>{
     const m=path.match(/^\/([^?]+)(?:\?(.+))?$/); const route='/'+(m?m[1]:''); const query=m&&m[2]?m[2]:'';
     const data=await fetchRoute(route,query); return {ok:true,data};
   };
-  const persist=()=>{try{localStorage.setItem(PULSE_FEED_CONFIG.cacheKey,JSON.stringify({version:19,...state}))}catch(e){}};
-  const restore=()=>{try{const c=JSON.parse(localStorage.getItem(PULSE_FEED_CONFIG.cacheKey)||'null');if(c&&Array.isArray(c.live)&&c.live.length){Object.assign(state,c,{status:'CACHED'});return true}}catch(e){}return false};
-  const setStatus=(s,e)=>{state.status=s;state.lastError=e||null;window.PULSE_FEED_STATUS=s;window.PULSE_FEED_TIMESTAMP=state.updatedAt||'—';emit()};
-  const loadCore=async()=>{
-    setStatus('CONNECTING','Connecting to NEPSE API…');
+  let refreshInFlight=null;
+  const persist=()=>{try{localStorage.setItem(PULSE_FEED_CONFIG.cacheKey,JSON.stringify({version:24,savedAt:Date.now(),...state}))}catch(e){}};
+  const restore=()=>{
     try{
-      const d=await fetchJSON('/market');
-      const rows=normalizeLive(d.live);
-      if(!rows.length)throw new Error('NEPSE API returned 0 stock rows');
-      state.live=rows; state.companies=arr(d.companies).length?d.companies:rows; state.gainers=normalizeLive(d.gainers); state.losers=normalizeLive(d.losers); state.index=normalizeIndex(d.index); state.summary=d.summary||{}; state.health=d.status||null; state.marketOpen=d.marketOpen; state.updatedAt=d.updatedAt||new Date().toISOString(); state.source='NEPSE API'; state.providerType='Unofficial NEPSE REST API'; state.diagnostics=d.diagnostics||{}; state.diagnostics.listedSymbols=Math.max(461,Number(state.diagnostics.listedSymbols)||461); state.diagnostics.coveredRows=rows.length; state.diagnostics.apiBase=PULSE_FEED_CONFIG.apiBase; state.lastError=state.diagnostics.failures?.length?state.diagnostics.failures.join(' | '):null;
-      persist(); setStatus('LIVE','NEPSE API · '+rows.length+' market rows · '+new Date(state.updatedAt).toLocaleTimeString()); return true;
-    }catch(e){state.lastError=e.message;if(!restore())setStatus('OFFLINE','NEPSE API unavailable · '+e.message);else setStatus('CACHED','Using last saved NEPSE API data · '+e.message);return false}
+      let raw=localStorage.getItem(PULSE_FEED_CONFIG.cacheKey);
+      if(!raw) raw=localStorage.getItem('nepsePulseCentralFeedV19');
+      const c=JSON.parse(raw||'null');
+      if(c&&Array.isArray(c.live)&&c.live.length){
+        Object.assign(state,c,{status:'CACHED'});
+        window.PULSE_FEED_STATUS='CACHED'; window.PULSE_FEED_TIMESTAMP=state.updatedAt||'—';
+        emit();
+        window.dispatchEvent(new CustomEvent('nepse:pulse-ready',{detail:{ok:true,cached:true}}));
+        return true;
+      }
+    }catch(e){}
+    return false;
+  };
+  const setStatus=(s,e)=>{state.status=s;state.lastError=e||null;window.PULSE_FEED_STATUS=s;window.PULSE_FEED_TIMESTAMP=state.updatedAt||'—';emit()};
+  const applySnapshot=(d)=>{
+    const rows=normalizeLive(d.live);
+    if(!rows.length)throw new Error('NEPSE API returned 0 stock rows');
+    state.live=rows;
+    state.companies=arr(d.companies).length?d.companies:rows;
+    state.gainers=normalizeLive(d.gainers);
+    state.losers=normalizeLive(d.losers);
+    state.index=normalizeIndex(d.index);
+    state.summary=d.summary||{};
+    state.health=d.status||null;
+    state.marketOpen=d.marketOpen;
+    state.updatedAt=d.updatedAt||new Date().toISOString();
+    state.source=d.source||'NEPSE Pulse Render backend';
+    state.providerType=d.providerType||'NEPSE market feed';
+    state.diagnostics=d.diagnostics||{};
+    state.diagnostics.listedSymbols=Math.max(461,Number(state.diagnostics.listedSymbols)||461);
+    state.diagnostics.coveredRows=rows.length;
+    state.diagnostics.apiBase=PULSE_FEED_CONFIG.apiBase;
+    state.lastError=state.diagnostics.failures?.length?state.diagnostics.failures.join(' | '):null;
+    persist();
+  };
+  const loadCore=async()=>{
+    if(refreshInFlight)return refreshInFlight;
+    const hasData=Array.isArray(state.live)&&state.live.length>0;
+    if(!hasData)setStatus('CONNECTING','Connecting to NEPSE market feed…');
+    refreshInFlight=(async()=>{
+      try{
+        const d=await fetchJSON('/market');
+        applySnapshot(d);
+        setStatus('LIVE','Live market data · '+state.live.length+' rows · '+new Date(state.updatedAt).toLocaleTimeString());
+        window.dispatchEvent(new CustomEvent('nepse:pulse-ready',{detail:{ok:true,cached:false}}));
+        return true;
+      }catch(e){
+        state.lastError=e.message;
+        if(hasData){
+          // Keep the last good snapshot visible. Never blank the market during a refresh failure.
+          setStatus('CACHED','Showing last good market snapshot · retrying automatically');
+        }else if(!restore()){
+          setStatus('OFFLINE','Market feed unavailable · retrying automatically');
+        }
+        return false;
+      }finally{refreshInFlight=null;}
+    })();
+    return refreshInFlight;
   };
   const refresh=()=>loadCore();
   const loadCompanies=async()=>{if(!state.companies.length)await refresh();return state.companies};
   const loadFloorsheet=async()=>{try{const d=await fetchRoute('/Floorsheet');state.floorsheet=arr(d);emit();return state.floorsheet}catch(e){state.lastError=e.message;emit();return[]}};
   const checkHealth=async()=>{try{const d=await fetchRoute('/health');state.health=d;return true}catch(e){return false}};
-  const start=async()=>{if(restore())setStatus('CACHED','Last saved NEPSE API data while connecting');await refresh();clearInterval(pollTimer);pollTimer=setInterval(refresh,PULSE_FEED_CONFIG.pollMs)};
+  const start=async()=>{
+    const hadCache=restore();
+    // Cache-first: paint immediately, then refresh in the background.
+    void refresh();
+    clearInterval(pollTimer);
+    const schedule=()=>{clearInterval(pollTimer);const ms=state.marketOpen===false?PULSE_FEED_CONFIG.closedPollMs:PULSE_FEED_CONFIG.pollMs;pollTimer=setInterval(refresh,ms)};
+    schedule();
+    subscribers.add(()=>schedule());
+    return hadCache;
+  };
   const subscribe=fn=>{subscribers.add(fn);return()=>subscribers.delete(fn)}; const get=()=>({...state});
   return {state:get,subscribe,start,refresh,loadCompanies,loadFloorsheet,checkHealth,fetchJSON,normalizeLive,num,pick,arr};
 })();
+window.PULSE_FEED_ENGINE = PulseFeedEngine;
+window.PULSE_FEED = PulseFeedEngine;
 
 function setFeedStatus(status,detail){
   const s=status==='LIVE'?'LIVE':status==='DELAYED'?'DELAYED':status==='CACHED'?'CACHED':status==='CONNECTING'?'CONNECTING':'OFFLINE';
@@ -4521,56 +4583,17 @@ window.addEventListener('error', function(e){
 })();
 </script>
 
-<script id="v20-render-watchdog">
+<script id="v24-render-bridge">
 (function(){
-  'use strict';
-  const base=String(window.NEPSE_PULSE_BACKEND_URL||'').replace(/\/$/,'');
-  if(!base) return;
-  let last=null;
-  function num(v){const n=Number(String(v??'').replace(/,/g,''));return Number.isFinite(n)?n:null;}
-  function arr(v){if(Array.isArray(v))return v;if(v&&typeof v==='object'){for(const k of ['data','result','results','content','records','rows','items'])if(Array.isArray(v[k]))return v[k];}return[];}
-  function pick(o,keys){if(!o||typeof o!=='object')return null;const m={};for(const k of Object.keys(o))m[k.toLowerCase().replace(/[^a-z0-9]/g,'')]=o[k];for(const k of keys){const v=m[k.toLowerCase().replace(/[^a-z0-9]/g,'')];if(v!==undefined&&v!==null&&v!=='')return v;}return null;}
-  function pct(r){return num(pick(r,['pct','percentageChange','percentChange','changePercent','changePct','pChange','perChange']));}
-  function price(r){return num(pick(r,['ltp','lastPrice','LTP','price','closePrice','lastTradedPrice']));}
-  function ch(r){const v=num(pick(r,['change','priceChange','pointChange']));if(v!==null)return v;const p=price(r),q=num(pick(r,['previousClose','previousClosingPrice','prevClose']));return p!==null&&q!==null?p-q:null;}
-  function sym(r){return String(pick(r,['symbol','Symbol','ticker','stockSymbol','securitySymbol'])||'—');}
-  function money(v){const x=num(v);if(x===null)return '—';if(Math.abs(x)>=1e9)return (x/1e9).toFixed(2)+' Arab';if(Math.abs(x)>=1e7)return (x/1e7).toFixed(2)+' Crore';return x.toLocaleString(undefined,{maximumFractionDigits:0});}
-  function set(sel,v){const e=document.querySelector(sel);if(e)e.textContent=v;}
-  function summary(d,terms){for(const x of arr(d.summary)){const l=String(pick(x,['detail','label','name','title','key'])||'').toLowerCase().replace(/[^a-z0-9]/g,'');if(terms.some(t=>l.includes(t)))return pick(x,['value','amount','count','total']);}return null;}
-  function render(d){
-    if(!d||!d.ok)return;
-    last=d; const rows=arr(d.live);
-    const iv=document.getElementById('nepseIndexValue');
-    const ic=document.getElementById('nepseIndexChange');
-    const idx=arr(d.index)[0]||d.index||{};
-    const indexVal=num(pick(idx,['close','currentValue','value','indexValue','latest']));
-    const indexCh=num(pick(idx,['change','pointChange','changeValue']));
-    const indexPct=num(pick(idx,['perChange','percentChange','percentageChange','changePercent']));
-    if(iv)iv.textContent=indexVal===null?'Index unavailable':indexVal.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
-    if(ic)ic.textContent=indexCh===null?'Index feed returned no value':((indexCh>=0?'+':'')+indexCh.toFixed(2)+(indexPct===null?'':` (${indexPct>=0?'+':''}${indexPct.toFixed(2)}%)`));
-    const open=String(pick(d.status||{},['isOpen','open','marketOpen'])??d.marketOpen).toLowerCase()==='true' || d.marketOpen===true || String(d.marketOpen||'').toLowerCase()==='open';
-    set('#marketStatusValue',open?'OPEN':'CLOSED'); const ms=document.getElementById('marketStatusValue'); if(ms)ms.style.color=open?'#14804a':'#c62828';
-    set('#marketStatusDetail',open?'Market is currently open':'Market is currently closed');
-    set('#feedState','LIVE'); set('#pulseLiveLabel','LIVE');
-    const dot=document.querySelector('.feed .dot'); if(dot)dot.style.background='var(--accent2)';
-    set('#stamp',d.updatedAt?'Updated '+new Date(d.updatedAt).toLocaleTimeString():'Market data');
-    const totalTurn=summary(d,['totalturnover','turnover']);
-    set('[data-market="turnover"]','Turnover: '+money(totalTurn));
-    const adv=rows.filter(r=>(pct(r)||0)>0).length, dec=rows.filter(r=>(pct(r)||0)<0).length, unc=rows.length-adv-dec;
-    set('[data-breadth="advance"] b',adv); set('[data-breadth="decline"] b',dec); set('[data-breadth="unchanged"] b',unc);
-    set('[data-breadth="positive"] b',rows.filter(r=>(pct(r)||0)>=9.9).length); set('[data-breadth="negative"] b',rows.filter(r=>(pct(r)||0)<=-9.9).length);
-    const gainers=(arr(d.gainers).length?arr(d.gainers):rows.slice().sort((a,b)=>(pct(b)||-999)-(pct(a)||-999))).slice(0,10);
-    const losers=(arr(d.losers).length?arr(d.losers):rows.slice().sort((a,b)=>(pct(a)||999)-(pct(b)||999))).slice(0,10);
-    const mode=window.NEPSE_PULSE_MOVER_MODE||'gainers'; const mb=document.getElementById('pulseMoversRows');
-    if(mb)mb.innerHTML=(mode==='losers'?losers:gainers).map(r=>`<div class="pulse-table-row"><span>${sym(r)}</span><span>${ch(r)===null?'—':(ch(r)>=0?'+':'')+ch(r).toFixed(2)}</span><span>${pct(r)===null?'—':(pct(r)>=0?'+':'')+pct(r).toFixed(2)+'%'}</span><span>${price(r)===null?'—':price(r).toFixed(2)}</span></div>`).join('')||'<div class="empty-feed">No mover rows returned.</div>';
-    const liq=rows.slice().sort((a,b)=>(num(pick(b,['turnover','totalTradedValue','value','amount']))||0)-(num(pick(a,['turnover','totalTradedValue','value','amount']))||0)).slice(0,10); const lb=document.getElementById('pulseLiquidityRows');
-    if(lb)lb.innerHTML=liq.map(r=>`<div class="pulse-table-row"><span>${sym(r)}</span><span>${money(pick(r,['turnover','totalTradedValue','value','amount']))}</span><span>${price(r)===null?'—':price(r).toFixed(2)}</span></div>`).join('')||'<div class="empty-feed">No activity rows returned.</div>';
-    set('[data-summary="turnover"]',money(totalTurn)); set('[data-summary="volume"]',money(summary(d,['totaltradedshares','tradedshares','totalvolume']))); set('[data-summary="transactions"]',money(summary(d,['totaltransactions','transactions']))); set('[data-summary="scrips"]',money(summary(d,['totalscripstraded','scripstraded'])??rows.length)); set('[data-summary="marketcap"]',money(summary(d,['totalmarketcapitalization','marketcapitalization']))); set('[data-summary="floatcap"]',money(summary(d,['totalfloatmarketcapitalization','floatmarketcapitalization'])));
-    window.NEPSE_PULSE_LIVE_DATA=d;
+  // V24: one central feed owner. No second polling loop.
+  function sync(st){
+    if(!st)return;
+    if(window.renderPulseMarket) window.renderPulseMarket();
+    window.dispatchEvent(new CustomEvent('pulse-feed-update',{detail:st}));
   }
-  async function load(){try{const r=await fetch(base+'/api/market?force=true',{cache:'no-store',headers:{Accept:'application/json'}});const d=await r.json();render(d);window.dispatchEvent(new CustomEvent('nepse:pulse-ready',{detail:{ok:!!d?.ok}}));}catch(e){console.warn('V20 backend bridge',e);window.dispatchEvent(new CustomEvent('nepse:pulse-ready',{detail:{ok:false}}));}}
-  window.addEventListener('load',()=>{load();setInterval(load,30000);});
-  document.addEventListener('click',e=>{if(e.target.closest('[data-mover-tab]'))setTimeout(load,0);});
+  window.addEventListener('pulse-central-snapshot',e=>sync(e.detail));
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>sync(window.PULSE_FEED_ENGINE?.state?.()),{once:true});
+  else sync(window.PULSE_FEED_ENGINE?.state?.());
 })();
 </script>
 
@@ -4613,7 +4636,6 @@ window.addEventListener('error', function(e){
   }
   new MutationObserver(decorate).observe(document.body,{subtree:true,childList:true});
   window.addEventListener('load',decorate);
-  setInterval(decorate,1500);
 })();
 </script>
 
@@ -4740,7 +4762,8 @@ header.topbar .feature-btn{
       const cell=document.createElement('button');cell.className='v22-star';cell.type='button';const active=getList().includes(sym);cell.textContent=active?'★':'☆';if(active)cell.classList.add('active');cell.title='Add to watchlist';cell.onclick=()=>window.v23Toggle(sym);row.appendChild(cell);row.style.gridTemplateColumns='minmax(0,1.35fr) .7fr .8fr .7fr 38px';
     });
   }
-  window.addEventListener('load',()=>{render();init();decorateMovers();setInterval(()=>{render();decorateMovers()},2500)});
+  window.addEventListener('load',()=>{render();init();decorateMovers();});
+  window.addEventListener('pulse-central-snapshot',()=>{render();decorateMovers();});
 })();
 </script>
 
