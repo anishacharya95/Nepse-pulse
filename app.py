@@ -13,8 +13,10 @@ try:
 except Exception:
     AsyncNepseClient = None
 
-APP_VERSION = "V25-CENTRAL-DATA-ENGINE"
+APP_VERSION = "V26-REAL-FEATURE-DATA-ENGINE"
 PUBLIC_API = "https://nepseapi.surajrimal.dev"
+STATIC_API = "https://shubhamnpk.github.io/yonepse/data"
+OPEN_DATA = "https://raw.githubusercontent.com/socrateai-official/nepse-open-data/main"
 CACHE_TTL = {
     "market": 25,
     "index": 25,
@@ -107,6 +109,26 @@ async def public_get(path: str, params: Optional[dict] = None):
         r = await client.get(url, params=params, headers={"Accept": "application/json"})
         r.raise_for_status()
         return r.json()
+
+
+async def static_get(path: str):
+    url = STATIC_API.rstrip("/") + path
+    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+        r = await client.get(url, headers={"Accept": "application/json"})
+        r.raise_for_status()
+        return r.json()
+
+
+async def first_ok(callables):
+    errors=[]
+    for label, fn in callables:
+        try:
+            value=await fn()
+            if value is not None:
+                return value, errors, label
+        except Exception as e:
+            errors.append(f"{label}: {e}")
+    return None, errors, None
 
 
 async def nepse_call(methods: list[str], *args, **kwargs):
@@ -208,16 +230,15 @@ async def get_index():
 
 
 async def get_index_history(index_id: int = 58):
+    try: index_id=int(index_id)
+    except Exception: index_id=58
     key = f"history:{index_id}"
     async def load():
-        try:
-            return await nepse_call(["index_history"], index_id, 1, 500)
-        except Exception:
-            # The public service exposes the same concept through its graph route.
-            try:
-                return await public_get("/DailyNepseIndexGraph")
-            except Exception:
-                return []
+        value, errors, source = await first_ok([
+            ("nepsepy.index_history", lambda: nepse_call(["index_history"], index_id, 1, 500)),
+            ("public.daily-index-graph", lambda: public_get("/DailyNepseIndexGraph")),
+        ])
+        return {"ok": bool(value), "source": source, "data": value if value is not None else [], "errors": errors, "updatedAt": now_iso()}
     return await cached(key, load)
 
 
@@ -390,80 +411,66 @@ def closes_from_history(raw: Any) -> list[float]:
     return out
 
 
-def sma(values: list[float], n: int):
-    return sum(values[-n:]) / n if len(values) >= n else None
+def closes_from(raw: Any) -> list[float]:
+    rows=arr(raw)
+    out=[]
+    for x in rows:
+        if isinstance(x,(list,tuple)) and len(x)>1:
+            v=num(x[-1])
+        else:
+            v=num(pick(x,["close","closingPrice","ltp","lastPrice","price","value"]))
+        if v is not None: out.append(v)
+    return out
 
+def sma(values,n):
+    return sum(values[-n:])/n if len(values)>=n else None
 
-def ema(values: list[float], n: int):
-    if len(values) < n:
-        return None
-    k = 2 / (n + 1)
-    e = sum(values[:n]) / n
-    for v in values[n:]:
-        e = v * k + e * (1 - k)
+def ema(values,n):
+    if len(values)<n:return None
+    k=2/(n+1); e=sum(values[:n])/n
+    for v in values[n:]: e=v*k+e*(1-k)
     return e
 
+def rsi(values,n=14):
+    if len(values)<=n:return None
+    gains=[]; losses=[]
+    for a,b in zip(values[-n-1:-1],values[-n:]):
+        d=b-a; gains.append(max(d,0)); losses.append(max(-d,0))
+    ag=sum(gains)/n; al=sum(losses)/n
+    if al==0:return 100.0
+    return 100-(100/(1+ag/al))
 
-def rsi(values: list[float], n: int = 14):
-    if len(values) <= n:
-        return None
-    gains, losses = [], []
-    for a, b in zip(values[-n-1:-1], values[-n:]):
-        d = b - a
-        gains.append(max(d, 0))
-        losses.append(max(-d, 0))
-    avg_gain = sum(gains) / n
-    avg_loss = sum(losses) / n
-    if avg_loss == 0:
-        return 100.0
-    rs = avg_gain / avg_loss
-    return 100 - (100 / (1 + rs))
+def technical_from(values):
+    if not values:return {"sma20":None,"sma50":None,"ema20":None,"rsi14":None,"trend":"Unavailable","signal":"Unavailable"}
+    last=values[-1]; s20=sma(values,20); s50=sma(values,50); e20=ema(values,20); r=rsi(values,14)
+    trend='Bullish' if s20 is not None and last>s20 and (s50 is None or s20>s50) else ('Bearish' if s20 is not None and last<s20 and (s50 is None or s20<s50) else 'Neutral')
+    signal='Overbought' if r is not None and r>=70 else ('Oversold' if r is not None and r<=30 else trend)
+    return {"last":last,"sma20":s20,"sma50":s50,"ema20":e20,"rsi14":r,"trend":trend,"signal":signal}
 
+@app.get("/api/floorsheet")
+async def api_floorsheet(symbol: Optional[str]=None, limit:int=Query(250,ge=1,le=2000)):
+    d=await get_floorsheet(symbol)
+    rows=floor_rows(d)[:limit]
+    return {"ok":bool(rows),"source":"nepsepy/public floorsheet","symbol":symbol,"data":rows,"count":len(rows),"updatedAt":now_iso()}
 
-async def get_fundamentals(symbol: str):
-    c = await get_company(symbol)
-    d = c.get("details") or {}
-    if isinstance(d, list):
-        d = d[0] if d else {}
-    if isinstance(d, dict) and isinstance(d.get("data"), dict):
-        d = d["data"]
-    return {
-        "ok": bool(c.get("ok")),
-        "symbol": symbol.upper(),
-        "source": "NEPSE public company profile/details where available",
-        "updatedAt": now_iso(),
-        "fundamentals": {
-            "companyName": pick(d, ["securityName", "companyName", "name"]),
-            "sector": pick(d, ["sectorName", "sector"]),
-            "bookValue": num(pick(d, ["bookValue", "bookValuePerShare", "bvps"])),
-            "eps": num(pick(d, ["eps", "earningPerShare", "earningsPerShare"])),
-            "pe": num(pick(d, ["peRatio", "peratio", "pe"])),
-            "marketCap": num(pick(d, ["marketCapitalization", "marketCap", "marketcap"])),
-            "shares": num(pick(d, ["listedShares", "totalShares", "sharesOutstanding"])),
-            "promoterShares": num(pick(d, ["promoterShares", "promoterShare"])),
-            "publicShares": num(pick(d, ["publicShares", "publicShare"])),
-            "raw": d,
-        },
-    }
+@app.get("/api/brokers")
+async def api_brokers():
+    return await get_broker_analysis()
 
+@app.get("/api/sectors")
+async def api_sectors():
+    return await get_sectors()
 
-async def get_xray(symbol: str):
-    symbol = symbol.upper().strip()
-    company, history, floors = await asyncio.gather(get_company(symbol), get_history(symbol), get_floorsheet(symbol))
-    h = closes_from_history(history)
-    last = h[-1] if h else None
-    fundamentals = (await get_fundamentals(symbol))["fundamentals"]
-    return {
-        "ok": True,
-        "symbol": symbol,
-        "updatedAt": now_iso(),
-        "price": {"last": last, "historyPoints": len(h)},
-        "fundamentals": fundamentals,
-        "technical": {"sma20": sma(h, 20), "sma50": sma(h, 50), "ema20": ema(h, 20), "rsi14": rsi(h, 14)},
-        "floorsheet": {"rows": len(floor_rows(floors))},
-        "company": company.get("company"),
-    }
+@app.get("/api/technical/{symbol}")
+async def api_technical(symbol:str):
+    h=await get_history(symbol)
+    vals=closes_from(h.get("data") if isinstance(h,dict) else h)
+    return {"ok":bool(vals),"symbol":symbol.upper(),"historySource":h.get("source") if isinstance(h,dict) else None,"technical":technical_from(vals),"updatedAt":now_iso(),"errors":h.get("errors",[]) if isinstance(h,dict) else []}
 
+@app.get("/api/stock-xray/{symbol}")
+async def api_stock_xray(symbol:str):
+    f,h,t=await asyncio.gather(get_fundamentals(symbol),get_history(symbol),api_technical(symbol))
+    return {"ok":bool(f.get("ok") or h.get("ok") or t.get("ok")),"symbol":symbol.upper(),"fundamentals":f,"history":h,"technical":t,"updatedAt":now_iso()}
 
 @app.get("/health")
 async def health():
@@ -547,123 +554,38 @@ async def floorsheet_of(symbol: str):
     return await get_floorsheet(symbol)
 
 
-@app.get("/api/floorsheet")
-async def api_floorsheet(symbol: Optional[str] = None, limit: int = Query(250, ge=1, le=2000)):
-    raw = await get_floorsheet(symbol)
-    rows = floor_rows(raw)[:limit]
-    return {"ok": True, "updatedAt": now_iso(), "symbol": symbol, "data": rows, "count": len(rows)}
-
-
-@app.get("/api/brokers")
-async def api_brokers():
-    return await get_broker_analysis()
-
-
-@app.get("/api/sectors")
-async def api_sectors():
-    return await get_sectors()
-
-
-@app.get("/api/technical/{symbol}")
-async def api_technical(symbol: str):
-    h = closes_from_history(await get_history(symbol))
-    return {"ok": True, "symbol": symbol.upper(), "historyPoints": len(h), "data": {"sma20": sma(h,20), "sma50": sma(h,50), "ema20": ema(h,20), "rsi14": rsi(h,14)}}
-
-
-@app.get("/api/stock-xray/{symbol}")
-async def api_stock_xray(symbol: str):
-    return await get_xray(symbol)
-
-
-async def _command_market_snapshot():
-    # Build the Command Center from independent verified endpoints.
-    # A failure in one optional dataset must not blank the whole dashboard.
-    errors = []
-    result = {}
-    async def one(key, loader, default):
-        try:
-            result[key] = await loader()
-        except Exception as e:
-            result[key] = default
-            errors.append(f"{key}: {e}")
-    await asyncio.gather(
-        one("status", lambda: nepse_call(["market_status"]), {"isOpen": None}),
-        one("summary", lambda: nepse_call(["market_summary"]), []),
-        one("live", lambda: nepse_call(["live_market"]), []),
-        one("gainers", lambda: nepse_call(["top_gainers"], True), []),
-        one("losers", lambda: nepse_call(["top_losers"], True), []),
-        one("turnover", lambda: nepse_call(["top_turnover"], True), []),
-        one("trades", lambda: nepse_call(["top_traded_shares", "top_active"], True), []),
-        one("transactions", lambda: nepse_call(["top_transactions"], True), []),
-        one("index", lambda: get_index(), []),
-        one("sectors", lambda: get_sectors(), {"ok": False, "data": []}),
-    )
-    # If nepsepy is unavailable for an individual call, fill only that dataset from
-    # the public compatibility API rather than replacing good data with blanks.
-    public_routes = {
-        "status": "/IsNepseOpen", "summary": "/Summary", "live": "/LiveMarket",
-        "gainers": "/TopGainers", "losers": "/TopLosers",
-        "turnover": "/TopTenTurnoverScrips", "trades": "/TopTenTradeScrips",
-        "transactions": "/TopTenTransactionScrips", "index": "/NepseIndex",
-    }
-    for key, path in public_routes.items():
-        bad = result.get(key) in (None, []) or (key == "status" and result.get(key, {}).get("isOpen") is None)
-        if bad:
-            try:
-                result[key] = await public_get(path)
-            except Exception as e:
-                errors.append(f"fallback {key}: {e}")
-
-    summary_rows = arr(result.get("summary"))
-    summary = {}
-    for x in summary_rows:
-        label = str(pick(x, ["detail", "label", "name"], "")).lower()
-        val = pick(x, ["value", "val"])
-        if "turnover" in label: summary["turnover"] = val
-        elif "traded shares" in label or ("shares" in label and "capital" not in label): summary["volume"] = val
-        elif "transaction" in label: summary["transactions"] = val
-        elif "scrip" in label: summary["scripsTraded"] = val
-        elif "market capitalization" in label and "float" not in label: summary["marketCap"] = val
-        elif "float market" in label: summary["floatMarketCap"] = val
-
-    live = arr(result.get("live"))
-    adv = dec = unchanged = 0
-    for x in live:
-        p = num(pick(x, ["percentageChange", "percentChange", "perChange", "pChange"]))
-        if p is None:
-            # Prefer actual previous-close/LTP difference when available.
-            ltp = num(pick(x, ["ltp", "lastPrice", "closePrice", "price"]))
-            prev = num(pick(x, ["previousClose", "previousClosingPrice", "prevClose"]))
-            p = (ltp - prev) if ltp is not None and prev is not None else None
-        if p is None or p == 0: unchanged += 1
-        elif p > 0: adv += 1
-        else: dec += 1
-
-    idx = result.get("index")
-    index_rows = arr(idx)
-    nepse_row = next((x for x in index_rows if "nepse" in str(pick(x, ["index", "indexName", "name"], "")).lower()), None)
-    if nepse_row is None and isinstance(idx, dict): nepse_row = idx
-
-    sectors = result.get("sectors")
-    sector_rows = arr(sectors.get("data") if isinstance(sectors, dict) else sectors)
-    return {
-        "ok": bool(summary_rows or live or index_rows or result.get("gainers")),
-        "updatedAt": now_iso(),
-        "summary": summary,
-        "breadth": {"advancing": adv, "declining": dec, "unchanged": unchanged},
-        "nepse": nepse_row or {},
-        "movers": {"gainers": arr(result.get("gainers")), "losers": arr(result.get("losers"))},
-        "activity": {"turnover": arr(result.get("turnover")), "volume": arr(result.get("trades")), "transactions": arr(result.get("transactions"))},
-        "sectors": sector_rows,
-        "marketOpen": pick(result.get("status"), ["isOpen", "marketOpen"]),
-        "counts": {"live": len(live), "gainers": len(arr(result.get("gainers"))), "losers": len(arr(result.get("losers"))), "sectors": len(sector_rows)},
-        "diagnostics": {"errors": errors, "listedSymbols": 461, "verifiedOnly": True},
-    }
-
 @app.get("/api/command-center")
-async def api_command_center():
-    return await cached("command:center", _command_market_snapshot)
-
+async def command_center():
+    tasks={
+      "market":get_market(), "index":get_index(), "sectors":get_sectors(), "brokers":get_broker_analysis(),
+      "gainers":nepse_call(["top_gainers"],True), "losers":nepse_call(["top_losers"],True),
+      "turnover":nepse_call(["top_turnover"],True), "volume":nepse_call(["top_traded_shares","top_active"],True),
+      "transactions":nepse_call(["top_transactions"],True),
+    }
+    results={}; errors=[]
+    async def one(k,coro):
+        try: results[k]=await coro
+        except Exception as e: results[k]=[]; errors.append(f"{k}: {e}")
+    await asyncio.gather(*[one(k,v) for k,v in tasks.items()])
+    m=results.get("market") or {}; idx=results.get("index")
+    summary={}
+    for x in arr(m.get("summary") if isinstance(m,dict) else []):
+        label=str(pick(x,["detail","label","name"],"" )).lower()
+        val=num(pick(x,["value","amount","total"]))
+        if 'turnover' in label: summary['turnover']=val
+        elif 'traded shares' in label or 'volume' in label: summary['volume']=val
+        elif 'transactions' in label: summary['transactions']=val
+        elif 'scrips' in label: summary['scripsTraded']=val
+    live=arr(m.get('live') if isinstance(m,dict) else [])
+    breadth={"advancing":0,"declining":0,"unchanged":0}
+    for x in live:
+        p=num(pick(x,["perChange","percentageChange","percentChange","changePercent","pChange"]))
+        if p is None: continue
+        if p>0: breadth['advancing']+=1
+        elif p<0: breadth['declining']+=1
+        else: breadth['unchanged']+=1
+    def clean(xs): return arr(xs)[:50]
+    return {"ok":True,"updatedAt":now_iso(),"summary":summary,"breadth":breadth,"nepse":idx,"movers":{"gainers":clean(results.get('gainers')) or arr(m.get('gainers')),"losers":clean(results.get('losers')) or arr(m.get('losers'))},"activity":{"turnover":clean(results.get('turnover')) or arr(m.get('topTurnover')),"volume":clean(results.get('volume')) or arr(m.get('topTraded')),"transactions":clean(results.get('transactions')) or arr(m.get('topTransactions'))},"sectors":arr((results.get('sectors') or {}).get('data')) if isinstance(results.get('sectors'),dict) else arr(results.get('sectors')),"brokers":arr((results.get('brokers') or {}).get('data')) if isinstance(results.get('brokers'),dict) else arr(results.get('brokers')),"counts":{"live":len(live),"gainers":len(clean(results.get('gainers')) or arr(m.get('gainers'))),"losers":len(clean(results.get('losers')) or arr(m.get('losers'))),"sectors":len(arr((results.get('sectors') or {}).get('data')) if isinstance(results.get('sectors'),dict) else arr(results.get('sectors')))},"diagnostics":{"errors":errors,"marketSource":m.get('source') if isinstance(m,dict) else None}}
 
 @app.get("/api/diagnostics")
 async def diagnostics():
