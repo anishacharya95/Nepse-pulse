@@ -15,7 +15,24 @@ try:
 except Exception:
     AsyncNepseClient = None
 
-APP_VERSION = "V26-REAL-FEATURE-DATA-ENGINE-3"
+# Production NEPSE data layer.  Keep the existing FastAPI surface, but route
+# core data operations through the reusable production SDK below.
+try:
+    from nepse import NEPSE as ProductionNEPSE
+except Exception:
+    ProductionNEPSE = None
+
+PRODUCTION_NEPSE = ProductionNEPSE(cache_ttl=30) if ProductionNEPSE else None
+PRODUCTION_SDK_ENABLED = PRODUCTION_NEPSE is not None
+
+async def production_call(method: str, *args, **kwargs):
+    if PRODUCTION_NEPSE is None:
+        raise RuntimeError("production nepse.py is not installed")
+    fn = getattr(PRODUCTION_NEPSE, method)
+    return await asyncio.to_thread(fn, *args, **kwargs)
+
+
+APP_VERSION = "V27-PRODUCTION-NEPSE-SDK"
 PUBLIC_API = "https://nepseapi.surajrimal.dev"
 STATIC_API = "https://shubhamnpk.github.io/yonepse/data"
 OPEN_DATA = "https://raw.githubusercontent.com/socrateai-official/nepse-open-data/main"
@@ -72,6 +89,15 @@ async def close_nepse_client():
         except Exception:
             pass
 
+
+
+@app.on_event("shutdown")
+async def close_production_nepse():
+    if PRODUCTION_NEPSE is not None:
+        try:
+            await asyncio.to_thread(PRODUCTION_NEPSE.close)
+        except Exception:
+            pass
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -989,6 +1015,68 @@ def technical_from(values):
     signal='Overbought' if r is not None and r>=70 else ('Oversold' if r is not None and r<=30 else trend)
     return {"last":last,"sma20":s20,"sma50":s50,"ema20":e20,"rsi14":r,"trend":trend,"signal":signal}
 
+legacy_get_floorsheet = get_floorsheet
+legacy_get_broker_analysis = get_broker_analysis
+legacy_get_history = get_history
+legacy_get_fundamentals = get_fundamentals
+
+# ---------------------------------------------------------------------------
+# Production SDK integration
+# ---------------------------------------------------------------------------
+# Existing UI routes below continue to work, but these core functions now use
+# the production nepse.py layer.  Sync SDK calls are moved to a worker thread
+# so FastAPI's event loop remains responsive.
+
+async def get_floorsheet(symbol: Optional[str] = None):
+    try:
+        return await production_call("trades", symbol=symbol, max_pages=1000, size=500)
+    except TypeError:
+        # Older generated SDK signature: fetch all trades then filter.
+        rows = await production_call("trades", max_pages=1000, size=500)
+        if symbol:
+            s = symbol.upper().strip()
+            rows = [r for r in rows if str(r.get("symbol", "")).upper() == s]
+        return rows
+    except Exception:
+        # Preserve the existing backend fallback if the production layer is
+        # temporarily unavailable.
+        return await legacy_get_floorsheet(symbol)
+
+async def get_broker_analysis():
+    try:
+        rows = await production_call("trades", max_pages=1000, size=500)
+        analysis = await production_call("broker_analysis", rows)
+        flow = await production_call("broker_flow_by_symbol", rows)
+        return {"ok": True, "updatedAt": now_iso(), "data": analysis,
+                "bySymbol": flow, "sourceRows": len(rows),
+                "source": "nepse.py production data layer"}
+    except Exception:
+        return await legacy_get_broker_analysis()
+
+async def get_history(symbol: str):
+    try:
+        rows = await production_call("history_ohlcv", symbol)
+        if rows:
+            return {"ok": True, "symbol": symbol.upper(),
+                    "source": "nepse.py production history", "data": rows,
+                    "updatedAt": now_iso(), "errors": []}
+    except Exception as e:
+        production_history_error = str(e)
+    # Keep existing multi-source chart fallback.
+    return await legacy_get_history(symbol)
+
+async def get_fundamentals(symbol: str):
+    try:
+        snap = await production_call("company_snapshot", symbol)
+        if snap:
+            return {"ok": True, "symbol": symbol.upper(),
+                    **snap, "source": "nepse.py production company data",
+                    "updatedAt": now_iso()}
+    except Exception:
+        pass
+    return await legacy_get_fundamentals(symbol)
+
+# Preserve original implementations as explicit fallbacks.
 @app.get("/api/floorsheet")
 async def api_floorsheet(symbol: Optional[str]=None, limit:int=Query(100000,ge=1,le=100000)):
     rows=await get_floorsheet(symbol)
@@ -1013,6 +1101,77 @@ async def api_technical(symbol:str):
 async def api_stock_xray(symbol:str):
     f,h,t=await asyncio.gather(get_fundamentals(symbol),get_history(symbol),api_technical(symbol))
     return {"ok":bool(f.get("ok") or h.get("ok") or t.get("ok")),"symbol":symbol.upper(),"fundamentals":f,"history":h,"technical":t,"updatedAt":now_iso()}
+
+@app.get("/api/production/status")
+async def production_status():
+    return {"ok": PRODUCTION_SDK_ENABLED, "sdk": "nepse.py", "cache": await production_call("cache_info") if PRODUCTION_SDK_ENABLED else {}}
+
+@app.get("/api/production/market")
+async def production_market():
+    vals = await asyncio.gather(
+        production_call("market_status"), production_call("market_summary"),
+        production_call("live_market"), production_call("indices"),
+        production_call("top_gainers"), production_call("top_losers"),
+        production_call("top_turnover"), production_call("top_trade"),
+        production_call("top_transaction"), production_call("companies"),
+    )
+    keys = ["status","summary","live","indices","gainers","losers","turnover","trades","transactions","companies"]
+    return {"ok": True, "source":"nepse.py production data layer", **dict(zip(keys, vals)), "updatedAt": now_iso()}
+
+@app.get("/api/production/company/{symbol}")
+async def production_company(symbol: str):
+    return await production_call("company_snapshot", symbol)
+
+@app.get("/api/production/depth/{symbol}")
+async def production_depth(symbol: str):
+    depth, supply = await asyncio.gather(production_call("depth", symbol), production_call("supply_demand", symbol))
+    return {"ok": True, "symbol": symbol.upper(), "depth": depth, "supplyDemand": supply, "updatedAt": now_iso()}
+
+@app.get("/api/production/technical/{symbol}")
+async def production_technical(symbol: str):
+    rows = await production_call("technical_history", symbol)
+    return {"ok": bool(rows), "symbol": symbol.upper(), "data": rows, "updatedAt": now_iso()}
+
+@app.get("/api/production/notices")
+async def production_notices():
+    return await production_call("notices")
+
+@app.get("/api/production/disclosures")
+async def production_disclosures():
+    return await production_call("disclosures")
+
+@app.get("/api/production/holidays")
+async def production_holidays():
+    return await production_call("holidays")
+
+@app.get("/api/production/reports")
+async def production_reports():
+    return await production_call("reports")
+
+@app.get("/api/production/events")
+async def production_events():
+    return await production_call("events")
+
+# TradingView UDF-shaped adapter for the NEPSE Pulse chart frontend.
+@app.get("/api/tv/config")
+async def tv_config():
+    return await production_call("tv_config")
+
+@app.get("/api/tv/time")
+async def tv_time():
+    return await production_call("tv_time")
+
+@app.get("/api/tv/search")
+async def tv_search(q: str = Query(""), limit: int = Query(30, ge=1, le=100)):
+    return await production_call("tv_search", q, limit)
+
+@app.get("/api/tv/symbols")
+async def tv_symbols(symbol: str):
+    return await production_call("tv_symbol", symbol)
+
+@app.get("/api/tv/history")
+async def tv_history(symbol: str, resolution: str = "D", from_: int = Query(0, alias="from"), to: int = Query(0), countback: int = Query(500, ge=1, le=5000)):
+    return await production_call("tv_history", symbol, resolution=resolution, from_ts=from_, to_ts=to, countback=countback)
 
 @app.get("/health")
 async def health():
