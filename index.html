@@ -3785,7 +3785,8 @@ document.addEventListener('DOMContentLoaded',()=>{
     const indexRows=Array.isArray(lastState.index)?lastState.index:[];
     const nepse=indexRows.find(x=>String(pick(x,['index','name','indexname'])||'').toLowerCase().replace(/[^a-z]/g,'').includes('nepse')) || indexRows[0] || {};
     const summaryRaw=lastState.summary;
-    const summaryArr=Array.isArray(summaryRaw)?summaryRaw:(summaryRaw&&typeof summaryRaw==='object'?[summaryRaw]:[]);
+    const indexRows=Array.isArray(lastState.index)?lastState.index:
+  (Array.isArray(lastState.live)?lastState.live:[]);
     const summaryValue=(labels)=>{
       const target=labels.map(x=>x.toLowerCase().replace(/[^a-z0-9]/g,''));
       for(const item of summaryArr){
@@ -3796,7 +3797,15 @@ document.addEventListener('DOMContentLoaded',()=>{
     };
 
     const idx=pick(nepse,['close','currentvalue','value','indexvalue','latest']);
-    const point=pick(nepse,['change','pointchange','changevalue']);
+    const pct=pick(nepse,[
+  'perChange',
+  'perchange',
+  'percentChange',
+  'percentchange',
+  'percentageChange',
+  'percentagechange',
+  'changePercent'
+]);
     const pct=pick(nepse,['perchange','percentchange','percentagechange','changepercent']);
     const turnoverTotal=summaryValue(['totalturnover','turnover']) ?? rs.reduce((a,r)=>a+(turnover(r)||0),0);
     const adv=rs.filter(r=>(change(r)||0)>0).length;
@@ -3814,7 +3823,7 @@ document.addEventListener('DOMContentLoaded',()=>{
     setBox('[data-market="percent"]',(n(pct)===null?'—':(n(pct)>=0?'+':'')+fmt(pct)+'%'),positive);
 
     const stBox=q('[data-market="status"]');
-    const open=lastState.marketOpen===true;
+    const open=isNepseMarketOpen(lastState);
     if(stBox){
       stBox.textContent=open?'OPEN':'CLOSED';
       stBox.style.background=open?'#68bc72':'#ff5b60';
