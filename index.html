@@ -1577,9 +1577,17 @@ const PULSE_FEED_CONFIG = {
   pollMs: 60000,
   closedPollMs: 180000,
   timeoutMs: 9000,
-  cacheKey: 'nepsePulseCentralFeedV24_1',
+  cacheKey: 'nepsePulseCentralFeedV24_2_REAL',
   listedSymbols: 461
 };
+// V24.2 invalidates older caches that may contain a securities master snapshot rather than live prices.
+try {
+  if(localStorage.getItem('nepsePulseV24_2_cache_version')!=='1'){
+    localStorage.removeItem('nepsePulseCentralFeedV24_1');
+    localStorage.removeItem('nepsePulseCentralFeedV24');
+    localStorage.setItem('nepsePulseV24_2_cache_version','1');
+  }
+}catch(e){}
 
 const PulseFeedEngine = (()=>{
   const state={status:'CONNECTING',updatedAt:null,lastError:null,summary:null,index:null,live:[],gainers:[],losers:[],companies:[],floorsheet:[],health:null,source:'NEPSE API',providerType:'Unofficial NEPSE REST API',marketOpen:null,diagnostics:{listedSymbols:461,coveredRows:0,api:'nepseapi.surajrimal.dev'}};
@@ -1590,11 +1598,13 @@ const PulseFeedEngine = (()=>{
   const arr=v=>{if(Array.isArray(v))return v;if(!v||typeof v!=='object')return[];for(const k of ['data','result','results','content','records','rows','body','items','liveMarket','stocks','companies'])if(Array.isArray(v[k]))return v[k];for(const k of Object.keys(v))if(Array.isArray(v[k]))return v[k];return[]};
   const first=v=>{const a=arr(v);return a.length?a[0]:(v&&typeof v==='object'?v:{})};
   const normalizeLive=rows=>arr(rows).map(o=>{
-    const ltp=num(pick(o,['ltp','lasttradedprice','close','closingprice','price','currentprice']));
-    const pct=num(pick(o,['percentchange','percentagechange','changepercent','perchange','pct']));
-    const prev=num(pick(o,['previousclose','previousclosingprice','prevclose','previousprice']));
-    const change=num(pick(o,['change','pointchange','changevalue'])) ?? (ltp!==null&&prev!==null?ltp-prev:null);
-    return {...o,symbol:String(pick(o,['symbol','stocksymbol','securitysymbol','ticker','code'])||'').trim().toUpperCase(),company:String(pick(o,['name','companyname','company','securityname'])||''),ltp,pct,prev,volume:num(pick(o,['volume','tradedshares','quantity','totaltradedshares'])),turnover:num(pick(o,['turnover','totalturnover','amount'])),transactions:num(pick(o,['transactions','totaltransactions','numberoftransactions','nooftransactions'])),change};
+    const ltp=num(pick(o,['ltp','lasttradedprice','lastprice','closeprice','closingprice','close','price','currentprice']));
+    const prev=num(pick(o,['previousclose','previousclosingprice','prevclose','previousprice','previousdayclose']));
+    let change=num(pick(o,['change','pointchange','changevalue','pricechange','difference']));
+    let pct=num(pick(o,['percentagechange','percentchange','changepercent','perchange','pct','pchange','changepercentage','percent_change']));
+    if(change===null && ltp!==null && prev!==null) change=ltp-prev;
+    if(pct===null && change!==null && prev!==null && prev!==0) pct=(change/prev)*100;
+    return {...o,symbol:String(pick(o,['symbol','stocksymbol','securitysymbol','ticker','code'])||'').trim().toUpperCase(),company:String(pick(o,['name','companyname','company','securityname'])||''),ltp,pct,prev,volume:num(pick(o,['volume','tradedshares','quantity','totaltradedshares','totaltradequantity','sharevolume'])),turnover:num(pick(o,['turnover','totalturnover','amount','totaltradevalue','totaltradedvalue'])),transactions:num(pick(o,['transactions','totaltransactions','numberoftransactions','totaltransactions','totaltrades','tradecount'])),change};
   }).filter(x=>x.symbol);
   const normalizeIndex=v=>arr(v).length?arr(v):[v].filter(x=>x&&typeof x==='object');
   const withTimeout=async(promise,label)=>{const c=new AbortController();const t=setTimeout(()=>c.abort(),PULSE_FEED_CONFIG.timeoutMs);try{return await promise(c.signal)}catch(e){if(e.name==='AbortError')throw new Error(label+' timeout');throw e}finally{clearTimeout(t)}};
@@ -1657,11 +1667,14 @@ const PulseFeedEngine = (()=>{
   const restore=()=>{
     try{
       let raw=localStorage.getItem(PULSE_FEED_CONFIG.cacheKey);
-      if(!raw) raw=localStorage.getItem('nepsePulseCentralFeedV19');
+      // Do not revive legacy V19 cache: it can contain the securities master instead of live prices.
       const c=JSON.parse(raw||'null');
-      const cachedRows = c && (Array.isArray(c.live)&&c.live.length ? c.live : (Array.isArray(c.liveMarket)&&c.liveMarket.length ? c.liveMarket : c.securities));
-      if(c&&Array.isArray(cachedRows)&&cachedRows.length){
-        Object.assign(state,c,{live:cachedRows,status:'CACHED'});
+      // Only restore a verified market snapshot. Never fall back to a security master list,
+      // because that list contains prices but is not live market data.
+      const cachedRows = c && Array.isArray(c.live) ? normalizeLive(c.live) : [];
+      const usable = cachedRows.filter(x=>x.ltp!==null && (x.pct!==null || x.prev!==null || x.change!==null));
+      if(c&&usable.length>=50){
+        Object.assign(state,c,{live:usable,status:'CACHED'});
         window.PULSE_FEED_STATUS='CACHED'; window.PULSE_FEED_TIMESTAMP=state.updatedAt||'—';
         emit();
         window.dispatchEvent(new CustomEvent('nepse:pulse-ready',{detail:{ok:true,cached:true}}));
@@ -1673,16 +1686,18 @@ const PulseFeedEngine = (()=>{
   const setStatus=(s,e)=>{state.status=s;state.lastError=e||null;window.PULSE_FEED_STATUS=s;window.PULSE_FEED_TIMESTAMP=state.updatedAt||'—';emit()};
   const applySnapshot=(d)=>{
     const rows=normalizeLive(d.live);
-    if(!rows.length)throw new Error('NEPSE API returned 0 stock rows');
+    const usable=rows.filter(x=>x.ltp!==null && (x.pct!==null || x.prev!==null || x.change!==null));
+    if(usable.length<50)throw new Error('NEPSE API returned insufficient verified live rows ('+usable.length+')');
+    const rowsToStore=usable;
     // Quality gate: never replace a healthy snapshot with a suspiciously
-    // small partial response. Keep the last known-good market visible.
+    // small/partial response. Keep the last known-good market visible.
     const previousCount=Array.isArray(state.live)?state.live.length:0;
-    const minimumAcceptable=previousCount>0 ? Math.max(50, Math.floor(previousCount*0.50)) : 1;
-    if(previousCount>0 && rows.length < minimumAcceptable){
+    const minimumAcceptable=previousCount>0 ? Math.max(50, Math.floor(previousCount*0.50)) : 50;
+    if(rowsToStore.length < minimumAcceptable){
       throw new Error('Feed returned an incomplete snapshot ('+rows.length+' rows; keeping '+previousCount+' cached rows)');
     }
-    state.live=rows;
-    state.companies=arr(d.companies).length?d.companies:rows;
+    state.live=rowsToStore;
+    state.companies=arr(d.companies).length?d.companies:rowsToStore;
     state.gainers=normalizeLive(d.gainers);
     state.losers=normalizeLive(d.losers);
     state.index=normalizeIndex(d.index);
@@ -1694,7 +1709,7 @@ const PulseFeedEngine = (()=>{
     state.providerType=d.providerType||'NEPSE market feed';
     state.diagnostics=d.diagnostics||{};
     state.diagnostics.listedSymbols=Math.max(461,Number(state.diagnostics.listedSymbols)||461);
-    state.diagnostics.coveredRows=rows.length;
+    state.diagnostics.coveredRows=rowsToStore.length;
     state.diagnostics.apiBase=PULSE_FEED_CONFIG.apiBase;
     state.lastError=state.diagnostics.failures?.length?state.diagnostics.failures.join(' | '):null;
     persist();
@@ -4203,11 +4218,21 @@ document.addEventListener('DOMContentLoaded',()=>{
     if(Array.isArray(state?.securities) && state.securities.length) return state.securities;
     return [];
   }
-  function change(r){return n(pick(r,['percentageChange','percentChange','changePercent','changePct','pChange']))}
-  function price(r){return n(pick(r,['lastPrice','ltp','LTP','price','closePrice']))}
-  function ch(r){return n(pick(r,['change','priceChange','pointChange']))}
-  function vol(r){return n(pick(r,['volume','totalTradedQuantity','quantity','shares']))}
-  function turnover(r){return n(pick(r,['turnover','totalTradedValue','value']))}
+  function change(r){
+    const direct=n(pick(r,['percentageChange','percentChange','changePercent','changePct','pChange','perChange','perchange','percentagechange','percentchange','changePercentage','percent_change']));
+    if(direct!==null)return direct;
+    const p=price(r), prev=n(pick(r,['previousClose','previousclose','previousClosingPrice','prevClose','previousPrice','previousDayClose']));
+    return p!==null&&prev!==null&&prev!==0?((p-prev)/prev)*100:null;
+  }
+  function price(r){return n(pick(r,['lastTradedPrice','lastPrice','ltp','LTP','price','closePrice','closingPrice','close','currentPrice']))}
+  function ch(r){
+    const direct=n(pick(r,['change','priceChange','pointChange','changeValue','difference']));
+    if(direct!==null)return direct;
+    const p=price(r), prev=n(pick(r,['previousClose','previousclose','previousClosingPrice','prevClose','previousPrice','previousDayClose']));
+    return p!==null&&prev!==null? p-prev:null;
+  }
+  function vol(r){return n(pick(r,['volume','totalTradedQuantity','quantity','shares','tradedShares','shareVolume']))}
+  function turnover(r){return n(pick(r,['turnover','totalTradedValue','value','totalTradeValue','totalTradedValue']))}
   function sym(r){return pick(r,['symbol','Symbol','ticker','stockSymbol','securitySymbol'])||'—'}
 
   function fmt(v,dec=2){return n(v)===null?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:dec})}
@@ -4305,8 +4330,10 @@ document.addEventListener('DOMContentLoaded',()=>{
     q('[data-breadth="positive"] b').textContent=fmt(plusCircuit,0);
     q('[data-breadth="negative"] b').textContent=fmt(minusCircuit,0);
 
-    const gainers=[...rs].filter(r=>change(r)!==null).sort((a,b)=>change(b)-change(a));
-    const losers=[...rs].filter(r=>change(r)!==null).sort((a,b)=>change(a)-change(b));
+    const liveGainers=Array.isArray(lastState.gainers)?lastState.gainers:[];
+    const liveLosers=Array.isArray(lastState.losers)?lastState.losers:[];
+    const gainers=(liveGainers.length?liveGainers:[...rs].filter(r=>change(r)!==null).sort((a,b)=>change(b)-change(a)));
+    const losers=(liveLosers.length?liveLosers:[...rs].filter(r=>change(r)!==null).sort((a,b)=>change(a)-change(b)));
     const moverRows=(moverMode==='gainers'?gainers:losers).slice(0,5);
     q('#pulseMoversRows').innerHTML=moverRows.map(r=>{
       const c=change(r), cls=c>=0?'up':'down';
