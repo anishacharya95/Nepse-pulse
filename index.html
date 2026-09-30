@@ -1903,7 +1903,7 @@ const PULSE_FEED_CONFIG = {
   wsUrl: 'wss://nepseapiws.surajrimal.dev/',
   pollMs: 60000,
   closedPollMs: 180000,
-  timeoutMs: 9000,
+  timeoutMs: 90000,
   cacheKey: 'nepsePulseCentralFeedV24_2_REAL',
   listedSymbols: 461
 };
@@ -2580,7 +2580,7 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
     <div class="b-card">
       <b>Latest Floorsheet</b>
       <div class="b-muted">Verified transactions returned by the configured feed.</div>
-      <div id="bFloorRows" class="b-list"><div class="b-empty">Waiting for floorsheet data…</div></div>
+      <div id="bFloorMeta" class="b-muted">Loading complete daily floorsheet…</div><div id="bFloorRows" class="b-list"><div class="b-empty">Waiting for floorsheet data…</div></div>
     </div>
 
     <div class="b-card">
@@ -2642,7 +2642,7 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
     })).filter(x=>x.symbol!=='—');
 
     const fr=$('bFloorRows');
-    if(fr) fr.innerHTML=normalized.slice(0,12).map(x=>`<div class="b-item"><span><b>${esc(x.symbol)}</b><small>${esc(x.side)} • ${esc(x.broker)}</small></span><span>${money(x.qty)} @ ${money(x.price)}</span></div>`).join('')||'<div class="b-empty">No verified floorsheet rows.</div>';
+    if($('bFloorMeta')) $('bFloorMeta').textContent=normalized.length ? `Today’s complete floorsheet: ${normalized.length.toLocaleString()} trades loaded` : 'No floorsheet rows returned yet'; if(fr) fr.innerHTML=normalized.slice(0,50).map(x=>`<div class="b-item"><span><b>${esc(x.symbol)}</b><small>${esc(x.side)} • ${esc(x.broker)}</small></span><span>${money(x.qty)} @ ${money(x.price)}</span></div>`).join('')||'<div class="b-empty">No verified floorsheet rows.</div>';
 
     const agg={};
     normalized.forEach(x=>{

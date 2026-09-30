@@ -542,59 +542,100 @@ async def get_fundamentals(symbol: str):
 
 
 async def get_floorsheet(symbol: Optional[str] = None):
-    """Return normalized current-session floorsheet rows.
+    """Return the complete current-session floorsheet, normalized to a flat list.
 
-    The UI expects a flat list.  Newer nepsepy versions return a wrapper such
-    as {"floorsheets": {"content": [...], "totalPages": ...}}, so returning
-    that wrapper directly makes the browser's generic array parser see zero
-    rows.  Prefer the client method, then the public REST service, and finally
-    the static daily archive when available.
+    NEPSE paginates the floor sheet.  nepsepy exposes the same page/size
+    parameters used by the website, so fetch every page and cache the result
+    for the current session.  The browser never has to make dozens of NEPSE
+    requests itself.
     """
     key = f"floorsheet:{symbol.upper().strip() if symbol else 'all'}"
 
     async def load():
         errors = []
-        raw = None
-        # Prefer nepsepy's floorsheets() method.  It knows the current NEPSE
-        # session and current pagination format.
-        try:
-            if symbol:
-                company = await resolve_company(symbol)
-                sid = pick(company, ["id", "securityId", "security_id"])
-                if sid is not None:
-                    raw = await nepse_call(["floorsheets"], stock_id=int(sid))
-                else:
-                    raw = await nepse_call(["floorsheets"])
-            else:
-                raw = await nepse_call(["floorsheets"])
-            rows = floor_rows(raw)
-            if rows:
-                wanted = symbol.upper().strip() if symbol else None
-                if wanted:
-                    rows = [r for r in rows if str(r.get("symbol") or "").upper() == wanted]
-                return rows
-            errors.append("nepsepy floorsheets returned no rows")
-        except Exception as e:
-            errors.append(f"nepsepy floorsheets: {e}")
+        wanted = symbol.upper().strip() if symbol else None
 
-        # Public compatibility service.  Its /Floorsheet response is also
-        # normalized locally so the frontend always receives a flat list.
+        async def fetch_all_with_nepse():
+            company_id = None
+            if wanted:
+                company = await resolve_company(wanted)
+                company_id = pick(company, ["id", "securityId", "security_id"])
+
+            page_size = 500
+            first = await nepse_call(
+                ["floorsheets"], page=1, size=page_size,
+                stock_id=int(company_id) if company_id is not None else None,
+                sort_by="contractId", sort_order="desc"
+            )
+            first_rows = floor_rows(first)
+            wrapper = first.get("floorsheets") if isinstance(first, dict) else None
+            total_pages = 1
+            total_trades = None
+            if isinstance(wrapper, dict):
+                try: total_pages = max(1, int(wrapper.get("totalPages") or 1))
+                except Exception: total_pages = 1
+                try: total_trades = int(wrapper.get("totalElements"))
+                except Exception: pass
+            if isinstance(first, dict):
+                try: total_trades = int(first.get("totalTrades")) if total_trades is None else total_trades
+                except Exception: pass
+
+            rows = list(first_rows)
+            # Guard against a malformed server response claiming an absurd page count.
+            total_pages = min(total_pages, 500)
+            for page in range(2, total_pages + 1):
+                data = await nepse_call(
+                    ["floorsheets"], page=page, size=page_size,
+                    stock_id=int(company_id) if company_id is not None else None,
+                    sort_by="contractId", sort_order="desc"
+                )
+                page_rows = floor_rows(data)
+                if not page_rows:
+                    break
+                rows.extend(page_rows)
+                # Stop if the API reports the complete expected count.
+                if total_trades is not None and len(rows) >= total_trades:
+                    break
+            if wanted:
+                rows = [r for r in rows if str(r.get("symbol") or "").upper() == wanted]
+            return rows
+
+        try:
+            rows = await fetch_all_with_nepse()
+            if rows:
+                return rows
+            errors.append("NEPSE floorsheet returned no rows")
+        except Exception as e:
+            errors.append(f"NEPSE floorsheet: {e}")
+
+        # Compatibility API fallback.
         for path, params in (
-            ("/FloorsheetOf", {"symbol": symbol.upper().strip()} if symbol else None),
+            ("/FloorsheetOf", {"symbol": wanted} if wanted else None),
             ("/Floorsheet", None),
         ):
-            if symbol is None and path == "/FloorsheetOf":
+            if not wanted and path == "/FloorsheetOf":
                 continue
             try:
                 raw = await public_get(path, params)
                 rows = floor_rows(raw)
                 if rows:
-                    if symbol:
-                        rows = [r for r in rows if str(r.get("symbol") or "").upper() == symbol.upper().strip()]
+                    if wanted:
+                        rows = [r for r in rows if str(r.get("symbol") or "").upper() == wanted]
                     return rows
-                errors.append(f"{path} returned no rows")
             except Exception as e:
                 errors.append(f"{path}: {e}")
+
+        # Historical open-data archive is a final fallback after the live feed.
+        try:
+            today = datetime.now().strftime("%Y-%m-%d")
+            raw = await static_get(f"/floor_sheet/daily/{today}.json")
+            rows = floor_rows(raw)
+            if wanted:
+                rows = [r for r in rows if str(r.get("symbol") or "").upper() == wanted]
+            if rows:
+                return rows
+        except Exception as e:
+            errors.append(f"daily archive: {e}")
 
         return []
 
@@ -951,7 +992,7 @@ def technical_from(values):
     return {"last":last,"sma20":s20,"sma50":s50,"ema20":e20,"rsi14":r,"trend":trend,"signal":signal}
 
 @app.get("/api/floorsheet")
-async def api_floorsheet(symbol: Optional[str]=None, limit:int=Query(2000,ge=1,le=5000)):
+async def api_floorsheet(symbol: Optional[str]=None, limit:int=Query(100000,ge=1,le=100000)):
     rows=await get_floorsheet(symbol)
     rows=rows[:limit]
     return {"ok":bool(rows),"source":"NEPSE floorsheet","symbol":symbol,"data":rows,"count":len(rows),"updatedAt":now_iso()}
