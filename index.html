@@ -1564,7 +1564,7 @@ window.PULSE_FEED_STATUS='CONNECTING'; window.PULSE_FEED_TIMESTAMP='—';
 
 
 /* =========================
-   NEPSE PULSE V19 — NEPSE API CENTRAL FEED
+   NEPSE PULSE V24.1 — STABLE FAST CENTRAL FEED
    Primary: unofficial NEPSE REST API service.
    Browser path: /api/nepse (Netlify server-side proxy).
    Standalone path: direct hosted API with CORS.
@@ -1577,7 +1577,7 @@ const PULSE_FEED_CONFIG = {
   pollMs: 60000,
   closedPollMs: 180000,
   timeoutMs: 9000,
-  cacheKey: 'nepsePulseCentralFeedV24',
+  cacheKey: 'nepsePulseCentralFeedV24_1',
   listedSymbols: 461
 };
 
@@ -1653,14 +1653,15 @@ const PulseFeedEngine = (()=>{
     const data=await fetchRoute(route,query); return {ok:true,data};
   };
   let refreshInFlight=null;
-  const persist=()=>{try{localStorage.setItem(PULSE_FEED_CONFIG.cacheKey,JSON.stringify({version:24,savedAt:Date.now(),...state}))}catch(e){}};
+  const persist=()=>{try{localStorage.setItem(PULSE_FEED_CONFIG.cacheKey,JSON.stringify({version:'24.1',savedAt:Date.now(),...state}))}catch(e){}};
   const restore=()=>{
     try{
       let raw=localStorage.getItem(PULSE_FEED_CONFIG.cacheKey);
       if(!raw) raw=localStorage.getItem('nepsePulseCentralFeedV19');
       const c=JSON.parse(raw||'null');
-      if(c&&Array.isArray(c.live)&&c.live.length){
-        Object.assign(state,c,{status:'CACHED'});
+      const cachedRows = c && (Array.isArray(c.live)&&c.live.length ? c.live : (Array.isArray(c.liveMarket)&&c.liveMarket.length ? c.liveMarket : c.securities));
+      if(c&&Array.isArray(cachedRows)&&cachedRows.length){
+        Object.assign(state,c,{live:cachedRows,status:'CACHED'});
         window.PULSE_FEED_STATUS='CACHED'; window.PULSE_FEED_TIMESTAMP=state.updatedAt||'—';
         emit();
         window.dispatchEvent(new CustomEvent('nepse:pulse-ready',{detail:{ok:true,cached:true}}));
@@ -1673,6 +1674,13 @@ const PulseFeedEngine = (()=>{
   const applySnapshot=(d)=>{
     const rows=normalizeLive(d.live);
     if(!rows.length)throw new Error('NEPSE API returned 0 stock rows');
+    // Quality gate: never replace a healthy snapshot with a suspiciously
+    // small partial response. Keep the last known-good market visible.
+    const previousCount=Array.isArray(state.live)?state.live.length:0;
+    const minimumAcceptable=previousCount>0 ? Math.max(50, Math.floor(previousCount*0.50)) : 1;
+    if(previousCount>0 && rows.length < minimumAcceptable){
+      throw new Error('Feed returned an incomplete snapshot ('+rows.length+' rows; keeping '+previousCount+' cached rows)');
+    }
     state.live=rows;
     state.companies=arr(d.companies).length?d.companies:rows;
     state.gainers=normalizeLive(d.gainers);
@@ -4189,7 +4197,12 @@ document.addEventListener('DOMContentLoaded',()=>{
 
   function n(v){const x=Number(v);return Number.isFinite(x)?x:null}
   function pick(o,keys){for(const k of keys){if(o&&o[k]!==undefined&&o[k]!==null&&o[k]!=='')return o[k]}return null}
-  function rows(state){return Array.isArray(state?.liveMarket)?state.liveMarket:(Array.isArray(state?.securities)?state.securities:[])}
+  function rows(state){
+    if(Array.isArray(state?.live) && state.live.length) return state.live;
+    if(Array.isArray(state?.liveMarket) && state.liveMarket.length) return state.liveMarket;
+    if(Array.isArray(state?.securities) && state.securities.length) return state.securities;
+    return [];
+  }
   function change(r){return n(pick(r,['percentageChange','percentChange','changePercent','changePct','pChange']))}
   function price(r){return n(pick(r,['lastPrice','ltp','LTP','price','closePrice']))}
   function ch(r){return n(pick(r,['change','priceChange','pointChange']))}
