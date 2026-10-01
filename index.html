@@ -2016,10 +2016,10 @@ const PulseFeedEngine = (()=>{
   };
   const setStatus=(s,e)=>{state.status=s;state.lastError=e||null;window.PULSE_FEED_STATUS=s;window.PULSE_FEED_TIMESTAMP=state.updatedAt||'—';emit()};
   const applySnapshot=(d)=>{
-    const sourceRows=arr(d.live).length?d.live:d.companies;
+    const sourceRows=Array.isArray(d.live)&&d.live.length?d.live:(Array.isArray(d.companies)?d.companies:[]);
     const rows=normalizeLive(sourceRows);
     const usable=rows.filter(x=>x.ltp!==null);
-    if(usable.length<20)throw new Error('NEPSE API returned insufficient usable price rows from live/companies ('+usable.length+')');
+    if(usable.length<20)throw new Error('NEPSE API returned insufficient live price rows ('+usable.length+')');
     const rowsToStore=usable;
     // Quality gate: never replace a healthy snapshot with a suspiciously
     // small/partial response. Keep the last known-good market visible.
