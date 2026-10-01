@@ -307,13 +307,21 @@ async def get_market():
         )
 
         live = live_raw if live_raw is not None else []
-        if not arr(live):
-            # One SDK fallback is allowed, but it is NOT required for the
-            # endpoint to return a response.
+        if not deep_rows(live) and not arr(live):
+            # Static public snapshot fallback: keeps the dashboard populated
+            # when the primary unofficial API is blocked (403).
+            for path in ("/market/live.json", "/nepse_data.json"):
+                try:
+                    candidate = await asyncio.wait_for(static_get(path), timeout=10)
+                    if deep_rows(candidate) or arr(candidate):
+                        live = candidate
+                        errors.append(f"live source switched to static snapshot: {path}")
+                        break
+                except Exception as exc:
+                    errors.append(f"static {path}: {exc}")
+        if not deep_rows(live) and not arr(live):
             try:
-                live = await asyncio.wait_for(
-                    nepse_call(["live_market"]), timeout=12
-                )
+                live = await asyncio.wait_for(nepse_call(["live_market"]), timeout=12)
             except Exception as exc:
                 errors.append(f"nepsepy.live_market: {exc}")
 
@@ -359,9 +367,20 @@ async def get_market():
         except Exception as exc:
             errors.append(f"/IsNepseOpen: {exc}")
 
+        if index_raw is None:
+            try:
+                index_raw = await asyncio.wait_for(static_get("/market/indices.json"), timeout=8)
+            except Exception as exc:
+                errors.append(f"static indices: {exc}")
+        if summary_raw is None:
+            try:
+                summary_raw = await asyncio.wait_for(static_get("/market/summary.json"), timeout=8)
+            except Exception as exc:
+                errors.append(f"static summary: {exc}")
+
         return {
             "ok": True,
-            "source": "NEPSE public market feed",
+            "source": "NEPSE primary with static snapshot fallback",
             "providerType": "Unofficial public read-only client",
             "updatedAt": now_iso(),
             "marketOpen": pick(status, ["isOpen", "marketOpen", "open"], None),
