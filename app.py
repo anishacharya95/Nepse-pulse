@@ -281,82 +281,103 @@ async def nepse_call(methods: list[str], *args, **kwargs):
 
 
 async def get_market():
+    """Fast core market feed.
+
+    The dashboard must not wait for optional nepsepy endpoints.  Fetch the
+    proven public LiveMarket endpoint first, then add index/summary data when
+    available.  Movers are derived from the live rows so the main feed still
+    works if top-ten endpoints are slow or rate-limited.
+    """
     async def load():
         errors = []
 
-        # Do not make the core feed depend on optional top-ten endpoints.
-        # One failing/rate-limited endpoint must never blank the whole dashboard.
-        async def safe(methods, *args, **kwargs):
+        async def safe_public(path, params=None):
             try:
-                return await nepse_call(methods, *args, **kwargs)
+                return await public_get(path, params)
             except Exception as exc:
-                label = methods[0] if isinstance(methods, (list, tuple)) else str(methods)
-                errors.append(f"{label}: {exc}")
+                errors.append(f"{path}: {exc}")
                 return None
 
-        status, summary, live, indices, companies = await asyncio.gather(
-            safe(["market_status"]),
-            safe(["market_summary"]),
-            safe(["live_market"]),
-            safe(["nepse_indices", "nepse_index"]),
-            safe(["companies", "securities"]),
+        # Core data only: these three requests are independent and have a
+        # short HTTP timeout.  Never serialize them behind nepsepy's client.
+        live_raw, index_raw, summary_raw = await asyncio.gather(
+            safe_public("/LiveMarket"),
+            safe_public("/NepseIndex"),
+            safe_public("/Summary"),
         )
 
-        # live_market can be empty outside trading hours. today_price is the
-        # authoritative full-session price table and also provides the rows
-        # needed by the dashboard when the live endpoint has no snapshot.
+        live = live_raw if live_raw is not None else []
         if not arr(live):
-            prices = await safe(["today_price"], page=1, size=500)
-            if prices is not None:
-                live = prices
+            # One SDK fallback is allowed, but it is NOT required for the
+            # endpoint to return a response.
+            try:
+                live = await asyncio.wait_for(
+                    nepse_call(["live_market"]), timeout=12
+                )
+            except Exception as exc:
+                errors.append(f"nepsepy.live_market: {exc}")
 
-        # Optional panels are independent. Their failure is recorded but does
-        # not invalidate the main market feed.
-        gainers, losers, turnover, trades, tx = await asyncio.gather(
-            safe(["top_gainers"], 10),
-            safe(["top_losers"], 10),
-            safe(["top_turnover"], 10),
-            safe(["top_traded_shares", "top_active"], 10),
-            safe(["top_transactions"], 10),
-        )
+        # The public API sometimes wraps rows under data/content/results.
+        live_rows = deep_rows(live, ("content", "data", "results", "rows"))
+        if not live_rows:
+            live_rows = arr(live)
 
-        # If nepsepy returned no live rows, try the existing public endpoint as
-        # a final server-side fallback without replacing any successful data.
-        if not arr(live):
-            try:
-                live = await public_get("/LiveMarket")
-            except Exception as exc:
-                errors.append(f"LiveMarket fallback: {exc}")
-        if not arr(companies):
-            try:
-                companies = await public_get("/CompanyList")
-            except Exception as exc:
-                errors.append(f"CompanyList fallback: {exc}")
-        if indices is None:
-            try:
-                indices = await public_get("/NepseIndex")
-            except Exception as exc:
-                errors.append(f"NepseIndex fallback: {exc}")
+        # Derive movers from the same live snapshot. This avoids making the
+        # core dashboard dependent on five additional rate-limited endpoints.
+        def row_pct(row):
+            value = num(pick(row, [
+                "percentageChange", "percentChange", "changePercent",
+                "perChange", "pct", "pChange", "changePercentage"
+            ]))
+            if value is not None:
+                return value
+            ltp = num(pick(row, ["ltp", "lastTradedPrice", "lastPrice", "price", "close"]))
+            prev = num(pick(row, ["previousClose", "previousClosingPrice", "prevClose"]))
+            if ltp is not None and prev not in (None, 0):
+                return ((ltp - prev) / prev) * 100
+            return None
+
+        enriched = []
+        for row in live_rows:
+            if not isinstance(row, dict):
+                continue
+            enriched.append((row_pct(row), row))
+        gainers = [r for pct, r in sorted(enriched, key=lambda x: (x[0] is not None, x[0] or -1e99), reverse=True) if pct is not None][:10]
+        losers = [r for pct, r in sorted(enriched, key=lambda x: (x[0] is not None, x[0] or 1e99)) if pct is not None][:10]
+
+        # Company directory is optional and deliberately not on the critical
+        # path. Search/company pages can request it separately.
+        companies = []
+        try:
+            companies = await asyncio.wait_for(public_get("/CompanyList"), timeout=8)
+        except Exception as exc:
+            errors.append(f"/CompanyList: {exc}")
+
+        status = {"isOpen": None}
+        try:
+            status = await asyncio.wait_for(public_get("/IsNepseOpen"), timeout=6)
+        except Exception as exc:
+            errors.append(f"/IsNepseOpen: {exc}")
 
         return {
             "ok": True,
-            "source": "NEPSE public frontend data via nepsepy",
+            "source": "NEPSE public market feed",
             "providerType": "Unofficial public read-only client",
             "updatedAt": now_iso(),
-            "marketOpen": pick(status, ["isOpen", "marketOpen"], None),
+            "marketOpen": pick(status, ["isOpen", "marketOpen", "open"], None),
             "status": status or {},
-            "summary": summary or {},
-            "index": normalize_index(indices),
-            "live": live or [],
-            "gainers": gainers or [],
-            "losers": losers or [],
-            "topTurnover": turnover or [],
-            "topTraded": trades or [],
-            "topTransactions": tx or [],
-            "companies": companies or [],
+            "summary": summary_raw or {},
+            "index": normalize_index(index_raw),
+            "live": live_rows,
+            "gainers": gainers,
+            "losers": losers,
+            "topTurnover": [],
+            "topTraded": [],
+            "topTransactions": [],
+            "companies": arr(companies),
             "diagnostics": {
                 "listedSymbols": max(461, len(arr(companies))),
-                "coveredRows": len(arr(live)),
+                "coveredRows": len(live_rows),
                 "sourceErrors": errors,
             },
         }
