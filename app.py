@@ -22,13 +22,40 @@ try:
 except Exception:
     ProductionNEPSE = None
 
-PRODUCTION_NEPSE = ProductionNEPSE(cache_ttl=30) if ProductionNEPSE else None
-PRODUCTION_SDK_ENABLED = PRODUCTION_NEPSE is not None
+PRODUCTION_NEPSE = None
+PRODUCTION_SDK_ENABLED = False
+PRODUCTION_SDK_ERROR = None
+PRODUCTION_SDK_INIT_LOCK = asyncio.Lock()
+
+async def ensure_production_sdk():
+    global PRODUCTION_NEPSE, PRODUCTION_SDK_ENABLED, PRODUCTION_SDK_ERROR
+    if PRODUCTION_NEPSE is not None:
+        return PRODUCTION_NEPSE
+    if ProductionNEPSE is None:
+        PRODUCTION_SDK_ENABLED = False
+        PRODUCTION_SDK_ERROR = "nepse.py could not be imported"
+        raise RuntimeError(PRODUCTION_SDK_ERROR)
+    async with PRODUCTION_SDK_INIT_LOCK:
+        if PRODUCTION_NEPSE is not None:
+            return PRODUCTION_NEPSE
+        try:
+            # Initialize lazily so a transient NEPSE/bootstrap/network problem
+            # can never prevent FastAPI itself from starting.
+            client = await asyncio.to_thread(ProductionNEPSE, cache_ttl=30)
+            PRODUCTION_NEPSE = client
+            PRODUCTION_SDK_ENABLED = True
+            PRODUCTION_SDK_ERROR = None
+            return client
+        except Exception as exc:
+            PRODUCTION_SDK_ENABLED = False
+            PRODUCTION_SDK_ERROR = f"{type(exc).__name__}: {exc}"
+            raise
 
 async def production_call(method: str, *args, **kwargs):
-    if PRODUCTION_NEPSE is None:
-        raise RuntimeError("production nepse.py is not installed")
-    fn = getattr(PRODUCTION_NEPSE, method)
+    client = await ensure_production_sdk()
+    fn = getattr(client, method, None)
+    if fn is None:
+        raise RuntimeError(f"nepse.py method not available: {method}")
     return await asyncio.to_thread(fn, *args, **kwargs)
 
 
@@ -256,73 +283,83 @@ async def nepse_call(methods: list[str], *args, **kwargs):
 async def get_market():
     async def load():
         errors = []
-        try:
-            status, summary, live, gainers, losers, turnover, trades, tx = await asyncio.gather(
-                nepse_call(["market_status"]),
-                nepse_call(["market_summary"]),
-                nepse_call(["live_market"]),
-                nepse_call(["top_gainers"], True),
-                nepse_call(["top_losers"], True),
-                nepse_call(["top_turnover"], True),
-                nepse_call(["top_traded_shares", "top_active"], True),
-                nepse_call(["top_transactions"], True),
-            )
-            if not arr(live):
-                try:
-                    live = await nepse_call(["today_price"], page=1, size=500)
-                except Exception as e:
-                    errors.append(f"today_price: {e}")
-            indices = await nepse_call(["nepse_indices", "nepse_index"])
-            companies = await nepse_call(["companies", "securities"])
-            return {
-                "ok": True,
-                "source": "NEPSE public frontend data via nepsepy",
-                "providerType": "Unofficial public read-only client",
-                "updatedAt": now_iso(),
-                "marketOpen": pick(status, ["isOpen", "marketOpen"], None),
-                "status": status,
-                "summary": summary,
-                "index": normalize_index(indices),
-                "live": live,
-                "gainers": gainers,
-                "losers": losers,
-                "topTurnover": turnover,
-                "topTraded": trades,
-                "topTransactions": tx,
-                "companies": companies,
-                "diagnostics": {"listedSymbols": max(461, len(arr(companies))), "sourceErrors": errors},
-            }
-        except Exception as e:
-            errors.append(str(e))
-            # Server-side fallback to the public API service. This keeps the browser away from CORS.
-            endpoints = {
-                "status": "/IsNepseOpen",
-                "summary": "/Summary",
-                "index": "/NepseIndex",
-                "live": "/LiveMarket",
-                "gainers": "/TopGainers",
-                "losers": "/TopLosers",
-                "topTurnover": "/TopTenTurnoverScrips",
-                "topTraded": "/TopTenTradeScrips",
-                "topTransactions": "/TopTenTransactionScrips",
-                "companies": "/CompanyList",
-            }
-            out = {}
-            for k, path in endpoints.items():
-                try:
-                    out[k] = await public_get(path)
-                except Exception as ex:
-                    out[k] = [] if k not in ("status",) else {"isOpen": None}
-                    errors.append(f"{k}: {ex}")
-            return {
-                "ok": True,
-                "source": "Server-side public NEPSE API fallback",
-                "providerType": "Unofficial public read-only client",
-                "updatedAt": now_iso(),
-                "marketOpen": pick(out.get("status"), ["isOpen", "marketOpen"], None),
-                **out,
-                "diagnostics": {"listedSymbols": max(461, len(arr(out.get("companies")))), "sourceErrors": errors},
-            }
+
+        # Do not make the core feed depend on optional top-ten endpoints.
+        # One failing/rate-limited endpoint must never blank the whole dashboard.
+        async def safe(methods, *args, **kwargs):
+            try:
+                return await nepse_call(methods, *args, **kwargs)
+            except Exception as exc:
+                label = methods[0] if isinstance(methods, (list, tuple)) else str(methods)
+                errors.append(f"{label}: {exc}")
+                return None
+
+        status, summary, live, indices, companies = await asyncio.gather(
+            safe(["market_status"]),
+            safe(["market_summary"]),
+            safe(["live_market"]),
+            safe(["nepse_indices", "nepse_index"]),
+            safe(["companies", "securities"]),
+        )
+
+        # live_market can be empty outside trading hours. today_price is the
+        # authoritative full-session price table and also provides the rows
+        # needed by the dashboard when the live endpoint has no snapshot.
+        if not arr(live):
+            prices = await safe(["today_price"], page=1, size=500)
+            if prices is not None:
+                live = prices
+
+        # Optional panels are independent. Their failure is recorded but does
+        # not invalidate the main market feed.
+        gainers, losers, turnover, trades, tx = await asyncio.gather(
+            safe(["top_gainers"], 10),
+            safe(["top_losers"], 10),
+            safe(["top_turnover"], 10),
+            safe(["top_traded_shares", "top_active"], 10),
+            safe(["top_transactions"], 10),
+        )
+
+        # If nepsepy returned no live rows, try the existing public endpoint as
+        # a final server-side fallback without replacing any successful data.
+        if not arr(live):
+            try:
+                live = await public_get("/LiveMarket")
+            except Exception as exc:
+                errors.append(f"LiveMarket fallback: {exc}")
+        if not arr(companies):
+            try:
+                companies = await public_get("/CompanyList")
+            except Exception as exc:
+                errors.append(f"CompanyList fallback: {exc}")
+        if indices is None:
+            try:
+                indices = await public_get("/NepseIndex")
+            except Exception as exc:
+                errors.append(f"NepseIndex fallback: {exc}")
+
+        return {
+            "ok": True,
+            "source": "NEPSE public frontend data via nepsepy",
+            "providerType": "Unofficial public read-only client",
+            "updatedAt": now_iso(),
+            "marketOpen": pick(status, ["isOpen", "marketOpen"], None),
+            "status": status or {},
+            "summary": summary or {},
+            "index": normalize_index(indices),
+            "live": live or [],
+            "gainers": gainers or [],
+            "losers": losers or [],
+            "topTurnover": turnover or [],
+            "topTraded": trades or [],
+            "topTransactions": tx or [],
+            "companies": companies or [],
+            "diagnostics": {
+                "listedSymbols": max(461, len(arr(companies))),
+                "coveredRows": len(arr(live)),
+                "sourceErrors": errors,
+            },
+        }
     return await cached("market:core", load)
 
 
@@ -1104,19 +1141,33 @@ async def api_stock_xray(symbol:str):
 
 @app.get("/api/production/status")
 async def production_status():
-    return {"ok": PRODUCTION_SDK_ENABLED, "sdk": "nepse.py", "cache": await production_call("cache_info") if PRODUCTION_SDK_ENABLED else {}}
+    try:
+        await ensure_production_sdk()
+        cache = await production_call("cache_info")
+        return {"ok": True, "sdk": "nepse.py", "cache": cache, "error": None}
+    except Exception as exc:
+        return {"ok": False, "sdk": "nepse.py", "cache": {}, "error": PRODUCTION_SDK_ERROR or str(exc)}
 
 @app.get("/api/production/market")
 async def production_market():
-    vals = await asyncio.gather(
-        production_call("market_status"), production_call("market_summary"),
-        production_call("live_market"), production_call("indices"),
-        production_call("top_gainers"), production_call("top_losers"),
-        production_call("top_turnover"), production_call("top_trade"),
-        production_call("top_transaction"), production_call("companies"),
-    )
-    keys = ["status","summary","live","indices","gainers","losers","turnover","trades","transactions","companies"]
-    return {"ok": True, "source":"nepse.py production data layer", **dict(zip(keys, vals)), "updatedAt": now_iso()}
+    try:
+        vals = await asyncio.gather(
+            production_call("market_status"), production_call("market_summary"),
+            production_call("live_market"), production_call("indices"),
+            production_call("top_gainers"), production_call("top_losers"),
+            production_call("top_turnover"), production_call("top_trade"),
+            production_call("top_transaction"), production_call("companies"),
+        )
+        keys = ["status","summary","live","indices","gainers","losers","turnover","trades","transactions","companies"]
+        return {"ok": True, "source":"nepse.py production data layer", **dict(zip(keys, vals)), "updatedAt": now_iso()}
+    except Exception as exc:
+        # Never blank the main feed just because the optional production SDK
+        # layer is unavailable. The proven central market loader remains the
+        # authoritative fallback.
+        data = await get_market()
+        if isinstance(data, dict):
+            data.setdefault("diagnostics", {})["productionSdkError"] = str(exc)
+        return data
 
 @app.get("/api/production/company/{symbol}")
 async def production_company(symbol: str):
