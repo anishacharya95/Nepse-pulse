@@ -1910,8 +1910,6 @@ def _row_date(row: dict) -> Optional[str]:
     except Exception:
         return None
 
-HISTORY_DIAGNOSTICS = {}
-
 async def _historical_floor_rows(start_date: datetime.date, end_date: datetime.date, symbol: Optional[str] = None):
     """Load historical trades from NEPSE Open Data, then use the existing archive as fallback.
 
@@ -1991,11 +1989,8 @@ async def _historical_floor_rows(start_date: datetime.date, end_date: datetime.d
     if paths:
         batches = await asyncio.gather(*(load_path(day, path) for day, path in paths))
         data = [row for batch in batches for row in batch]
-        HISTORY_DIAGNOSTICS.update({"githubFilesFound": len(paths), "githubRowsParsed": len(data), "githubErrors": errors[:8], "samplePaths": [p for _, p in paths[:3]]})
         if data:
             return data
-    else:
-        HISTORY_DIAGNOSTICS.update({"githubFilesFound": 0, "githubRowsParsed": 0, "githubErrors": errors[:8], "samplePaths": []})
 
     # Fallback to YONEPSE's compact daily JSON archive if Open Data had no
     # matching files or returned no parseable rows.
@@ -2018,9 +2013,7 @@ async def _historical_floor_rows(start_date: datetime.date, end_date: datetime.d
         except Exception:
             return []
     batches = await asyncio.gather(*(fetch_fallback(day) for day in dates))
-    fallback_data = [row for batch in batches for row in batch]
-    HISTORY_DIAGNOSTICS.update({**HISTORY_DIAGNOSTICS, "fallbackRowsParsed": len(fallback_data)})
-    return fallback_data
+    return [row for batch in batches for row in batch]
 
 def _build_broker_report(rows: list[dict]):
     brokers = {}
@@ -2067,7 +2060,7 @@ def _build_broker_report(rows: list[dict]):
     return broker_rows, symbol_rows, daily_rows
 
 @app.get("/api/brokers/history")
-async def api_brokers_history(months: int = Query(3, ge=1, le=12), symbol: Optional[str] = None,
+async def api_brokers_history(months: int = Query(12, ge=1, le=12), symbol: Optional[str] = None,
                               start: Optional[str] = None, end: Optional[str] = None):
     """Historical broker flow from archived floorsheets, with data for charts."""
     today = datetime.now().date()
@@ -2093,7 +2086,7 @@ async def api_brokers_history(months: int = Query(3, ge=1, le=12), symbol: Optio
                           "sellQty": sum(x["sellQty"] for x in day_rows)})
         return {"ok": bool(rows), "source": "NEPSE Open Data (with YONEPSE archive fallback)", "startDate": start_day.isoformat(),
                 "endDate": end_day.isoformat(), "monthsRequested": months, "symbol": symbol.upper() if symbol else None,
-                "dataCoverage": {"tradeRows": len(rows), "daysWithData": len(dates)}, "diagnostics": dict(HISTORY_DIAGNOSTICS), "brokers": broker_rows,
+                "dataCoverage": {"tradeRows": len(rows), "daysWithData": len(dates)}, "brokers": broker_rows,
                 "bySymbol": symbol_rows, "dailyByBroker": daily_rows, "chart": chart,
                 "holdingNote": "Net buy/sell is transaction flow over this period, not a broker's current demat holding.",
                 "updatedAt": now_iso()}
