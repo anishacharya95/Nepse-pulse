@@ -2060,7 +2060,7 @@ def _build_broker_report(rows: list[dict]):
     return broker_rows, symbol_rows, daily_rows
 
 @app.get("/api/brokers/history")
-async def api_brokers_history(months: int = Query(12, ge=1, le=12), symbol: Optional[str] = None,
+async def api_brokers_history(months: int = Query(6, ge=1, le=6), symbol: Optional[str] = None,
                               start: Optional[str] = None, end: Optional[str] = None):
     """Historical broker flow from archived floorsheets, with data for charts."""
     today = datetime.now().date()
@@ -2071,6 +2071,10 @@ async def api_brokers_history(months: int = Query(12, ge=1, le=12), symbol: Opti
         raise HTTPException(status_code=400, detail="start/end must use YYYY-MM-DD")
     if start_day > end_day:
         raise HTTPException(status_code=400, detail="start must be on or before end")
+    # Hard-limit floorsheet history to six months even when callers pass dates.
+    earliest_allowed = _subtract_months(datetime.combine(end_day, datetime.min.time()), 6).date()
+    if start_day < earliest_allowed:
+        start_day = earliest_allowed
     cache_key = f"brokers-history:{start_day}:{end_day}:{(symbol or 'all').upper()}"
     async def load():
         rows = await _historical_floor_rows(start_day, end_day, symbol)
