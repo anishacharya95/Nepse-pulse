@@ -566,42 +566,70 @@ async def get_index():
     return await cached("index:current", load)
 
 
+def normalize_index_history_rows(raw: Any, wanted_id: int = 58) -> list[dict]:
+    """Normalize and validate ONLY the requested headline NEPSE index series."""
+    rows = deep_rows(raw, ("content", "data", "results", "result", "records", "rows", "history", "index"))
+    if not rows and isinstance(raw, list):
+        rows = raw
+
+    def matches(r: dict) -> bool:
+        rid = pick(r, ["id", "indexId", "index_id", "exchangeIndexId"])
+        name = str(pick(r, ["index", "indexName", "name", "symbol"], "") or "").strip().upper()
+        try:
+            if rid is not None and int(float(rid)) == int(wanted_id):
+                return True
+        except Exception:
+            pass
+        return name in {"NEPSE", "NEPSE INDEX"} or name.startswith("NEPSE INDEX")
+
+    dict_rows=[r for r in rows if isinstance(r,dict)]
+    labelled=[r for r in dict_rows if any(pick(r,[k]) is not None for k in ["id","indexId","index","indexName","name"])]
+    candidates=[r for r in labelled if matches(r)] if any(matches(r) for r in labelled) else dict_rows
+    out=[]
+    for r in candidates:
+        date=pick(r,["date","businessDate","publishedDate","generatedTime","tradingDate","tradeDate","timestamp","time","datetime","dateTime"])
+        o=num(pick(r,["open","openingPrice","openPrice"]))
+        h=num(pick(r,["high","highPrice","dayHigh"]))
+        l=num(pick(r,["low","lowPrice","dayLow"]))
+        c=num(pick(r,["close","closingPrice","currentValue","indexValue","value","ltp","lastPrice","price"]))
+        if c is None: continue
+        if o is None: o=c
+        if h is None: h=max(o,c)
+        if l is None: l=min(o,c)
+        out.append({"date":str(date or ""),"open":o,"high":h,"low":l,"close":c,"volume":None})
+    seen=set(); clean=[]
+    for r in sorted(out,key=lambda x:str(x.get("date") or "")):
+        k=(r["date"],r["open"],r["high"],r["low"],r["close"])
+        if k not in seen: seen.add(k); clean.append(r)
+    return clean
+
+
 async def get_index_history(index_id: int = 58):
     try: index_id=int(index_id)
     except Exception: index_id=58
-    key = f"history:{index_id}"
+    key=f"history:{index_id}"
     async def load():
-        errors = []
-        # NEPSE main index is security/index id 58. Prefer the dedicated
-        # index-history method when it returns a real row list.
+        errors=[]
         try:
-            raw = await nepse_call(["index_history"], index_id, 1, 500)
-            rows = normalize_history_rows(raw)
+            raw=await nepse_call(["index_history"], index_id, 1, 1000)
+            rows=normalize_index_history_rows(raw,index_id)
             if rows:
-                return {"ok": True, "source": "NEPSE via nepsepy:index_history", "data": rows, "errors": errors, "updatedAt": now_iso()}
-            errors.append("nepsepy index_history: empty")
-        except Exception as exc:
-            errors.append(f"nepsepy index_history: {exc}")
-        # Public intraday/history adapter.
+                return {"ok":True,"source":"NEPSE via nepsepy:index_history","data":rows,"errors":errors,"updatedAt":now_iso()}
+            errors.append("nepsepy index_history returned no usable NEPSE rows")
+        except Exception as e:
+            errors.append(f"nepsepy.index_history: {e}")
         try:
-            raw = await public_get("/DailyNepseIndexGraph")
-            rows = normalize_history_rows(raw)
+            raw=await public_get("/DailyNepseIndexGraph")
+            rows=normalize_index_history_rows(raw,index_id)
             if rows:
-                return {"ok": True, "source": "NEPSE public DailyNepseIndexGraph", "data": rows, "errors": errors, "updatedAt": now_iso()}
-            errors.append("public DailyNepseIndexGraph: empty")
-        except Exception as exc:
-            errors.append(f"public graph: {exc}")
-        # Durable static OHLC history. This is specifically a NEPSE index
-        # archive, not a substitute stock/security feed.
-        try:
-            rows = await yonepse_index_history()
-            if rows:
-                return {"ok": True, "source": "NEPSE index OHLC archive", "data": rows, "errors": errors, "updatedAt": now_iso()}
-            errors.append("index OHLC archive: empty")
-        except Exception as exc:
-            errors.append(f"index OHLC archive: {exc}")
-        return {"ok": False, "source": None, "data": [], "errors": errors, "updatedAt": now_iso()}
-    return await cached(key, load)
+                return {"ok":True,"source":"NEPSE public DailyNepseIndexGraph","data":rows,"errors":errors,"updatedAt":now_iso()}
+            errors.append("public graph returned no usable NEPSE rows")
+        except Exception as e:
+            errors.append(f"public graph: {e}")
+        # Never substitute stock OHLC, market-summary data, or a stale static
+        # dataset for the index. Wrong data is worse than an empty chart.
+        return {"ok":False,"source":None,"data":[],"errors":errors,"updatedAt":now_iso()}
+    return await cached(key,load)
 
 
 async def resolve_company(symbol: str):
@@ -1444,16 +1472,24 @@ async def api_history(index: int = Query(58)):
 
 @app.get("/DailyNepseIndexGraph")
 async def daily_nepse_index_graph():
-    # Try the live/intraday graph first, then return the verified NEPSE index
-    # OHLC history rather than an empty response.
+    errors=[]
     try:
-        raw = await public_get("/DailyNepseIndexGraph")
-        rows = normalize_history_rows(raw)
+        raw=await public_get("/DailyNepseIndexGraph")
+        rows=normalize_index_history_rows(raw,58)
         if rows:
-            return {"ok": True, "source": "NEPSE public DailyNepseIndexGraph", "data": rows, "updatedAt": now_iso()}
-    except Exception:
-        pass
-    return await get_index_history(58)
+            return {"ok":True,"source":"NEPSE public DailyNepseIndexGraph","data":rows,"updatedAt":now_iso(),"errors":errors}
+        errors.append("public graph returned no usable NEPSE rows")
+    except Exception as e:
+        errors.append(f"public graph: {e}")
+    try:
+        raw=await nepse_call(["index_history"],58,1,1000)
+        rows=normalize_index_history_rows(raw,58)
+        if rows:
+            return {"ok":True,"source":"NEPSE via nepsepy:index_history","data":rows,"updatedAt":now_iso(),"errors":errors}
+        errors.append("nepsepy index history returned no usable rows")
+    except Exception as e:
+        errors.append(f"nepsepy index history: {e}")
+    return {"ok":False,"source":None,"data":[],"updatedAt":now_iso(),"errors":errors}
 
 
 @app.get("/NepseIndex")

@@ -4794,22 +4794,25 @@ document.addEventListener('DOMContentLoaded',()=>{
     return null;
   };
   const normalize=v=>{
-    return arr(v).map(o=>{
+    const rows=arr(v);
+    const objs=rows.filter(o=>o&&typeof o==='object'&&!Array.isArray(o));
+    const isNepse=o=>{
+      const id=n(pick(o,['id','indexid','index_id','exchangeindexid']));
+      const name=String(pick(o,['index','indexname','name','symbol'])??'').trim().toUpperCase();
+      return id===58 || name==='NEPSE' || name==='NEPSE INDEX' || name.startsWith('NEPSE INDEX');
+    };
+    const scoped=objs.some(isNepse)?objs.filter(isNepse):objs;
+    return scoped.map(o=>{
       if(Array.isArray(o)){
-        const ts=n(o[0]), val=n(o[1]);
-        const ms=ts!=null && ts<100000000000 ? ts*1000 : ts;
-        const d=ms!=null && Number.isFinite(ms) ? new Date(ms) : null;
-        return {date:d ? d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : String(o[0]??''),open:null,high:null,low:null,close:val,volume:null};
+        const ts=n(o[0]),val=n(o[1]);
+        const ms=ts!=null&&ts<100000000000?ts*1000:ts;
+        const d=ms!=null&&Number.isFinite(ms)?new Date(ms):null;
+        return {date:d?d.toISOString():String(o[0]??''),open:null,high:null,low:null,close:val,volume:null};
       }
-      return {
-        date:String(pick(o,['date','businessdate','publisheddate','timestamp','tradedate','time','datetime','datetimevalue'])??''),
-        open:n(pick(o,['open','openingprice','openprice'])),
-        high:n(pick(o,['high','highprice','dayhigh'])),
-        low:n(pick(o,['low','lowprice','daylow'])),
-        close:n(pick(o,['close','closingprice','ltp','lasttradedprice','lastprice','price','index','value','currentvalue','indexvalue'])),
-        volume:n(pick(o,['volume','tradedshares','quantity','totaltradedquantity']))
-      };
-    }).filter(x=>x.close!==null || (x.open!==null&&x.high!==null&&x.low!==null));
+      const date=pick(o,['date','businessdate','publisheddate','generatedtime','timestamp','tradedate','time','datetime','datetimevalue']);
+      const ts=n(date),ms=ts!=null&&ts<100000000000?ts*1000:ts;
+      return {date:ms!=null&&Number.isFinite(ms)?new Date(ms).toISOString():String(date??''),open:n(pick(o,['open','openingprice','openprice'])),high:n(pick(o,['high','highprice','dayhigh'])),low:n(pick(o,['low','lowprice','daylow'])),close:n(pick(o,['close','closingprice','currentvalue','indexvalue','ltp','lasttradedprice','lastprice','price','value'])),volume:n(pick(o,['volume','tradedshares','quantity','totaltradedquantity']))};
+    }).filter(x=>x.close!==null||(x.open!==null&&x.high!==null&&x.low!==null));
   };
 
   function getState(){
