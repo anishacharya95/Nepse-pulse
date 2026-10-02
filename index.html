@@ -2015,10 +2015,8 @@ const PulseFeedEngine = (()=>{
     return false;
   };
   const setStatus=(s,e)=>{state.status=s;state.lastError=e||null;window.PULSE_FEED_STATUS=s;window.PULSE_FEED_TIMESTAMP=state.updatedAt||'—';emit()};
-  const sourceRows = Array.isArray(d.live) && d.live.length
-  ? d.live
-  : (Array.isArray(d.companies) ? d.companies : []);
-const rows = normalizeLive(sourceRows);
+  const applySnapshot=(d)=>{
+    const rows=normalizeLive(d.live);
     const usable=rows.filter(x=>x.ltp!==null);
     if(usable.length<20)throw new Error('NEPSE API returned insufficient live price rows ('+usable.length+')');
     const rowsToStore=usable;
@@ -2101,7 +2099,7 @@ function setFeedStatus(status,detail){
   const s=status==='LIVE'?'LIVE':status==='DELAYED'?'DELAYED':status==='CACHED'?'CACHED':status==='CONNECTING'?'CONNECTING':'OFFLINE';
   const fs=PulseFeedEngine.state();
   window.PULSE_FEED_STATUS=s; window.PULSE_FEED_TIMESTAMP=fs.updatedAt||'—';
-  const state=document.getElementById('feedState'); if(state) state.textContent=s;
+  document.querySelectorAll('#feedState').forEach(state=>{state.textContent=s;});
   const detailEl=document.getElementById('feedStateDetail'); if(detailEl) detailEl.textContent=detail||''; const ud=document.getElementById('pulseUniverseDetail'); if(ud){const q=PulseFeedEngine.state(); const d=q.diagnostics||{}; ud.textContent=d.coveredRows?`NEPSE API: ${d.coveredRows} market rows · ${d.listedSymbols||461} listed symbols`:'';}
   const market=document.getElementById('marketStatusValue');
   if(market){
@@ -4602,18 +4600,18 @@ document.addEventListener('DOMContentLoaded',()=>{
   function change(r){
     const direct=n(pick(r,['percentageChange','percentChange','changePercent','changePct','pChange','perChange','perchange','percentagechange','percentchange','changePercentage','percent_change']));
     if(direct!==null)return direct;
-    const p=price(r), prev=n(pick(r,['previousClose','previous_close','previousclose','previousClosingPrice','prevClose','previousPrice','previousDayClose']));
+    const p=price(r), prev=n(pick(r,['previousClose','previousclose','previousClosingPrice','prevClose','previousPrice','previousDayClose']));
     return p!==null&&prev!==null&&prev!==0?((p-prev)/prev)*100:null;
   }
-  function price(r){return n(pick(r,['lastTradedPrice','last_traded_price','lastPrice','ltp','LTP','price','closePrice','closingPrice','close','currentPrice']))}
+  function price(r){return n(pick(r,['lastTradedPrice','lastPrice','ltp','LTP','price','closePrice','closingPrice','close','currentPrice']))}
   function ch(r){
     const direct=n(pick(r,['change','priceChange','pointChange','changeValue','difference']));
     if(direct!==null)return direct;
-    const p=price(r), prev=n(pick(r,['previousClose','previous_close','previousclose','previousClosingPrice','prevClose','previousPrice','previousDayClose']));
+    const p=price(r), prev=n(pick(r,['previousClose','previousclose','previousClosingPrice','prevClose','previousPrice','previousDayClose']));
     return p!==null&&prev!==null? p-prev:null;
   }
   function vol(r){return n(pick(r,['volume','totalTradedQuantity','quantity','shares','tradedShares','shareVolume']))}
-  function turnover(r){return n(pick(r,['turnover','total_turnover','totalTradedValue','total_traded_value','value','totalTradeValue']))}
+  function turnover(r){return n(pick(r,['turnover','totalTradedValue','value','totalTradeValue','totalTradedValue']))}
   function sym(r){return pick(r,['symbol','Symbol','ticker','stockSymbol','securitySymbol'])||'—'}
 
   function fmt(v,dec=2){return n(v)===null?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:dec})}
@@ -4750,23 +4748,9 @@ document.addEventListener('DOMContentLoaded',()=>{
   qa('[data-liq-tab]').forEach(b=>b.onclick=()=>{liqMode=b.dataset.liqTab;qa('[data-liq-tab]').forEach(x=>x.classList.toggle('active',x===b));render(lastState)});
 
   function hook(){
-    const syncFromEngine=()=>{
-      try{
-        const engine=window.PULSE_FEED_ENGINE||window.PulseFeedEngine;
-        const st=engine&&typeof engine.state==='function'?engine.state():
-          (window.PULSE_FEED?.state||null);
-        if(st && (Array.isArray(st.live)&&st.live.length ||
-                  Array.isArray(st.liveMarket)&&st.liveMarket.length ||
-                  Array.isArray(st.securities)&&st.securities.length)) render(st);
-      }catch(e){}
-    };
-    syncFromEngine();
-    window.addEventListener('pulse-central-snapshot',e=>render(e.detail||e.detail?.state||(
-      (window.PULSE_FEED_ENGINE||window.PulseFeedEngine)?.state?.()
-    )));
-    window.addEventListener('pulse-feed-update',syncFromEngine);
-    // Recover if the feed's first snapshot arrived before this dashboard listener mounted.
-    setInterval(syncFromEngine,2000);
+    if(window.PULSE_FEED_ENGINE?.state) render(window.PULSE_FEED_ENGINE.state());
+    if(window.PULSE_FEED?.state) render(window.PULSE_FEED.state);
+    window.addEventListener('pulse-central-snapshot',e=>render(e.detail||e.detail?.state||window.PULSE_FEED_ENGINE?.state()));
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',hook,{once:true});else hook();
 })();
@@ -5702,6 +5686,226 @@ header.topbar, header.topbar .toprow, .mobile-exact-topbar {
   });
 })();
 </script>
+
+
+<script id="np-header-feed-status-sync">
+(function(){
+  function syncHeaderStatus(){
+    try {
+      const engine=window.PULSE_FEED_ENGINE;
+      const st=engine && typeof engine.state==='function' ? engine.state() : null;
+      if(!st || !st.status) return;
+      const s=String(st.status).toUpperCase();
+      if(!['LIVE','DELAYED','CACHED','CONNECTING','OFFLINE'].includes(s)) return;
+      document.querySelectorAll('#feedState').forEach(el=>el.textContent=s);
+    } catch(e) {}
+  }
+  window.addEventListener('pulse-central-snapshot',syncHeaderStatus);
+  window.addEventListener('pulse-feed-update',syncHeaderStatus);
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',syncHeaderStatus,{once:true});
+  else syncHeaderStatus();
+  setTimeout(syncHeaderStatus,1500);
+})();
+</script>
+
+<script id="nepse-pulse-frontend-data-receiver-v1">
+(function(){
+  'use strict';
+
+  // Standalone frontend receiver for the Render /api/market feed.
+  // It does not replace the existing PulseFeedEngine; it independently fetches
+  // the central snapshot and paints the visible Home dashboard.
+
+  const BACKEND=(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
+  const POLL_MS=60000;
+  const TIMEOUT_MS=20000;
+  let timer=null;
+
+  const num=v=>{
+    if(v===null||v===undefined||v==='')return null;
+    const n=Number(String(v).replace(/,/g,''));
+    return Number.isFinite(n)?n:null;
+  };
+  const normKey=k=>String(k||'').toLowerCase().replace(/[^a-z0-9]/g,'');
+  function pick(o,keys){
+    if(!o||typeof o!=='object')return null;
+    const map={};
+    Object.keys(o).forEach(k=>{map[normKey(k)]=o[k]});
+    for(const k of keys){
+      const v=map[normKey(k)];
+      if(v!==undefined&&v!==null&&v!=='')return v;
+    }
+    return null;
+  }
+  function arr(v){
+    if(Array.isArray(v))return v;
+    if(!v||typeof v!=='object')return [];
+    for(const k of ['data','result','results','content','records','rows','items','live','liveMarket','companies','stocks']){
+      if(Array.isArray(v[k]))return v[k];
+    }
+    for(const k of Object.keys(v))if(Array.isArray(v[k]))return v[k];
+    return [];
+  }
+  function stateValue(labels,summary){
+    const target=labels.map(normKey);
+    const list=Array.isArray(summary)?summary:(summary&&typeof summary==='object'?[summary]:[]);
+    for(const item of list){
+      const label=String(pick(item,['detail','label','name','title','key','metric'])||'');
+      if(target.some(t=>normKey(label).includes(t))){
+        const v=pick(item,['value','amount','count','total','val']);
+        if(v!==null)return v;
+      }
+    }
+    return null;
+  }
+  function normalizeRow(o){
+    const ltp=num(pick(o,['ltp','lastTradedPrice','lastPrice','price','closePrice','closingPrice','close','currentPrice']));
+    const prev=num(pick(o,['previousClose','previousclose','previousClosingPrice','prevClose','previousPrice','previousDayClose']));
+    let change=num(pick(o,['change','pointChange','changeValue','priceChange','difference']));
+    let pct=num(pick(o,['pct','percentageChange','percentChange','changePercent','changePct','pChange','perChange','perchange','changePercentage','percent_change']));
+    if(change===null&&ltp!==null&&prev!==null)change=ltp-prev;
+    if(pct===null&&change!==null&&prev!==null&&prev!==0)pct=(change/prev)*100;
+    const symbol=String(pick(o,['symbol','stockSymbol','securitySymbol','ticker','code'])||'').trim().toUpperCase();
+    const company=String(pick(o,['securityName','companyName','company','name'])||'');
+    return {...o,symbol,company,ltp,prev,change,pct,
+      volume:num(pick(o,['volume','tradedShares','quantity','totalTradedQuantity','totalTradeQuantity','shareVolume'])),
+      turnover:num(pick(o,['turnover','totalTurnover','amount','totalTradeValue','totalTradedValue','value'])),
+      transactions:num(pick(o,['transactions','totalTransactions','numberOfTransactions','totalTrades','tradeCount']))
+    };
+  }
+  function uniqueRows(list){
+    const seen=new Set();
+    return list.map(normalizeRow).filter(r=>r.symbol&&!seen.has(r.symbol)&&seen.add(r.symbol));
+  }
+  function fmt(v,d=2){
+    const n=num(v);return n===null?'—':n.toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d});
+  }
+  function fmt0(v){const n=num(v);return n===null?'—':n.toLocaleString(undefined,{maximumFractionDigits:0});}
+  function money(v){
+    const n=num(v); if(n===null)return '—';
+    const a=Math.abs(n);
+    if(a>=1e9)return (n/1e9).toFixed(2)+' Arab';
+    if(a>=1e7)return (n/1e7).toFixed(2)+' Cr';
+    if(a>=1e5)return (n/1e5).toFixed(2)+' L';
+    return n.toLocaleString(undefined,{maximumFractionDigits:2});
+  }
+  function setText(selector,value){document.querySelectorAll(selector).forEach(e=>{e.textContent=value});}
+  function setStatus(status,detail){
+    const s=String(status||'OFFLINE').toUpperCase();
+    setText('#feedState',s);
+    const label=document.getElementById('pulseLiveLabel');
+    if(label)label.textContent=s==='LIVE'?'LIVE':s==='CACHED'?'CACHED':s==='CONNECTING'?'CONNECTING':'NO LIVE FEED';
+    const dot=document.querySelector('.feed .dot');
+    if(dot)dot.style.background=s==='LIVE'?'#39a55a':s==='CACHED'?'#b78300':'#71808a';
+    const detailEl=document.getElementById('feedStateDetail');if(detailEl)detailEl.textContent=detail||'';
+  }
+  function extractIndex(payload){
+    const list=arr(payload.index);
+    const item=list.find(x=>normKey(String(pick(x,['index','indexName','name','symbol'])||'')).includes('nepse'))||list[0]||{};
+    return {
+      value:num(pick(item,['close','currentValue','indexValue','value','latest','current'])),
+      change:num(pick(item,['change','pointChange','changeValue','difference'])),
+      pct:num(pick(item,['percentageChange','percentChange','perChange','changePercent','pChange']))
+    };
+  }
+  function extractSnapshot(payload){
+    const rawLive=Array.isArray(payload.live)?payload.live:[];
+    const rawCompanies=Array.isArray(payload.companies)?payload.companies:[];
+    let rows=uniqueRows(rawLive.length?rawLive:rawCompanies);
+    if(rows.length<1){
+      const candidates=arr(payload.data);
+      if(candidates.length)rows=uniqueRows(candidates);
+    }
+    const gainers=uniqueRows(Array.isArray(payload.gainers)?payload.gainers:[]).filter(r=>r.symbol);
+    const losers=uniqueRows(Array.isArray(payload.losers)?payload.losers:[]).filter(r=>r.symbol);
+    const finalGainers=gainers.length?gainers:[...rows].filter(r=>r.pct!==null).sort((a,b)=>(b.pct??-Infinity)-(a.pct??-Infinity));
+    const finalLosers=losers.length?losers:[...rows].filter(r=>r.pct!==null).sort((a,b)=>(a.pct??Infinity)-(b.pct??Infinity));
+    return {rows,gainers:finalGainers,losers:finalLosers,index:extractIndex(payload),summary:payload.summary,marketOpen:payload.marketOpen,updatedAt:payload.updatedAt||new Date().toISOString()};
+  }
+  function summaryNumber(labels,summary,rows,key){
+    const direct=num(stateValue(labels,summary));
+    if(direct!==null)return direct;
+    return rows.reduce((s,r)=>s+(num(r[key])||0),0);
+  }
+  function renderMain(s){
+    const rows=s.rows;
+    const idx=s.index||{};
+    const positive=(idx.pct??0)>=0;
+    setText('[data-market="index"]',idx.value===null?'—':fmt(idx.value,2));
+    setText('[data-market="points"]',idx.change===null?'—':(idx.change>=0?'+':'')+fmt(idx.change,2));
+    setText('[data-market="percent"]',idx.pct===null?'—':(idx.pct>=0?'+':'')+fmt(idx.pct,2)+'%');
+    const statusBox=document.querySelector('[data-market="status"]');
+    if(statusBox){statusBox.textContent=s.marketOpen===true?'OPEN':s.marketOpen===false?'CLOSED':'OPEN';statusBox.style.background=s.marketOpen===false?'#ff5b60':'#68bc72';statusBox.style.color='#fff';}
+    setText('[data-market="turnover"]','Turnover: '+money(summaryNumber(['totalTurnover','turnover'],s.summary,rows,'turnover')));
+    const timeEl=document.querySelector('[data-market="time"]');if(timeEl)timeEl.textContent=s.updatedAt?'Updated '+new Date(s.updatedAt).toLocaleTimeString():'Updated just now';
+    setText('[data-breadth="advance"] b',fmt0(rows.filter(r=>(r.pct??0)>0).length));
+    setText('[data-breadth="decline"] b',fmt0(rows.filter(r=>(r.pct??0)<0).length));
+    setText('[data-breadth="unchanged"] b',fmt0(rows.filter(r=>(r.pct??0)===0).length));
+    setText('[data-breadth="positive"] b',fmt0(rows.filter(r=>(r.pct??0)>=9.9).length));
+    setText('[data-breadth="negative"] b',fmt0(rows.filter(r=>(r.pct??0)<=-9.9).length));
+
+    const movers=s.gainers.slice(0,5);
+    const moversEl=document.getElementById('pulseMoversRows');
+    if(moversEl)moversEl.innerHTML=movers.map(r=>`<div class="pulse-row"><b>${escapeHtml(r.symbol)}</b><span class="up">${r.change===null?'—':fmt(r.change,2)}</span><span class="up">${r.pct===null?'—':(r.pct>=0?'+':'')+fmt(r.pct,2)+'%'}</span><span>${fmt(r.ltp,2)}</span></div>`).join('')||'<div class="pulse-row"><span>No verified rows</span></div>';
+    renderLiquidity(rows);
+    const turnover=summaryNumber(['totalTurnover','turnover'],s.summary,rows,'turnover');
+    const volume=summaryNumber(['totalTradedShares','tradedShares','totalVolume','volume'],s.summary,rows,'volume');
+    const transactions=summaryNumber(['totalTransactions','transactions'],s.summary,rows,'transactions');
+    const scrips=num(stateValue(['tradedScrips','scripsTraded','totalScrips'],s.summary))??rows.length;
+    const marketCap=num(stateValue(['totalMarketCap','marketCap'],s.summary));
+    const floatCap=num(stateValue(['totalFloatMarketCap','floatMarketCap'],s.summary));
+    const sm={turnover,volume,transactions,scrips,marketcap:marketCap,floatcap:floatCap};
+    Object.entries(sm).forEach(([k,v])=>{const e=document.querySelector('[data-summary="'+k+'"]');if(e)e.textContent=k==='turnover'||k==='marketcap'||k==='floatcap'?money(v):fmt0(v)});
+    // If the existing engine is listening, feed it a normalized snapshot too.
+    const detail={ok:true,status:'LIVE',live:rows,companies:rows,gainers:s.gainers,losers:s.losers,index:arrPayload(s.index),summary:s.summary,marketOpen:s.marketOpen,updatedAt:s.updatedAt,diagnostics:{coveredRows:rows.length,listedsymbols:461}};
+    try{window.dispatchEvent(new CustomEvent('pulse-central-snapshot',{detail}))}catch(e){}
+    return positive;
+  }
+  function renderLiquidity(rows){
+    const el=document.getElementById('pulseLiquidityRows');if(!el)return;
+    let mode=(document.querySelector('[data-liq-tab].active')?.dataset.liqTab)||'turnover';
+    let list=[...rows];
+    if(mode==='volume')list.sort((a,b)=>(b.volume??-1)-(a.volume??-1));
+    else if(mode==='transactions')list.sort((a,b)=>(b.transactions??-1)-(a.transactions??-1));
+    else list.sort((a,b)=>(b.turnover??-1)-(a.turnover??-1));
+    el.innerHTML=list.slice(0,5).map(r=>{
+      const value=mode==='volume'?r.volume:mode==='transactions'?r.transactions:r.turnover;
+      return `<div class="pulse-row"><b>${escapeHtml(r.symbol)}</b><span>${mode==='turnover'?money(value):fmt0(value)}</span><span class="${(r.pct??0)>=0?'up':'down'}">${fmt(r.ltp,2)}${r.pct===null?'':` (${r.pct>=0?'+':''}${fmt(r.pct,2)}%)`}</span></div>`;
+    }).join('')||'<div class="pulse-row"><span>No verified rows</span></div>';
+  }
+  function arrPayload(idx){return idx&&typeof idx==='object'?[idx]:[]}
+  function escapeHtml(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+  async function fetchMarket(){
+    const controller=new AbortController();
+    const timerId=setTimeout(()=>controller.abort(),TIMEOUT_MS);
+    try{
+      setStatus('CONNECTING','Connecting to Render market feed…');
+      const r=await fetch(BACKEND+'/api/market?_pulse='+Date.now(),{cache:'no-store',signal:controller.signal,headers:{Accept:'application/json'}});
+      if(!r.ok)throw new Error('Backend HTTP '+r.status);
+      const payload=await r.json();
+      if(!payload||payload.ok!==true)throw new Error(payload?.error||'Backend returned no market data');
+      const snap=extractSnapshot(payload);
+      if(snap.rows.length<1)throw new Error('Backend returned no usable market rows');
+      renderMain(snap);
+      setStatus('LIVE','Live market data · '+snap.rows.length+' rows');
+      window.PULSE_FRONTEND_RECEIVER={status:'LIVE',rows:snap.rows.length,updatedAt:snap.updatedAt};
+    }catch(e){
+      setStatus('CACHED',e?.message||'Showing last received market data');
+      window.PULSE_FRONTEND_RECEIVER={status:'ERROR',error:e?.message||String(e)};
+    }finally{clearTimeout(timerId)}
+  }
+  function start(){
+    // Re-render the liquidity tab when the user switches tabs.
+    document.querySelectorAll('[data-liq-tab]').forEach(b=>b.addEventListener('click',()=>setTimeout(()=>{try{fetchMarket()}catch(e){}},0)));
+    fetchMarket();
+    if(timer)clearInterval(timer);
+    timer=setInterval(fetchMarket,POLL_MS);
+  }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});
+  else start();
+})();
+</script>
+
 
 </body>
 </html><script>
