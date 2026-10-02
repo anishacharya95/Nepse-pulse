@@ -2099,7 +2099,7 @@ function setFeedStatus(status,detail){
   const s=status==='LIVE'?'LIVE':status==='DELAYED'?'DELAYED':status==='CACHED'?'CACHED':status==='CONNECTING'?'CONNECTING':'OFFLINE';
   const fs=PulseFeedEngine.state();
   window.PULSE_FEED_STATUS=s; window.PULSE_FEED_TIMESTAMP=fs.updatedAt||'—';
-  document.querySelectorAll('#feedState').forEach(state=>{state.textContent=s;});
+  const state=document.getElementById('feedState'); if(state) state.textContent=s;
   const detailEl=document.getElementById('feedStateDetail'); if(detailEl) detailEl.textContent=detail||''; const ud=document.getElementById('pulseUniverseDetail'); if(ud){const q=PulseFeedEngine.state(); const d=q.diagnostics||{}; ud.textContent=d.coveredRows?`NEPSE API: ${d.coveredRows} market rows · ${d.listedSymbols||461} listed symbols`:'';}
   const market=document.getElementById('marketStatusValue');
   if(market){
@@ -4600,18 +4600,18 @@ document.addEventListener('DOMContentLoaded',()=>{
   function change(r){
     const direct=n(pick(r,['percentageChange','percentChange','changePercent','changePct','pChange','perChange','perchange','percentagechange','percentchange','changePercentage','percent_change']));
     if(direct!==null)return direct;
-    const p=price(r), prev=n(pick(r,['previousClose','previousclose','previousClosingPrice','prevClose','previousPrice','previousDayClose']));
+    const p=price(r), prev=n(pick(r,['previousClose','previous_close','previousclose','previousClosingPrice','prevClose','previousPrice','previousDayClose']));
     return p!==null&&prev!==null&&prev!==0?((p-prev)/prev)*100:null;
   }
-  function price(r){return n(pick(r,['lastTradedPrice','lastPrice','ltp','LTP','price','closePrice','closingPrice','close','currentPrice']))}
+  function price(r){return n(pick(r,['lastTradedPrice','last_traded_price','lastPrice','ltp','LTP','price','closePrice','closingPrice','close','currentPrice']))}
   function ch(r){
     const direct=n(pick(r,['change','priceChange','pointChange','changeValue','difference']));
     if(direct!==null)return direct;
-    const p=price(r), prev=n(pick(r,['previousClose','previousclose','previousClosingPrice','prevClose','previousPrice','previousDayClose']));
+    const p=price(r), prev=n(pick(r,['previousClose','previous_close','previousclose','previousClosingPrice','prevClose','previousPrice','previousDayClose']));
     return p!==null&&prev!==null? p-prev:null;
   }
   function vol(r){return n(pick(r,['volume','totalTradedQuantity','quantity','shares','tradedShares','shareVolume']))}
-  function turnover(r){return n(pick(r,['turnover','totalTradedValue','value','totalTradeValue','totalTradedValue']))}
+  function turnover(r){return n(pick(r,['turnover','total_turnover','totalTradedValue','total_traded_value','value','totalTradeValue']))}
   function sym(r){return pick(r,['symbol','Symbol','ticker','stockSymbol','securitySymbol'])||'—'}
 
   function fmt(v,dec=2){return n(v)===null?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:dec})}
@@ -4748,9 +4748,23 @@ document.addEventListener('DOMContentLoaded',()=>{
   qa('[data-liq-tab]').forEach(b=>b.onclick=()=>{liqMode=b.dataset.liqTab;qa('[data-liq-tab]').forEach(x=>x.classList.toggle('active',x===b));render(lastState)});
 
   function hook(){
-    if(window.PULSE_FEED_ENGINE?.state) render(window.PULSE_FEED_ENGINE.state());
-    if(window.PULSE_FEED?.state) render(window.PULSE_FEED.state);
-    window.addEventListener('pulse-central-snapshot',e=>render(e.detail||e.detail?.state||window.PULSE_FEED_ENGINE?.state()));
+    const syncFromEngine=()=>{
+      try{
+        const engine=window.PULSE_FEED_ENGINE||window.PulseFeedEngine;
+        const st=engine&&typeof engine.state==='function'?engine.state():
+          (window.PULSE_FEED?.state||null);
+        if(st && (Array.isArray(st.live)&&st.live.length ||
+                  Array.isArray(st.liveMarket)&&st.liveMarket.length ||
+                  Array.isArray(st.securities)&&st.securities.length)) render(st);
+      }catch(e){}
+    };
+    syncFromEngine();
+    window.addEventListener('pulse-central-snapshot',e=>render(e.detail||e.detail?.state||(
+      (window.PULSE_FEED_ENGINE||window.PulseFeedEngine)?.state?.()
+    )));
+    window.addEventListener('pulse-feed-update',syncFromEngine);
+    // Recover if the feed's first snapshot arrived before this dashboard listener mounted.
+    setInterval(syncFromEngine,2000);
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',hook,{once:true});else hook();
 })();
@@ -5684,27 +5698,6 @@ header.topbar, header.topbar .toprow, .mobile-exact-topbar {
   document.addEventListener('click',e=>{
     if(!e.target.closest('.search-wrap,.mobile-search-wrap')) document.querySelectorAll('.search-suggestions').forEach(x=>x.classList.remove('open'));
   });
-})();
-</script>
-
-
-<script id="np-header-feed-status-sync">
-(function(){
-  function syncHeaderStatus(){
-    try {
-      const engine=window.PULSE_FEED_ENGINE;
-      const st=engine && typeof engine.state==='function' ? engine.state() : null;
-      if(!st || !st.status) return;
-      const s=String(st.status).toUpperCase();
-      if(!['LIVE','DELAYED','CACHED','CONNECTING','OFFLINE'].includes(s)) return;
-      document.querySelectorAll('#feedState').forEach(el=>el.textContent=s);
-    } catch(e) {}
-  }
-  window.addEventListener('pulse-central-snapshot',syncHeaderStatus);
-  window.addEventListener('pulse-feed-update',syncHeaderStatus);
-  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',syncHeaderStatus,{once:true});
-  else syncHeaderStatus();
-  setTimeout(syncHeaderStatus,1500);
 })();
 </script>
 
