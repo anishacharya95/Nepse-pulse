@@ -370,6 +370,38 @@ async def _sdk_first(methods, *args, **kwargs):
     raise RuntimeError("; ".join(errors[-6:]) or "No compatible nepsepy method available")
 
 
+async def _fallback_breadth_from_yonepse():
+    """Fetch current static market summary/live rows only when primary breadth is absent."""
+    try:
+        summary = await yonepse_get("market/summary.json")
+    except Exception:
+        summary = None
+    found = _find_breadth_values(summary)
+    if len(found) == 3:
+        return found
+    try:
+        live = await yonepse_get("market/live.json")
+    except Exception:
+        live = None
+    rows = deep_rows(live, ("content", "data", "results", "rows"))
+    if rows:
+        out = {"advancing": 0, "declining": 0, "unchanged": 0}
+        for row in rows:
+            p = num(pick(row, ["perChange", "percentageChange", "percentChange", "changePercent", "pChange", "percentage"]))
+            if p is None:
+                ch = num(pick(row, ["change", "pointChange", "difference"]))
+                prev = num(pick(row, ["previousClose", "previousPrice", "prevClose", "previousLtp"]))
+                if ch is not None and prev not in (None, 0):
+                    p = ch / prev * 100
+            if p is None:
+                continue
+            if p > 0: out["advancing"] += 1
+            elif p < 0: out["declining"] += 1
+            else: out["unchanged"] += 1
+        if sum(out.values()) > 0:
+            return out
+    return {}
+
 async def get_market():
     """Authoritative dashboard feed.
 
@@ -500,6 +532,11 @@ async def get_market():
                 else: derived["unchanged"] += 1
             explicit_breadth = derived
 
+        if sum(int(explicit_breadth.get(k, 0) or 0) for k in ("advancing", "declining", "unchanged")) == 0:
+            fb = await _fallback_breadth_from_yonepse()
+            if len(fb) == 3:
+                explicit_breadth = fb
+
         try:
             authoritative_index = await get_index()
         except Exception:
@@ -628,9 +665,18 @@ async def _verified_closed_index() -> dict:
 def _find_breadth_values(value: Any) -> dict:
     """Find explicit Adv/Dec/Unchanged counts without mixing stock rows."""
     aliases = {
-        "advancing": ("advancing", "advancers", "advance", "advanced", "advancedscrips"),
-        "declining": ("declining", "decliners", "decline", "declined", "decliningscrips"),
-        "unchanged": ("unchanged", "unchangedcount", "unchangedstocks", "unchangedscrips"),
+        "advancing": (
+            "advancing", "advancers", "advance", "advanced", "advancedscrips",
+            "adv", "advances", "advancescrips", "advancedscrips", "positive", "positivecount",
+        ),
+        "declining": (
+            "declining", "decliners", "decline", "declined", "decliningscrips",
+            "dec", "declines", "declinescrips", "negative", "negativecount",
+        ),
+        "unchanged": (
+            "unchanged", "unchangedcount", "unchangedstocks", "unchangedscrips",
+            "unch", "unchanges", "unchangedsecurities", "unchangedcount",
+        ),
     }
     found = {}
     def walk(x):
@@ -659,48 +705,49 @@ def _find_breadth_values(value: Any) -> dict:
     return found
 
 async def get_index():
+    """Return a consistent headline NEPSE snapshot.
+
+    The index endpoint itself is preferred for both open and closed sessions.
+    A completed-session archive is only a fallback, preventing a stale archive
+    from overriding a correct current NEPSE value.
+    """
     async def load():
         errors = []
-        # When the market is closed, the completed-session archive is the
-        # safest source for the headline close. This prevents a mismatched
-        # currentValue/change pair from a stale intraday adapter.
-        try:
-            status_raw = await nepse_call(["market_status"])
-            is_open = normalize_open(pick(status_raw, ["isOpen", "marketOpen", "open"], None))
-        except Exception as exc:
-            is_open = None
-            errors.append(f"status: {exc}")
-
-        if is_open is False:
-            archived = await _verified_closed_index()
-            if archived:
-                return archived
-
-        # During an open session, use the live NEPSE session first.
         try:
             raw = await nepse_call(["nepse_indices", "nepse_index", "get_nepse_index", "indices"])
             idx = normalize_index(raw)
             if idx:
                 return idx
+            errors.append("nepsepy index response did not contain NEPSE Index id 58")
         except Exception as exc:
             errors.append(f"nepsepy: {exc}")
 
-        # Secondary public adapter, but only if it explicitly identifies NEPSE.
         try:
             raw = await public_get("/NepseIndex")
             idx = normalize_index(raw)
             if idx:
                 return idx
+            errors.append("public /NepseIndex response did not contain NEPSE Index id 58")
         except Exception as exc:
             errors.append(f"public: {exc}")
 
-        # Verified completed-session fallback.
+        # Static YONEPSE snapshot is preferred to the older CSV archive when
+        # the live adapters fail. It is updated independently by GitHub Actions.
+        try:
+            raw = await yonepse_get("market/indices.json")
+            idx = normalize_index(raw)
+            if idx:
+                idx = dict(idx)
+                idx.setdefault("source", "YONEPSE market/indices.json")
+                return idx
+        except Exception as exc:
+            errors.append(f"yonepse indices: {exc}")
+
         archived = await _verified_closed_index()
         if archived:
             return archived
         return {}
     return await cached("index:current", load)
-
 
 def normalize_index_history_rows(raw: Any, wanted_id: int = 58) -> list[dict]:
     """Normalize and validate ONLY the requested headline NEPSE index series."""
@@ -763,6 +810,15 @@ async def get_index_history(index_id: int = 58):
         except Exception as e:
             errors.append(f"public graph: {e}")
         if int(index_id) == 58:
+            try:
+                # First try the current YONEPSE market history feed.
+                raw = await yonepse_get("market/history.json")
+                rows = normalize_index_history_rows(raw, index_id)
+                if rows:
+                    return {"ok":True,"source":"YONEPSE market/history.json","data":rows,"errors":errors,"updatedAt":now_iso()}
+                errors.append("YONEPSE market/history.json returned no usable NEPSE rows")
+            except Exception as e:
+                errors.append(f"YONEPSE market/history.json: {e}")
             try:
                 rows = await yonepse_index_history()
                 if rows:
@@ -1628,9 +1684,24 @@ async def daily_nepse_index_graph():
         rows=normalize_index_history_rows(raw,58)
         if rows:
             return {"ok":True,"source":"NEPSE via nepsepy:index_history","data":rows,"updatedAt":now_iso(),"errors":errors}
-        errors.append("nepsepy index history returned no usable rows")
+        errors.append("nepsepy index_history returned no usable rows")
     except Exception as e:
-        errors.append(f"nepsepy index history: {e}")
+        errors.append(f"nepsepy index_history: {e}")
+    # Closed-session fallback: show verified daily history instead of a blank
+    # chart. The response is explicitly marked intraday=False.
+    try:
+        raw=await yonepse_get("market/history.json")
+        rows=normalize_index_history_rows(raw,58)
+        if rows:
+            return {"ok":True,"source":"YONEPSE daily NEPSE history fallback","data":rows[-96:],"updatedAt":now_iso(),"errors":errors,"intraday":False}
+    except Exception as e:
+        errors.append(f"yonepse daily history: {e}")
+    try:
+        rows=await yonepse_index_history()
+        if rows:
+            return {"ok":True,"source":"NEPSE_INDEX.csv daily history fallback","data":rows[-96:],"updatedAt":now_iso(),"errors":errors,"intraday":False}
+    except Exception as e:
+        errors.append(f"NEPSE_INDEX.csv daily history: {e}")
     return {"ok":False,"source":None,"data":[],"updatedAt":now_iso(),"errors":errors}
 
 

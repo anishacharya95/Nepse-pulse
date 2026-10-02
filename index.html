@@ -4955,6 +4955,7 @@ document.addEventListener('DOMContentLoaded',()=>{
         // 1D must be real intraday data. Never fall back to daily history.
         raw=await fetch(backend+'/DailyNepseIndexGraph?_pulse='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw new Error('intraday graph HTTP '+r.status);return r.json();});
         if(raw && raw.ok===false) throw new Error((raw.errors||[]).join('; ') || 'intraday history unavailable');
+        if(raw?.intraday===false && subtitle) subtitle.textContent='NEPSE daily history · intraday feed unavailable';
       }else{
         raw=await fetch(backend+'/api/history?index=58&_pulse='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw new Error('history HTTP '+r.status);return r.json();});
       }
