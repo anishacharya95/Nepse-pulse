@@ -1949,49 +1949,46 @@ async def _historical_floor_rows(start_date: datetime.date, end_date: datetime.d
             path = item.get("path", "")
             low = path.lower()
             day = date_from_path(path)
-            if (item.get("type") == "blob" and low.startswith("floorsheet/")
+            if (item.get("type") == "blob" and (low.startswith("floorsheet/") or low.split("/")[-1].startswith("floorsheet_"))
                     and day and start_date <= day <= end_date
                     and low.endswith((".csv", ".json", ".csv.gz", ".json.gz"))):
                 paths.append((day, path))
     except Exception as exc:
         errors.append(f"NEPSE Open Data repository discovery: {type(exc).__name__}: {exc}")
 
+    sem = asyncio.Semaphore(6)
     async def load_path(day, path):
-        """Load one archive file at a time to keep peak memory bounded."""
-        try:
-            url = f"https://raw.githubusercontent.com/{repo}/main/{path}"
-            response = await request_bytes(url)
-            content = response.content
-            if path.lower().endswith(".gz"):
-                import gzip
-                content = gzip.decompress(content)
-            if path.lower().endswith((".json", ".json.gz")):
-                import json
-                raw = json.loads(content.decode("utf-8-sig"))
-                rows = floor_rows(raw)
-            else:
-                reader = csv.DictReader(io.StringIO(content.decode("utf-8-sig", errors="replace")))
-                rows = floor_rows(reader)
-            cleaned = []
-            for row in rows:
-                rd = _row_date(row) or day.isoformat()
-                if rd != day.isoformat():
-                    continue
-                row["businessDate"] = rd
-                if not wanted or str(row.get("symbol") or "").upper() == wanted:
-                    cleaned.append(row)
-            return cleaned
-        except Exception as exc:
-            errors.append(f"{path}: {type(exc).__name__}: {exc}")
-            return []
+        async with sem:
+            try:
+                url = f"https://raw.githubusercontent.com/{repo}/main/{path}"
+                response = await request_bytes(url)
+                content = response.content
+                if path.lower().endswith(".gz"):
+                    import gzip
+                    content = gzip.decompress(content)
+                if path.lower().endswith((".json", ".json.gz")):
+                    import json
+                    raw = json.loads(content.decode("utf-8-sig"))
+                    rows = floor_rows(raw)
+                else:
+                    reader = csv.DictReader(io.StringIO(content.decode("utf-8-sig", errors="replace")))
+                    rows = floor_rows(list(reader))
+                cleaned = []
+                for row in rows:
+                    rd = _row_date(row) or day.isoformat()
+                    if rd != day.isoformat():
+                        continue
+                    row["businessDate"] = rd
+                    if not wanted or str(row.get("symbol") or "").upper() == wanted:
+                        cleaned.append(row)
+                return cleaned
+            except Exception as exc:
+                errors.append(f"{path}: {type(exc).__name__}: {exc}")
+                return []
 
     if paths:
-        data = []
-        for day, path in sorted(paths):
-            batch = await load_path(day, path)
-            if batch:
-                data.extend(batch)
-            del batch
+        batches = await asyncio.gather(*(load_path(day, path) for day, path in paths))
+        data = [row for batch in batches for row in batch]
         if data:
             return data
 
@@ -2002,20 +1999,21 @@ async def _historical_floor_rows(start_date: datetime.date, end_date: datetime.d
     while day <= end_date:
         dates.append(day)
         day += timedelta(days=1)
-    data = []
-    for day in dates:
+    async def fetch_fallback(day):
         try:
             raw = await static_get(f"/floor_sheet/daily/{day.isoformat()}.json")
             rows = floor_rows(raw)
+            result = []
             for row in rows:
                 rd = _row_date(row) or day.isoformat()
                 if rd == day.isoformat() and (not wanted or str(row.get("symbol") or "").upper() == wanted):
                     row["businessDate"] = rd
-                    data.append(row)
-            del rows, raw
+                    result.append(row)
+            return result
         except Exception:
-            continue
-    return data
+            return []
+    batches = await asyncio.gather(*(fetch_fallback(day) for day in dates))
+    return [row for batch in batches for row in batch]
 
 def _build_broker_report(rows: list[dict]):
     brokers = {}
@@ -2062,7 +2060,7 @@ def _build_broker_report(rows: list[dict]):
     return broker_rows, symbol_rows, daily_rows
 
 @app.get("/api/brokers/history")
-async def api_brokers_history(months: int = Query(6, ge=1, le=6), symbol: Optional[str] = None,
+async def api_brokers_history(months: int = Query(3, ge=1, le=3), symbol: Optional[str] = None,
                               start: Optional[str] = None, end: Optional[str] = None):
     """Historical broker flow from archived floorsheets, with data for charts."""
     today = datetime.now().date()
@@ -2073,10 +2071,6 @@ async def api_brokers_history(months: int = Query(6, ge=1, le=6), symbol: Option
         raise HTTPException(status_code=400, detail="start/end must use YYYY-MM-DD")
     if start_day > end_day:
         raise HTTPException(status_code=400, detail="start must be on or before end")
-    # Hard-limit floorsheet history to six months even when callers pass dates.
-    earliest_allowed = _subtract_months(datetime.combine(end_day, datetime.min.time()), 6).date()
-    if start_day < earliest_allowed:
-        start_day = earliest_allowed
     cache_key = f"brokers-history:{start_day}:{end_day}:{(symbol or 'all').upper()}"
     async def load():
         rows = await _historical_floor_rows(start_day, end_day, symbol)
