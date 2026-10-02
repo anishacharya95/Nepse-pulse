@@ -2016,8 +2016,7 @@ const PulseFeedEngine = (()=>{
   };
   const setStatus=(s,e)=>{state.status=s;state.lastError=e||null;window.PULSE_FEED_STATUS=s;window.PULSE_FEED_TIMESTAMP=state.updatedAt||'—';emit()};
   const applySnapshot=(d)=>{
-    const sourceRows=Array.isArray(d.live)&&d.live.length?d.live:(Array.isArray(d.companies)?d.companies:[]);
-    const rows=normalizeLive(sourceRows);
+    const rows=normalizeLive(d.live);
     const usable=rows.filter(x=>x.ltp!==null);
     if(usable.length<20)throw new Error('NEPSE API returned insufficient live price rows ('+usable.length+')');
     const rowsToStore=usable;
@@ -2100,7 +2099,7 @@ function setFeedStatus(status,detail){
   const s=status==='LIVE'?'LIVE':status==='DELAYED'?'DELAYED':status==='CACHED'?'CACHED':status==='CONNECTING'?'CONNECTING':'OFFLINE';
   const fs=PulseFeedEngine.state();
   window.PULSE_FEED_STATUS=s; window.PULSE_FEED_TIMESTAMP=fs.updatedAt||'—';
-  const state=document.getElementById('feedState'); if(state) state.textContent=s;
+  document.querySelectorAll('#feedState').forEach(state=>{state.textContent=s;});
   const detailEl=document.getElementById('feedStateDetail'); if(detailEl) detailEl.textContent=detail||''; const ud=document.getElementById('pulseUniverseDetail'); if(ud){const q=PulseFeedEngine.state(); const d=q.diagnostics||{}; ud.textContent=d.coveredRows?`NEPSE API: ${d.coveredRows} market rows · ${d.listedSymbols||461} listed symbols`:'';}
   const market=document.getElementById('marketStatusValue');
   if(market){
@@ -5685,6 +5684,27 @@ header.topbar, header.topbar .toprow, .mobile-exact-topbar {
   document.addEventListener('click',e=>{
     if(!e.target.closest('.search-wrap,.mobile-search-wrap')) document.querySelectorAll('.search-suggestions').forEach(x=>x.classList.remove('open'));
   });
+})();
+</script>
+
+
+<script id="np-header-feed-status-sync">
+(function(){
+  function syncHeaderStatus(){
+    try {
+      const engine=window.PULSE_FEED_ENGINE;
+      const st=engine && typeof engine.state==='function' ? engine.state() : null;
+      if(!st || !st.status) return;
+      const s=String(st.status).toUpperCase();
+      if(!['LIVE','DELAYED','CACHED','CONNECTING','OFFLINE'].includes(s)) return;
+      document.querySelectorAll('#feedState').forEach(el=>el.textContent=s);
+    } catch(e) {}
+  }
+  window.addEventListener('pulse-central-snapshot',syncHeaderStatus);
+  window.addEventListener('pulse-feed-update',syncHeaderStatus);
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',syncHeaderStatus,{once:true});
+  else syncHeaderStatus();
+  setTimeout(syncHeaderStatus,1500);
 })();
 </script>
 
