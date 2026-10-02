@@ -1956,39 +1956,42 @@ async def _historical_floor_rows(start_date: datetime.date, end_date: datetime.d
     except Exception as exc:
         errors.append(f"NEPSE Open Data repository discovery: {type(exc).__name__}: {exc}")
 
-    sem = asyncio.Semaphore(6)
     async def load_path(day, path):
-        async with sem:
-            try:
-                url = f"https://raw.githubusercontent.com/{repo}/main/{path}"
-                response = await request_bytes(url)
-                content = response.content
-                if path.lower().endswith(".gz"):
-                    import gzip
-                    content = gzip.decompress(content)
-                if path.lower().endswith((".json", ".json.gz")):
-                    import json
-                    raw = json.loads(content.decode("utf-8-sig"))
-                    rows = floor_rows(raw)
-                else:
-                    reader = csv.DictReader(io.StringIO(content.decode("utf-8-sig", errors="replace")))
-                    rows = floor_rows(list(reader))
-                cleaned = []
-                for row in rows:
-                    rd = _row_date(row) or day.isoformat()
-                    if rd != day.isoformat():
-                        continue
-                    row["businessDate"] = rd
-                    if not wanted or str(row.get("symbol") or "").upper() == wanted:
-                        cleaned.append(row)
-                return cleaned
-            except Exception as exc:
-                errors.append(f"{path}: {type(exc).__name__}: {exc}")
-                return []
+        """Load one archive file at a time to keep peak memory bounded."""
+        try:
+            url = f"https://raw.githubusercontent.com/{repo}/main/{path}"
+            response = await request_bytes(url)
+            content = response.content
+            if path.lower().endswith(".gz"):
+                import gzip
+                content = gzip.decompress(content)
+            if path.lower().endswith((".json", ".json.gz")):
+                import json
+                raw = json.loads(content.decode("utf-8-sig"))
+                rows = floor_rows(raw)
+            else:
+                reader = csv.DictReader(io.StringIO(content.decode("utf-8-sig", errors="replace")))
+                rows = floor_rows(reader)
+            cleaned = []
+            for row in rows:
+                rd = _row_date(row) or day.isoformat()
+                if rd != day.isoformat():
+                    continue
+                row["businessDate"] = rd
+                if not wanted or str(row.get("symbol") or "").upper() == wanted:
+                    cleaned.append(row)
+            return cleaned
+        except Exception as exc:
+            errors.append(f"{path}: {type(exc).__name__}: {exc}")
+            return []
 
     if paths:
-        batches = await asyncio.gather(*(load_path(day, path) for day, path in paths))
-        data = [row for batch in batches for row in batch]
+        data = []
+        for day, path in sorted(paths):
+            batch = await load_path(day, path)
+            if batch:
+                data.extend(batch)
+            del batch
         if data:
             return data
 
@@ -1999,21 +2002,20 @@ async def _historical_floor_rows(start_date: datetime.date, end_date: datetime.d
     while day <= end_date:
         dates.append(day)
         day += timedelta(days=1)
-    async def fetch_fallback(day):
+    data = []
+    for day in dates:
         try:
             raw = await static_get(f"/floor_sheet/daily/{day.isoformat()}.json")
             rows = floor_rows(raw)
-            result = []
             for row in rows:
                 rd = _row_date(row) or day.isoformat()
                 if rd == day.isoformat() and (not wanted or str(row.get("symbol") or "").upper() == wanted):
                     row["businessDate"] = rd
-                    result.append(row)
-            return result
+                    data.append(row)
+            del rows, raw
         except Exception:
-            return []
-    batches = await asyncio.gather(*(fetch_fallback(day) for day in dates))
-    return [row for batch in batches for row in batch]
+            continue
+    return data
 
 def _build_broker_report(rows: list[dict]):
     brokers = {}
