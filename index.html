@@ -1901,7 +1901,7 @@ const PULSE_FEED_CONFIG = {
   wsUrl: 'wss://nepseapiws.surajrimal.dev/',
   pollMs: 60000,
   closedPollMs: 180000,
-  timeoutMs: 90000,
+  timeoutMs: 25000,
   cacheKey: 'nepsePulseCentralFeedV24_2_REAL',
   listedSymbols: 461
 };
@@ -4793,20 +4793,24 @@ document.addEventListener('DOMContentLoaded',()=>{
     }
     return null;
   };
-  const normalize=v=>arr(v).map((o)=>{
-    if(Array.isArray(o)){
-      const ts=n(o[0]); const val=n(o[1]);
-      return {date:ts?new Date(ts).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}):'',open:null,high:null,low:null,close:val,volume:null};
-    }
-    return {
-      date:String(pick(o,['date','businessdate','timestamp','tradedate','time'])||''),
-      open:n(pick(o,['open','openingprice'])),
-      high:n(pick(o,['high','highprice','dayhigh'])),
-      low:n(pick(o,['low','lowprice','daylow'])),
-      close:n(pick(o,['close','closingprice','ltp','lasttradedprice','price','index','value'])),
-      volume:n(pick(o,['volume','tradedshares','quantity']))
-    };
-  }).filter(x=>x.close!==null || (x.open!==null&&x.high!==null&&x.low!==null));
+  const normalize=v=>{
+    return arr(v).map(o=>{
+      if(Array.isArray(o)){
+        const ts=n(o[0]), val=n(o[1]);
+        const ms=ts!=null && ts<100000000000 ? ts*1000 : ts;
+        const d=ms!=null && Number.isFinite(ms) ? new Date(ms) : null;
+        return {date:d ? d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : String(o[0]??''),open:null,high:null,low:null,close:val,volume:null};
+      }
+      return {
+        date:String(pick(o,['date','businessdate','publisheddate','timestamp','tradedate','time','datetime','datetimevalue'])??''),
+        open:n(pick(o,['open','openingprice','openprice'])),
+        high:n(pick(o,['high','highprice','dayhigh'])),
+        low:n(pick(o,['low','lowprice','daylow'])),
+        close:n(pick(o,['close','closingprice','ltp','lasttradedprice','lastprice','price','index','value','currentvalue','indexvalue'])),
+        volume:n(pick(o,['volume','tradedshares','quantity','totaltradedquantity']))
+      };
+    }).filter(x=>x.close!==null || (x.open!==null&&x.high!==null&&x.low!==null));
+  };
 
   function getState(){
     try{
@@ -4941,7 +4945,11 @@ document.addEventListener('DOMContentLoaded',()=>{
     const backend=(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse.onrender.com').replace(/\/$/,'');
     try{
       if(range==='1D'){
-        raw=await fetch(backend+'/DailyNepseIndexGraph',{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw new Error('intraday graph HTTP '+r.status);return r.json();});
+        try{
+          raw=await fetch(backend+'/DailyNepseIndexGraph',{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw new Error('intraday graph HTTP '+r.status);return r.json();});
+        }catch(_e){
+          raw=await fetch(backend+'/api/history?index=58',{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw new Error('history HTTP '+r.status);return r.json();});
+        }
       }else{
         raw=await fetch(backend+'/api/history?index=58',{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw new Error('history HTTP '+r.status);return r.json();});
       }

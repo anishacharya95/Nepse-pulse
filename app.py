@@ -64,11 +64,11 @@ PUBLIC_API = "https://nepseapi.surajrimal.dev"
 STATIC_API = "https://shubhamnpk.github.io/yonepse/data"
 OPEN_DATA = "https://raw.githubusercontent.com/socrateai-official/nepse-open-data/main"
 CACHE_TTL = {
-    "market": 25,
-    "index": 25,
+    "market": 60,
+    "index": 120,
     "floorsheet": 35,
     "company": 300,
-    "history": 75,
+    "history": 600,
     "sectors": 60,
     "brokers": 45,
 }
@@ -258,24 +258,22 @@ async def first_ok(callables):
 async def nepse_call(methods: list[str], *args, **kwargs):
     client = await get_nepse_client()
     errors = []
-    # One shared client is important for the NEPSE token/session. The current
-    # nepsepy client also serializes calls internally, so this outer lock keeps
-    # our method fallbacks from racing each other during a refresh burst.
-    async with NEPSE_CALL_LOCK:
-        for name in methods:
-            fn = getattr(client, name, None)
-            if fn is None:
-                continue
+    # Let the shared nepsepy client manage its own session/request safety.
+    # A second application-wide lock made independent dashboard calls run
+    # strictly one after another and caused very slow first paint.
+    for name in methods:
+        fn = getattr(client, name, None)
+        if fn is None:
+            continue
+        try:
+            return await fn(*args, **kwargs)
+        except TypeError:
             try:
-                return await fn(*args, **kwargs)
-            except TypeError as e:
-                # Some installed nepsepy versions differ in optional args.
-                try:
-                    return await fn(*args)
-                except Exception as e2:
-                    errors.append(f"{name}: {e2}")
-            except Exception as e:
-                errors.append(f"{name}: {e}")
+                return await fn(*args)
+            except Exception as e2:
+                errors.append(f"{name}: {e2}")
+        except Exception as e:
+            errors.append(f"{name}: {e}")
     detail = "; ".join(errors[-4:])
     raise RuntimeError("No compatible nepsepy method succeeded" + (f": {detail}" if detail else ""))
 
@@ -309,20 +307,19 @@ async def _sdk_first(methods, *args, **kwargs):
     """Call the first available nepsepy method and return its raw payload."""
     errors = []
     client = await get_nepse_client()
-    async with NEPSE_CALL_LOCK:
-        for name in methods:
-            fn = getattr(client, name, None)
-            if fn is None:
-                continue
+    for name in methods:
+        fn = getattr(client, name, None)
+        if fn is None:
+            continue
+        try:
+            return await fn(*args, **kwargs), name, errors
+        except TypeError:
             try:
-                return await fn(*args, **kwargs), name, errors
-            except TypeError:
-                try:
-                    return await fn(*args), name, errors
-                except Exception as exc:
-                    errors.append(f"{name}: {type(exc).__name__}: {exc}")
+                return await fn(*args), name, errors
             except Exception as exc:
                 errors.append(f"{name}: {type(exc).__name__}: {exc}")
+        except Exception as exc:
+            errors.append(f"{name}: {type(exc).__name__}: {exc}")
     raise RuntimeError("; ".join(errors[-6:]) or "No compatible nepsepy method available")
 
 
@@ -345,31 +342,31 @@ async def get_market():
                 errors.append(f"{label}: {type(exc).__name__}: {exc}")
                 return None, None
 
-        # All dashboard-critical values come from the same nepsepy public
-        # session. The client retains NEPSE's temporary token in memory.
-        status_raw, status_method = await one("market_status", ["market_status"])
-        summary_raw, summary_method = await one("market_summary", ["market_summary", "summary"])
-        index_raw, index_method = await one("nepse_index", ["nepse_index", "get_nepse_index", "indices"])
-        live_raw, live_method = await one("live_market", ["live_market"])
+        # Fetch independent datasets concurrently. The old version awaited
+        # every dataset serially, multiplying network latency.
+        core = await asyncio.gather(
+            one("market_status", ["market_status"]),
+            one("market_summary", ["market_summary", "summary"]),
+            one("nepse_index", ["nepse_index", "get_nepse_index", "indices"]),
+            one("live_market", ["live_market"]),
+            one("top_gainers", ["top_gainers"]),
+            one("top_losers", ["top_losers"]),
+            one("top_turnover", ["top_ten_turnover_scrips", "top_turnover"]),
+            one("top_trade", ["top_ten_trade_scrips", "top_trade"]),
+            one("top_transaction", ["top_ten_transaction_scrips", "top_transaction"]),
+        )
+        (
+            (status_raw,status_method),(summary_raw,summary_method),
+            (index_raw,index_method),(live_raw,live_method),
+            (gainers_raw,gainers_method),(losers_raw,losers_method),
+            (turnover_raw,turnover_method),(trade_raw,trade_method),
+            (transaction_raw,transaction_method)
+        ) = core
 
-        # Current day's price sheet is a reliable fallback for the live table
-        # when a nepsepy release does not expose live_market().
         if not deep_rows(live_raw):
             live_raw, live_method = await one("today_price", ["today_price"], page=1, size=500)
 
-        gainers_raw, gainers_method = await one("top_gainers", ["top_gainers"])
-        losers_raw, losers_method = await one("top_losers", ["top_losers"])
-        turnover_raw, turnover_method = await one(
-            "top_turnover", ["top_ten_turnover_scrips", "top_turnover"]
-        )
-        trade_raw, trade_method = await one(
-            "top_trade", ["top_ten_trade_scrips", "top_trade"]
-        )
-        transaction_raw, transaction_method = await one(
-            "top_transaction", ["top_ten_transaction_scrips", "top_transaction"]
-        )
-
-        # These lists must remain empty if the dedicated NEPSE method failed.
+        # Company directory is lazy: it is not needed to paint the dashboard.
         # Showing derived/static values would make the dashboard look live when
         # it is not. The frontend can display LIVE DATA UNAVAILABLE instead.
         gainers = deep_rows(gainers_raw) or []
@@ -380,11 +377,7 @@ async def get_market():
         live_rows = deep_rows(live_raw, ("content", "data", "results", "rows")) or []
 
         companies = []
-        try:
-            companies_raw, _ = await one("companies", ["companies", "company_list", "securities"])
-            companies = arr(companies_raw)
-        except Exception:
-            pass
+        company_method = None
 
         market_open = normalize_open(pick(status_raw, ["isOpen", "marketOpen", "open"], None))
         if market_open is None:
@@ -427,7 +420,7 @@ async def get_market():
             "diagnostics": {
                 "listedSymbols": max(461, len(companies)) if companies else 461,
                 "coveredRows": len(live_rows),
-                "sourceMethods": source_methods,
+                "sourceMethods": {**source_methods, "companies": company_method},
                 "sourceErrors": errors,
                 "rankingPolicy": "Dedicated nepsepy rankings only; no derived/static dashboard rankings",
                 "failedSources": failed,
@@ -1338,10 +1331,16 @@ async def nepse_sub_indices():
 
 @app.get("/CompanyList")
 async def company_list():
-    try:
-        return await nepse_call(["companies", "securities"])
-    except Exception:
-        return await public_get("/CompanyList")
+    async def load():
+        try:
+            return await nepse_call(["companies", "securities", "company_list"])
+        except Exception:
+            return await public_get("/CompanyList")
+    return await cached("companies:all", load)
+
+@app.get("/api/companies")
+async def api_companies():
+    return await company_list()
 
 
 @app.get("/CompanyDetails")
@@ -1384,189 +1383,69 @@ async def floorsheet_of(symbol: str):
 
 @app.get("/api/command-center")
 async def command_center():
-    tasks={
-      "market":get_market(), "index":get_index(), "sectors":get_sectors(), "brokers":get_broker_analysis(),
-      "gainers":nepse_call(["top_gainers"],True), "losers":nepse_call(["top_losers"],True),
-      "turnover":nepse_call(["top_turnover"],True), "volume":nepse_call(["top_traded_shares","top_active"],True),
-      "transactions":nepse_call(["top_transactions"],True),
-    }
-    results={}; errors=[]
-    async def one(k,coro):
-        try: results[k]=await coro
-        except Exception as e: results[k]=[]; errors.append(f"{k}: {e}")
-    await asyncio.gather(*[one(k,v) for k,v in tasks.items()])
-
-    m=results.get("market") or {}; idx=results.get("index")
-    summary={}
-    for x in deep_rows(m.get("summary") if isinstance(m,dict) else {}):
-        label=str(pick(x,["detail","label","name","title"],"" )).lower()
-        val=num(pick(x,["value","amount","total","turnover","totalTurnover","volume","transactions","scripsTraded"]))
-        if 'turnover' in label: summary['turnover']=val
-        elif 'traded shares' in label or 'volume' in label: summary['volume']=val
-        elif 'transactions' in label or 'trade count' in label: summary['transactions']=val
-        elif 'scrips' in label or 'securities' in label: summary['scripsTraded']=val
-    # Some market_summary versions are a single object rather than rows.
-    ms=m.get("summary") if isinstance(m,dict) else {}
-    if isinstance(ms,dict):
-        summary.setdefault('turnover', num(pick(ms,["turnover","totalTurnover","totalTradeValue"])))
-        summary.setdefault('volume', num(pick(ms,["volume","totalTradedQuantity","totalTradeQuantity","tradedShares"])))
-        summary.setdefault('transactions', num(pick(ms,["transactions","totalTransactions","totalTrades"])))
-        summary.setdefault('scripsTraded', num(pick(ms,["scripsTraded","totalScrips","totalSecuritiesTraded"])))
-
-    live=deep_rows(m.get('live') if isinstance(m,dict) else {})
-    # get_market normally fills live with today_price when live_market is empty.
-    # If a provider still returns no rows, make one direct, paginated attempt here.
-    if not live:
-        try:
-            live=deep_rows(await nepse_call(["today_price"], page=1, size=500))
-        except Exception as e:
-            errors.append(f"breadth today_price: {e}")
+    # Reuse the central cached market snapshot instead of starting a second
+    # ingestion pipeline whenever the Command Center opens.
+    market, idx, sectors, brokers = await asyncio.gather(
+        get_market(), get_index(), get_sectors(), get_broker_analysis()
+    )
+    m = market or {}
+    live = deep_rows(m.get("live"))
 
     def row_change_pct(x):
-        p=num(pick(x,["perChange","percentageChange","percentChange","changePercent","pChange","changePercentage"]))
+        p = num(pick(x, ["perChange","percentageChange","percentChange","changePercent","pChange","changePercentage"]))
         if p is not None:
             return p
-        change=num(pick(x,["change","pointChange","difference"]))
-        prev=num(pick(x,["previousClose","previousPrice","prevClose","previousLtp","previousLtpPrice"]))
-        if change is not None and prev not in (None,0):
-            return (change/prev)*100
-        ltp=num(pick(x,["lastTradedPrice","lastPrice","ltp","LTP","closePrice","price"]))
-        if ltp is not None and prev not in (None,0):
-            return ((ltp-prev)/prev)*100
+        change = num(pick(x, ["change","pointChange","difference"]))
+        prev = num(pick(x, ["previousClose","previousPrice","prevClose","previousLtp","previousLtpPrice"]))
+        if change is not None and prev not in (None, 0):
+            return change / prev * 100
+        ltp = num(pick(x, ["lastTradedPrice","lastPrice","ltp","LTP","closePrice","price"]))
+        if ltp is not None and prev not in (None, 0):
+            return (ltp - prev) / prev * 100
         return None
 
-    breadth={"advancing":0,"declining":0,"unchanged":0}
-    counted=0
-    for x in live:
-        p=row_change_pct(x)
+    breadth = {"advancing": 0, "declining": 0, "unchanged": 0}
+    for row in live:
+        p = row_change_pct(row)
         if p is None:
             continue
-        counted += 1
-        if p>0: breadth['advancing']+=1
-        elif p<0: breadth['declining']+=1
-        else: breadth['unchanged']+=1
+        if p > 0:
+            breadth["advancing"] += 1
+        elif p < 0:
+            breadth["declining"] += 1
+        else:
+            breadth["unchanged"] += 1
 
-    # If full live rows are unavailable, use provider summary breadth when it
-    # exists. Do not fabricate unchanged counts from a capped 50-row mover list.
-    if counted == 0:
-        ms=m.get("summary") if isinstance(m,dict) else {}
-        breadth["advancing"] = int(num(pick(ms,["advancing","advancers","advance"])) or 0) if isinstance(ms,dict) else 0
-        breadth["declining"] = int(num(pick(ms,["declining","decliners","decline"])) or 0) if isinstance(ms,dict) else 0
-        breadth["unchanged"] = int(num(pick(ms,["unchanged","unchangedCount"])) or 0) if isinstance(ms,dict) else 0
+    summary = m.get("summary") if isinstance(m, dict) else {}
+    if sum(breadth.values()) == 0 and isinstance(summary, dict):
+        breadth["advancing"] = int(num(pick(summary, ["advancing","advancers","advance"])) or 0)
+        breadth["declining"] = int(num(pick(summary, ["declining","decliners","decline"])) or 0)
+        breadth["unchanged"] = int(num(pick(summary, ["unchanged","unchangedCount"])) or 0)
 
-    def clean(xs): return deep_rows(xs)[:50]
-
-    # Build a symbol -> live row index so top lists can be enriched with the
-    # actual volume/value/transaction fields when their endpoint omits them.
-    live_by_symbol={}
-    for row in live:
-        sym=pick(row,["symbol","ticker","securitySymbol","stockSymbol"])
-        if sym: live_by_symbol[str(sym).upper()]=row
-
-    def first_num(row, keys):
-        for key in keys:
-            n=num(pick(row,[key]))
-            if n is not None:
-                return n
-        return None
-
-    def activity_rows(xs, kind):
-        source=clean(xs)
-        out=[]
-        for row in source:
-            if not isinstance(row,dict): continue
-            symbol=pick(row,["symbol","ticker","securitySymbol","stockSymbol"])
-            live_row=live_by_symbol.get(str(symbol).upper()) if symbol else None
-            merged={}
-            if isinstance(live_row,dict): merged.update(live_row)
-            merged.update(row)
-            quantity=first_num(merged,["sharesTraded","shareTraded","totalTradeQuantity","totalTradedQuantity","tradeQuantity","quantity","volume","tradedShares"])
-            value=first_num(merged,["turnover","totalTurnover","totalTradeValue","totalTradedValue","tradedValue","amount","value","totalAmount"])
-            transactions=first_num(merged,["transactions","totalTransactions","totalTrades","transactionCount","trades"])
-            item=dict(row)
-            if symbol is not None: item["symbol"]=symbol
-            if quantity is not None:
-                item.update({"quantity":quantity,"volume":quantity,"sharesTraded":quantity})
-            if value is not None:
-                item.update({"value":value,"turnover":value,"totalTradeValue":value})
-            if transactions is not None:
-                item.update({"transactions":transactions,"totalTransactions":transactions,"totalTrades":transactions})
-            out.append(item)
-        # If the dedicated volume endpoint returned rows without usable volume,
-        # derive Top Volume from the full live snapshot instead.
-        if kind=="volume" and (not out or sum(1 for r in out if num(r.get("volume")) not in (None,0))<min(5,len(out))):
-            derived=[]
-            for row in live:
-                q=first_num(row,["sharesTraded","shareTraded","totalTradeQuantity","totalTradedQuantity","tradeQuantity","quantity","volume","tradedShares"])
-                if q is None: continue
-                item=dict(row)
-                sym=pick(row,["symbol","ticker","securitySymbol","stockSymbol"])
-                val=first_num(row,["turnover","totalTurnover","totalTradeValue","totalTradedValue","tradedValue","amount","value","totalAmount"])
-                if sym is not None: item["symbol"]=sym
-                item["quantity"]=q; item["volume"]=q; item["sharesTraded"]=q
-                if val is not None: item["value"]=val; item["turnover"]=val; item["totalTradeValue"]=val
-                derived.append(item)
-            derived.sort(key=lambda r:num(r.get("volume")) or 0, reverse=True)
-            if derived: return derived[:50]
-        return out
-
-    turnover_rows=activity_rows(results.get('turnover') or m.get('topTurnover'), 'turnover')
-    volume_rows=activity_rows(results.get('volume') or m.get('topTraded'), 'volume')
-    transaction_rows=activity_rows(results.get('transactions') or m.get('topTransactions'), 'transactions')
-    gainers_rows=clean(results.get('gainers')) or clean(m.get('gainers'))
-    losers_rows=clean(results.get('losers')) or clean(m.get('losers'))
-
-    # Sector snapshot: prefer real sub-index rows. If unavailable, enrich live
-    # rows with company sector metadata and aggregate a verified snapshot from
-    # those constituent rows.
-    sector_payload=results.get('sectors') or {}
-    sector_rows=deep_rows(sector_payload, ("data","content","sectorIndices","subIndices"))
-    companies=deep_rows(m.get("companies") if isinstance(m,dict) else {})
-    company_by_symbol={}
-    for c in companies:
-        sym=pick(c,["symbol","ticker","securitySymbol","stockSymbol"])
-        if sym: company_by_symbol[str(sym).upper()]=c
-    sector_groups={}
-    for row in live:
-        sym=pick(row,["symbol","ticker","securitySymbol","stockSymbol"])
-        c=company_by_symbol.get(str(sym).upper(),{}) if sym else {}
-        sec=pick(row,["sector","sectorName","industry"]) or pick(c,["sector","sectorName","sectorNameEnglish","industry","indexName"])
-        if not sec: continue
-        key=str(sec).strip(); sector_groups.setdefault(key,[]).append(row)
-
-    normalized_sectors=[]
-    for x in sector_rows:
-        name=pick(x,["indexName","sectorName","sector","name","index","symbol"],"—")
-        normalized_sectors.append({
-            **x, "sector":name, "name":name,
-            "change":num(pick(x,["pointChange","difference","change"])),
-            "changePercent":num(pick(x,["perChange","percentageChange","percentChange","changePercent"])),
-            "turnover":num(pick(x,["turnover","totalTurnover","totalTradeValue","totalTradedValue"])),
-            "volume":num(pick(x,["volume","totalTradedQuantity","tradedShares","sharesTraded"])),
-        })
-    if not normalized_sectors:
-        for name, rows in sector_groups.items():
-            changes=[row_change_pct(r) for r in rows if row_change_pct(r) is not None]
-            turnover=sum(first_num(r,["turnover","totalTurnover","totalTradeValue","totalTradedValue","tradedValue","amount","value"]) or 0 for r in rows)
-            volume=sum(first_num(r,["sharesTraded","totalTradeQuantity","totalTradedQuantity","tradeQuantity","quantity","volume"]) or 0 for r in rows)
-            normalized_sectors.append({
-                "sector":name,"name":name,
-                "change":sum(changes)/len(changes) if changes else None,
-                "changePercent":sum(changes)/len(changes) if changes else None,
-                "turnover":turnover,"volume":volume,"stocks":len(rows),
-            })
-    else:
-        # Attach constituent counts where available.
-        for s in normalized_sectors:
-            name=str(s.get("name") or s.get("sector") or "").lower()
-            match=next((rows for key,rows in sector_groups.items() if key.lower()==name),[])
-            if match:
-                s["stocks"]=len(match)
-
-    broker_payload=results.get('brokers') or {}
-    broker_rows=deep_rows(broker_payload, ("data","content"))
-
-    return {"ok":True,"updatedAt":now_iso(),"summary":summary,"breadth":breadth,"nepse":idx,"movers":{"gainers":gainers_rows,"losers":losers_rows},"activity":{"turnover":turnover_rows,"volume":volume_rows,"transactions":transaction_rows},"sectors":normalized_sectors,"brokers":broker_rows,"counts":{"live":len(live),"gainers":len(gainers_rows),"losers":len(losers_rows),"sectors":len(normalized_sectors)},"diagnostics":{"errors":errors,"marketSource":m.get('source') if isinstance(m,dict) else None,"breadthRows":counted}}
+    return {
+        "ok": bool(m.get("ok") or live or idx),
+        "updatedAt": now_iso(),
+        "summary": summary if isinstance(summary, (dict, list)) else {},
+        "breadth": breadth,
+        "nepse": idx or m.get("index") or {},
+        "movers": {
+            "gainers": deep_rows(m.get("gainers"))[:50],
+            "losers": deep_rows(m.get("losers"))[:50],
+        },
+        "activity": {
+            "turnover": deep_rows(m.get("topTurnover"))[:50],
+            "volume": deep_rows(m.get("topTraded"))[:50],
+            "transactions": deep_rows(m.get("topTransactions"))[:50],
+        },
+        "sectors": (sectors or {}).get("data", []) if isinstance(sectors, dict) else [],
+        "brokers": (brokers or {}).get("data", []) if isinstance(brokers, dict) else [],
+        "counts": {"live": len(live)},
+        "diagnostics": {
+            "marketSource": m.get("source") if isinstance(m, dict) else None,
+            "breadthRows": sum(breadth.values()),
+            "sourceErrors": m.get("diagnostics", {}).get("sourceErrors", []) if isinstance(m, dict) else [],
+        },
+    }
 
 @app.get("/api/diagnostics")
 async def diagnostics():
