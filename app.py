@@ -1157,25 +1157,25 @@ def floor_rows(raw: Any) -> list[dict]:
         # Prefer broker names when present; fall back to member/broker IDs.
         buyer = pick(x, [
             "buyerBrokerName", "buyerBroker", "buyer", "buyerBrokerCode",
-            "buyerMemberId", "buyBroker"
+            "buyerMemberId", "buyBroker", "buyerBrokerId", "buyerCode"
         ])
         seller = pick(x, [
             "sellerBrokerName", "sellerBroker", "seller", "sellerBrokerCode",
-            "sellerMemberId", "sellBroker"
+            "sellerMemberId", "sellBroker", "sellerBrokerId", "sellerCode"
         ])
         out.append({
-            "symbol": pick(x, ["stockSymbol", "symbol", "securitySymbol", "ticker"]),
+            "symbol": pick(x, ["stockSymbol", "symbol", "securitySymbol", "ticker", "scrip", "stock"]),
             "buyerBroker": buyer,
             "sellerBroker": seller,
             "buyerBrokerName": pick(x, ["buyerBrokerName", "buyerBroker", "buyer"]),
             "sellerBrokerName": pick(x, ["sellerBrokerName", "sellerBroker", "seller"]),
             "buyerBrokerId": pick(x, ["buyerMemberId", "buyerBrokerCode", "buyerBroker"]),
             "sellerBrokerId": pick(x, ["sellerMemberId", "sellerBrokerCode", "sellerBroker"]),
-            "quantity": num(pick(x, ["contractQuantity", "quantity", "tradedQuantity", "volume", "shares"])),
+            "quantity": num(pick(x, ["contractQuantity", "quantity", "tradedQuantity", "volume", "shares", "qty"])),
             "rate": num(pick(x, ["contractRate", "rate", "price", "tradedPrice"])),
             "amount": num(pick(x, ["contractAmount", "amount", "turnover", "totalAmount"])),
             "trade": pick(x, ["contractId", "trade", "contractNumber", "transactionNumber"]),
-            "businessDate": pick(x, ["businessDate", "date", "tradeDate"]),
+            "businessDate": pick(x, ["businessDate", "date", "tradeDate", "calculationDate"]),
             "tradeTime": pick(x, ["tradeTime", "time"]),
             "securityId": pick(x, ["stockId", "securityId", "id"]),
             "securityName": pick(x, ["securityName", "name"]),
@@ -1895,7 +1895,7 @@ def _subtract_months(dt: datetime, months: int) -> datetime:
     return dt.replace(year=year, month=month, day=day)
 
 def _row_date(row: dict) -> Optional[str]:
-    value = row.get("businessDate") or pick(row.get("raw", {}), ["businessDate", "tradeDate", "date"])
+    value = row.get("businessDate") or pick(row.get("raw", {}), ["businessDate", "tradeDate", "calculationDate", "date"])
     if value is None:
         return None
     text_value = str(value).strip()
@@ -1911,31 +1911,108 @@ def _row_date(row: dict) -> Optional[str]:
         return None
 
 async def _historical_floor_rows(start_date: datetime.date, end_date: datetime.date, symbol: Optional[str] = None):
-    """Load dated daily archive files; never relabel today's live feed as history."""
+    """Load historical trades from NEPSE Open Data, then use the existing archive as fallback.
+
+    The repository is discovered through GitHub's tree API so this does not
+    assume a particular daily filename extension. Only dated files under
+    floorsheet/ inside the requested range are downloaded.
+    """
     wanted = symbol.upper().strip() if symbol else None
-    dates = []
-    d = start_date
-    while d <= end_date:
-        dates.append(d)
-        d += timedelta(days=1)
-    sem = asyncio.Semaphore(8)
-    async def fetch_day(day):
+    repo = "socrateai-official/nepse-open-data"
+    api = f"https://api.github.com/repos/{repo}/git/trees/main?recursive=1"
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "NEPSE-Pulse/1.0"}
+    errors = []
+
+    def date_from_path(path: str):
+        import re
+        m = re.search(r"(20\d{2})[-_/]?(\d{2})[-_/]?(\d{2})", path)
+        if not m:
+            return None
+        try:
+            return datetime.strptime("".join(m.groups()), "%Y%m%d").date()
+        except ValueError:
+            return None
+
+    async def request_bytes(url: str):
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+            response = await client.get(url, headers=headers)
+            response.raise_for_status()
+            return response
+
+    paths = []
+    try:
+        tree_response = await request_bytes(api)
+        tree = tree_response.json()
+        if tree.get("truncated"):
+            errors.append("GitHub tree response was truncated")
+        for item in tree.get("tree", []):
+            path = item.get("path", "")
+            low = path.lower()
+            day = date_from_path(path)
+            if (item.get("type") == "blob" and low.startswith("floorsheet/")
+                    and day and start_date <= day <= end_date
+                    and low.endswith((".csv", ".json", ".csv.gz", ".json.gz"))):
+                paths.append((day, path))
+    except Exception as exc:
+        errors.append(f"NEPSE Open Data repository discovery: {type(exc).__name__}: {exc}")
+
+    sem = asyncio.Semaphore(6)
+    async def load_path(day, path):
         async with sem:
             try:
-                raw = await static_get(f"/floor_sheet/daily/{day.isoformat()}.json")
-                rows = floor_rows(raw)
-                out = []
+                url = f"https://raw.githubusercontent.com/{repo}/main/{path}"
+                response = await request_bytes(url)
+                content = response.content
+                if path.lower().endswith(".gz"):
+                    import gzip
+                    content = gzip.decompress(content)
+                if path.lower().endswith((".json", ".json.gz")):
+                    import json
+                    raw = json.loads(content.decode("utf-8-sig"))
+                    rows = floor_rows(raw)
+                else:
+                    reader = csv.DictReader(io.StringIO(content.decode("utf-8-sig", errors="replace")))
+                    rows = floor_rows(list(reader))
+                cleaned = []
                 for row in rows:
                     rd = _row_date(row) or day.isoformat()
                     if rd != day.isoformat():
                         continue
                     row["businessDate"] = rd
                     if not wanted or str(row.get("symbol") or "").upper() == wanted:
-                        out.append(row)
-                return out
-            except Exception:
+                        cleaned.append(row)
+                return cleaned
+            except Exception as exc:
+                errors.append(f"{path}: {type(exc).__name__}: {exc}")
                 return []
-    batches = await asyncio.gather(*(fetch_day(day) for day in dates))
+
+    if paths:
+        batches = await asyncio.gather(*(load_path(day, path) for day, path in paths))
+        data = [row for batch in batches for row in batch]
+        if data:
+            return data
+
+    # Fallback to YONEPSE's compact daily JSON archive if Open Data had no
+    # matching files or returned no parseable rows.
+    dates = []
+    day = start_date
+    while day <= end_date:
+        dates.append(day)
+        day += timedelta(days=1)
+    async def fetch_fallback(day):
+        try:
+            raw = await static_get(f"/floor_sheet/daily/{day.isoformat()}.json")
+            rows = floor_rows(raw)
+            result = []
+            for row in rows:
+                rd = _row_date(row) or day.isoformat()
+                if rd == day.isoformat() and (not wanted or str(row.get("symbol") or "").upper() == wanted):
+                    row["businessDate"] = rd
+                    result.append(row)
+            return result
+        except Exception:
+            return []
+    batches = await asyncio.gather(*(fetch_fallback(day) for day in dates))
     return [row for batch in batches for row in batch]
 
 def _build_broker_report(rows: list[dict]):
@@ -2007,7 +2084,7 @@ async def api_brokers_history(months: int = Query(3, ge=1, le=12), symbol: Optio
                           "netValue": sum(x["netValue"] for x in day_rows),
                           "buyQty": sum(x["buyQty"] for x in day_rows),
                           "sellQty": sum(x["sellQty"] for x in day_rows)})
-        return {"ok": bool(rows), "source": "NEPSE daily floorsheet archive", "startDate": start_day.isoformat(),
+        return {"ok": bool(rows), "source": "NEPSE Open Data (with YONEPSE archive fallback)", "startDate": start_day.isoformat(),
                 "endDate": end_day.isoformat(), "monthsRequested": months, "symbol": symbol.upper() if symbol else None,
                 "dataCoverage": {"tradeRows": len(rows), "daysWithData": len(dates)}, "brokers": broker_rows,
                 "bySymbol": symbol_rows, "dailyByBroker": daily_rows, "chart": chart,
