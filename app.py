@@ -59,7 +59,7 @@ async def production_call(method: str, *args, **kwargs):
     return await asyncio.to_thread(fn, *args, **kwargs)
 
 
-APP_VERSION = "V32-NEPSEPY-YONEPSE-FALLBACK-DASHBOARD"
+APP_VERSION = "V33-CONSISTENT-NEPSE-DATA"
 PUBLIC_API = "https://nepseapi.surajrimal.dev"
 STATIC_API = "https://shubhamnpk.github.io/yonepse/data"
 OPEN_DATA = "https://raw.githubusercontent.com/socrateai-official/nepse-open-data/main"
@@ -483,8 +483,30 @@ async def get_market():
         source = "YONEPSE static fallback" if fallback_used else "nepsepy public NEPSE session"
         stale = bool(fallback_used)
 
+        explicit_breadth = _find_breadth_values(summary_raw)
+        if len(explicit_breadth) < 3:
+            explicit_breadth.update({k:v for k,v in _find_breadth_values(status_raw).items() if k not in explicit_breadth})
+        if len(explicit_breadth) < 3:
+            derived = {"advancing": 0, "declining": 0, "unchanged": 0}
+            for row in live_rows:
+                p = num(pick(row, ["perChange","percentageChange","percentChange","changePercent","pChange"]))
+                if p is None:
+                    ch = num(pick(row, ["change","pointChange","difference"]))
+                    prev = num(pick(row, ["previousClose","previousPrice","prevClose","previousLtp"]))
+                    if ch is not None and prev not in (None, 0): p = ch / prev * 100
+                if p is None: continue
+                if p > 0: derived["advancing"] += 1
+                elif p < 0: derived["declining"] += 1
+                else: derived["unchanged"] += 1
+            explicit_breadth = derived
+
+        try:
+            authoritative_index = await get_index()
+        except Exception:
+            authoritative_index = normalize_index(index_raw)
+
         return {
-            "ok": bool(summary_raw is not None or live_rows or gainers or losers or index_raw is not None),
+            "ok": bool(summary_raw is not None or live_rows or gainers or losers or authoritative_index),
             "source": source,
             "stale": stale,
             "providerType": "nepsepy public read-only NEPSE session",
@@ -493,7 +515,8 @@ async def get_market():
             "status": status or {},
             "summary": summary_raw if summary_raw is not None else {},
             "summarySource": source,
-            "index": normalize_index(index_raw),
+            "breadth": explicit_breadth,
+            "index": authoritative_index,
             "live": live_rows,
             "gainers": gainers,
             "losers": losers,
@@ -547,10 +570,113 @@ def normalize_index(raw: Any):
             return row
     return {}
 
+
+def _latest_archive_index(rows: list[dict]) -> dict:
+    """Return the newest completed NEPSE session from the verified index archive."""
+    if not rows:
+        return {}
+    r = rows[-1]
+    close = num(r.get("close"))
+    if close is None:
+        return {}
+    prev = None
+    if len(rows) >= 2:
+        prev = num(rows[-2].get("close"))
+    change = num(r.get("perChange"))
+    point = (close - prev) if prev is not None else None
+    if point is not None and change is None and prev:
+        change = point / prev * 100
+    return {
+        "id": 58,
+        "index": "NEPSE Index",
+        "indexName": "NEPSE Index",
+        "close": close,
+        "currentValue": close,
+        "value": close,
+        "open": num(r.get("open")),
+        "high": num(r.get("high")),
+        "low": num(r.get("low")),
+        "previousClose": prev,
+        "change": point,
+        "perChange": change,
+        "businessDate": r.get("date") or "",
+        "generatedTime": r.get("date") or "",
+        "source": "verified NEPSE_INDEX.csv completed-session archive",
+    }
+
+
+def _archive_is_recent(rows: list[dict], max_age_days: int = 7) -> bool:
+    if not rows:
+        return False
+    raw = str(rows[-1].get("date") or "")[:10]
+    try:
+        d = datetime.fromisoformat(raw).date()
+        return (datetime.now(NPT).date() - d).days <= max_age_days and d <= datetime.now(NPT).date()
+    except Exception:
+        return False
+
+async def _verified_closed_index() -> dict:
+    try:
+        rows = await yonepse_index_history()
+        if _archive_is_recent(rows, 7):
+            return _latest_archive_index(rows)
+    except Exception:
+        pass
+    return {}
+
+
+def _find_breadth_values(value: Any) -> dict:
+    """Find explicit Adv/Dec/Unchanged counts without mixing stock rows."""
+    aliases = {
+        "advancing": ("advancing", "advancers", "advance", "advanced", "advancedscrips"),
+        "declining": ("declining", "decliners", "decline", "declined", "decliningscrips"),
+        "unchanged": ("unchanged", "unchangedcount", "unchangedstocks", "unchangedscrips"),
+    }
+    found = {}
+    def walk(x):
+        if isinstance(x, dict):
+            norm = {str(k).lower().replace("_", "").replace("-", ""): v for k,v in x.items()}
+            for out, keys in aliases.items():
+                if out in found:
+                    continue
+                for k in keys:
+                    nk = k.lower().replace("_", "").replace("-", "")
+                    if nk in norm:
+                        v = num(norm[nk])
+                        if v is not None:
+                            found[out] = int(v)
+                            break
+            for v in x.values():
+                if len(found) == 3:
+                    break
+                walk(v)
+        elif isinstance(x, list):
+            for v in x:
+                if len(found) == 3:
+                    break
+                walk(v)
+    walk(value)
+    return found
+
 async def get_index():
     async def load():
         errors = []
-        # Primary: authenticated/public NEPSE session through nepsepy.
+        # When the market is closed, the completed-session archive is the
+        # safest source for the headline close. This prevents a mismatched
+        # currentValue/change pair from a stale intraday adapter.
+        try:
+            status_raw = await nepse_call(["market_status"])
+            is_open = normalize_open(pick(status_raw, ["isOpen", "marketOpen", "open"], None))
+        except Exception as exc:
+            is_open = None
+            errors.append(f"status: {exc}")
+
+        if is_open is False:
+            archived = await _verified_closed_index()
+            if archived:
+                return archived
+
+        # During an open session, use the live NEPSE session first.
         try:
             raw = await nepse_call(["nepse_indices", "nepse_index", "get_nepse_index", "indices"])
             idx = normalize_index(raw)
@@ -558,7 +684,8 @@ async def get_index():
                 return idx
         except Exception as exc:
             errors.append(f"nepsepy: {exc}")
-        # Secondary: the existing public API adapter.
+
+        # Secondary public adapter, but only if it explicitly identifies NEPSE.
         try:
             raw = await public_get("/NepseIndex")
             idx = normalize_index(raw)
@@ -566,14 +693,11 @@ async def get_index():
                 return idx
         except Exception as exc:
             errors.append(f"public: {exc}")
-        # Last resort: YONEPSE's current static index snapshot.
-        try:
-            raw = await yonepse_get("market/indices.json")
-            idx = normalize_index(raw)
-            if idx:
-                return idx
-        except Exception as exc:
-            errors.append(f"yonepse: {exc}")
+
+        # Verified completed-session fallback.
+        archived = await _verified_closed_index()
+        if archived:
+            return archived
         return {}
     return await cached("index:current", load)
 
@@ -1595,23 +1719,19 @@ async def command_center():
             return (ltp - prev) / prev * 100
         return None
 
-    breadth = {"advancing": 0, "declining": 0, "unchanged": 0}
-    for row in live:
-        p = row_change_pct(row)
-        if p is None:
-            continue
-        if p > 0:
-            breadth["advancing"] += 1
-        elif p < 0:
-            breadth["declining"] += 1
-        else:
-            breadth["unchanged"] += 1
-
     summary = m.get("summary") if isinstance(m, dict) else {}
-    if sum(breadth.values()) == 0 and isinstance(summary, dict):
-        breadth["advancing"] = int(num(pick(summary, ["advancing","advancers","advance"])) or 0)
-        breadth["declining"] = int(num(pick(summary, ["declining","decliners","decline"])) or 0)
-        breadth["unchanged"] = int(num(pick(summary, ["unchanged","unchangedCount"])) or 0)
+    breadth = m.get("breadth") if isinstance(m, dict) else None
+    if not isinstance(breadth, dict) or sum(num(breadth.get(k)) or 0 for k in ("advancing","declining","unchanged")) == 0:
+        breadth = _find_breadth_values(summary)
+    if len(breadth) < 3:
+        breadth = {"advancing": 0, "declining": 0, "unchanged": 0}
+        for row in live:
+            p = row_change_pct(row)
+            if p is None:
+                continue
+            if p > 0: breadth["advancing"] += 1
+            elif p < 0: breadth["declining"] += 1
+            else: breadth["unchanged"] += 1
 
     return {
         "ok": bool(m.get("ok") or live or idx),

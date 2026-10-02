@@ -1902,20 +1902,21 @@ const PULSE_FEED_CONFIG = {
   pollMs: 60000,
   closedPollMs: 180000,
   timeoutMs: 25000,
-  cacheKey: 'nepsePulseCentralFeedV32_REAL',
+  cacheKey: 'nepsePulseCentralFeedV33_REAL',
   listedSymbols: 461
 };
 // V24.2 invalidates older caches that may contain a securities master snapshot rather than live prices.
 try {
-  if(localStorage.getItem('nepsePulseV32_cache_version')!=='1'){
+  if(localStorage.getItem('nepsePulseV33_cache_version')!=='1'){
     localStorage.removeItem('nepsePulseCentralFeedV24_1');
     localStorage.removeItem('nepsePulseCentralFeedV24');
-    localStorage.setItem('nepsePulseV32_cache_version','1');
+    localStorage.removeItem('nepsePulseCentralFeedV32_REAL');
+    localStorage.setItem('nepsePulseV33_cache_version','1');
   }
 }catch(e){}
 
 const PulseFeedEngine = (()=>{
-  const state={status:'CONNECTING',updatedAt:null,lastError:null,summary:null,index:null,live:[],gainers:[],losers:[],companies:[],floorsheet:[],health:null,source:'NEPSE API',providerType:'Unofficial NEPSE REST API',marketOpen:null,diagnostics:{listedSymbols:461,coveredRows:0,api:'nepse-pulse-1.onrender.com'}};
+  const state={status:'CONNECTING',updatedAt:null,lastError:null,summary:null,index:null,live:[],gainers:[],losers:[],companies:[],floorsheet:[],health:null,source:'NEPSE API',providerType:'Unofficial NEPSE REST API',marketOpen:null,diagnostics:{listedSymbols:461,coveredRows:0,api:'nepse-pulse-1.onrender.com'},breadth:{advancing:0,declining:0,unchanged:0}};
   const subscribers=new Set(); let pollTimer=null;
   const emit=()=>subscribers.forEach(fn=>{try{fn({...state})}catch(e){}});
   const num=v=>{if(v===null||v===undefined||v==='')return null;const n=Number(String(v).replace(/,/g,''));return Number.isFinite(n)?n:null};
@@ -2033,6 +2034,7 @@ const PulseFeedEngine = (()=>{
     state.losers=normalizeLive(d.losers);
     state.index=normalizeIndex(d.index);
     state.summary=d.summary||{};
+    state.breadth=d.breadth||{};
     state.health=d.status||null;
     state.marketOpen=d.marketOpen;
     state.updatedAt=d.updatedAt||new Date().toISOString();
@@ -2130,9 +2132,11 @@ function renderPulseMarket(){
   if(cpc)cpc.textContent=pct===null?'—':(pct>=0?'+':'')+pct.toFixed(2)+'%';
   if(change)change.className='np-change '+(ch>0?'up':ch<0?'down':'');
   const arrow=document.querySelector('.np-arrow'); if(arrow)arrow.textContent=ch>0?'▲':ch<0?'▼':'•';
-  const adv=rows.filter(x=>{const q=PulseFeedEngine.num(PulseFeedEngine.pick(x,['percentageChange','changePercent','perChange','change']));return q!==null&&q>0}).length;
-  const dec=rows.filter(x=>{const q=PulseFeedEngine.num(PulseFeedEngine.pick(x,['percentageChange','changePercent','perChange','change']));return q!==null&&q<0}).length;
-  const unc=rows.filter(x=>{const q=PulseFeedEngine.num(PulseFeedEngine.pick(x,['percentageChange','changePercent','perChange','change']));return q!==null&&q===0}).length;
+  const b=st.breadth&&typeof st.breadth==='object'?st.breadth:{};
+  const explicit=(Number.isFinite(Number(b.advancing))||Number.isFinite(Number(b.declining))||Number.isFinite(Number(b.unchanged)));
+  const adv=explicit?Number(b.advancing||0):rows.filter(x=>{const q=PulseFeedEngine.num(PulseFeedEngine.pick(x,['percentageChange','changePercent','perChange','change']));return q!==null&&q>0}).length;
+  const dec=explicit?Number(b.declining||0):rows.filter(x=>{const q=PulseFeedEngine.num(PulseFeedEngine.pick(x,['percentageChange','changePercent','perChange','change']));return q!==null&&q<0}).length;
+  const unc=explicit?Number(b.unchanged||0):rows.filter(x=>{const q=PulseFeedEngine.num(PulseFeedEngine.pick(x,['percentageChange','changePercent','perChange','change']));return q!==null&&q===0}).length;
   const a=document.getElementById('npAdv'),d=document.getElementById('npDec'),u=document.getElementById('npUnch');
   if(a)a.textContent=adv.toLocaleString(); if(d)d.textContent=dec.toLocaleString(); if(u)u.textContent=unc.toLocaleString();
   const status=document.getElementById('npMarketStatus');
@@ -4949,10 +4953,10 @@ document.addEventListener('DOMContentLoaded',()=>{
     try{
       if(range==='1D'){
         // 1D must be real intraday data. Never fall back to daily history.
-        raw=await fetch(backend+'/DailyNepseIndexGraph',{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw new Error('intraday graph HTTP '+r.status);return r.json();});
+        raw=await fetch(backend+'/DailyNepseIndexGraph?_pulse='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw new Error('intraday graph HTTP '+r.status);return r.json();});
         if(raw && raw.ok===false) throw new Error((raw.errors||[]).join('; ') || 'intraday history unavailable');
       }else{
-        raw=await fetch(backend+'/api/history?index=58',{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw new Error('history HTTP '+r.status);return r.json();});
+        raw=await fetch(backend+'/api/history?index=58&_pulse='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw new Error('history HTTP '+r.status);return r.json();});
       }
       ok=true;
     }catch(e){
@@ -5196,48 +5200,7 @@ header.topbar .feature-btn{
  .nepse-chart-wrap{height:290px}
 }
 </style>
-<script id="v24-7-index-bridge">
-(function(){
-  'use strict';
-  const API='https://nepseapi.surajrimal.dev';
-  let idxData=null;
-  const n=v=>{if(v===null||v===undefined||v==='')return null;const x=Number(String(v).replace(/,/g,''));return Number.isFinite(x)?x:null};
-  const pick=(o,keys)=>{if(!o||typeof o!=='object')return null;const m={};Object.keys(o).forEach(k=>m[k.toLowerCase().replace(/[^a-z0-9]/g,'')]=o[k]);for(const k of keys){const v=m[k.toLowerCase().replace(/[^a-z0-9]/g,'')];if(v!==undefined&&v!==null)return v}return null};
-  const arr=v=>{if(Array.isArray(v))return v;if(!v||typeof v!=='object')return[];for(const k of ['data','result','results','content','records','rows','items'])if(Array.isArray(v[k]))return v[k];return Object.values(v).filter(x=>x&&typeof x==='object')};
-  const money=v=>{const x=n(v);if(x===null)return '—';if(x>=1000000000)return (x/1000000000).toFixed(2)+' Arab';if(x>=10000000)return (x/10000000).toFixed(2)+' Cr';if(x>=100000)return (x/100000).toFixed(2)+' Lakh';return x.toLocaleString(undefined,{maximumFractionDigits:2})};
-  function extract(raw){
-    let candidates=arr(raw);
-    const nepse=candidates.find(x=>String(pick(x,['index','name','indexname','symbol'])||'').toLowerCase().replace(/[^a-z]/g,'').includes('nepse'))||candidates[0]||raw;
-    return {value:n(pick(nepse,['close','currentvalue','value','indexvalue','latest','current'])),change:n(pick(nepse,['change','pointchange','changevalue','difference'])),pct:n(pick(nepse,['perchange','percentchange','percentagechange','changepercent','pchange'])),date:pick(nepse,['businessdate','date','timestamp','time'])};
-  }
-  function paint(){
-    if(!idxData)return;
-    const d=idxData;
-    const set=(sel,text)=>{const e=document.querySelector(sel);if(e)e.textContent=text};
-    set('[data-market="index"]',d.value===null?'—':d.value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}));
-    set('[data-market="points"]',d.change===null?'—':(d.change>=0?'+':'')+d.change.toFixed(2));
-    set('[data-market="percent"]',d.pct===null?'—':(d.pct>=0?'+':'')+d.pct.toFixed(2)+'%');
-    set('#nepseIndexValue',d.value===null?'—':d.value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}));
-    const c=document.getElementById('nepseIndexChange'); if(c){c.textContent=(d.change===null?'Index change unavailable':(d.change>=0?'+':'')+d.change.toFixed(2)+(d.pct===null?'':' ('+(d.pct>=0?'+':'')+d.pct.toFixed(2)+'%)'));c.className='market-label change '+(d.change>0?'up':d.change<0?'down':'')}
-    const sub=document.getElementById('nepseChartSubtitle'); if(sub)sub.textContent=d.value===null?'Index performance':'NEPSE '+d.value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})+(d.pct===null?'':' · '+(d.pct>=0?'+':'')+d.pct.toFixed(2)+'%');
-  }
-  async function load(){
-    try{
-      const r=await fetch(API+'/NepseIndex',{cache:'no-store',headers:{Accept:'application/json'}});
-      if(!r.ok)throw new Error('index '+r.status);
-      idxData=extract(await r.json());
-      paint();
-      window.PULSE_LIVE_INDEX=idxData;
-      window.dispatchEvent(new CustomEvent('pulse-index-ready',{detail:idxData}));
-    }catch(e){
-      // Keep existing feed/cache visible; never blank the market card on index failure.
-    }
-  }
-  window.addEventListener('pulse-central-snapshot',paint);
-  load();
-  setInterval(load,60000);
-})();
-</script>
+
 
 
 <style id="v24-8-nepse-visible-fix">
@@ -5252,47 +5215,7 @@ header.topbar .feature-btn{
  #pulse-home-market-dashboard .nepse-chart-wrap{height:290px!important;display:block!important}
 }
 </style>
-<script id="v24-8-nepse-data-fix">
-(function(){
- 'use strict';
- const BACKEND=(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
- const PUBLIC='https://nepseapi.surajrimal.dev';
- const num=v=>{if(v===null||v===undefined||v==='')return null;const x=Number(String(v).replace(/,/g,''));return Number.isFinite(x)?x:null};
- const key=k=>String(k).toLowerCase().replace(/[^a-z0-9]/g,'');
- const pick=(o,keys)=>{if(!o||typeof o!=='object')return null;const m={};Object.keys(o).forEach(k=>m[key(k)]=o[k]);for(const k of keys){const v=m[key(k)];if(v!==undefined&&v!==null&&v!=='')return v}return null};
- function rows(v,depth=0){
-   if(depth>5||v==null)return [];
-   if(Array.isArray(v))return v;
-   if(typeof v!=='object')return [];
-   for(const k of ['data','content','results','result','items','records','rows','index','nepseIndex']){
-     if(v[k]!=null){const r=rows(v[k],depth+1);if(r.length)return r}
-   }
-   return [v];
- }
- function extract(raw){
-   const list=rows(raw);
-   const x=list.find(o=>String(pick(o,['index','indexName','name','symbol'])||'').toLowerCase().replace(/[^a-z]/g,'').includes('nepse'))||list.find(o=>num(pick(o,['close','currentValue','indexValue','value','latest','current']))!==null)||list[0]||{};
-   return {value:num(pick(x,['close','currentValue','indexValue','value','latest','current'])),change:num(pick(x,['change','pointChange','changeValue','difference'])),pct:num(pick(x,['perChange','percentChange','percentageChange','changePercent','pChange'])),date:pick(x,['businessDate','date','timestamp','time'])};
- }
- function paint(d){
-   if(!d||d.value===null)return;
-   const set=(sel,v)=>{document.querySelectorAll(sel).forEach(e=>e.textContent=v)};
-   set('[data-market="index"]',d.value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}));
-   set('[data-market="points"]',d.change===null?'—':(d.change>=0?'+':'')+d.change.toFixed(2));
-   set('[data-market="percent"]',d.pct===null?'—':(d.pct>=0?'+':'')+d.pct.toFixed(2)+'%');
-   const sub=document.getElementById('nepseChartSubtitle');if(sub)sub.textContent='NEPSE '+d.value.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})+(d.pct===null?'':' · '+(d.pct>=0?'+':'')+d.pct.toFixed(2)+'%');
-   window.PULSE_LIVE_INDEX=d;
-   window.dispatchEvent(new CustomEvent('pulse-index-ready',{detail:d}));
- }
- async function getJSON(url){const r=await fetch(url,{cache:'no-store',headers:{Accept:'application/json'}});if(!r.ok)throw new Error(String(r.status));return r.json()}
- async function load(){
-   for(const url of [BACKEND+'/NepseIndex',PUBLIC+'/NepseIndex']){
-     try{const d=extract(await getJSON(url));if(d.value!==null){paint(d);break}}catch(e){}
-   }
- }
- load();setInterval(load,60000);
-})();
-</script>
+
 
 
 <style id="v25-central-feature-engine">
