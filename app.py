@@ -59,10 +59,13 @@ async def production_call(method: str, *args, **kwargs):
     return await asyncio.to_thread(fn, *args, **kwargs)
 
 
-APP_VERSION = "V31-NEPSEPY-AUTHORITATIVE-DASHBOARD"
+APP_VERSION = "V32-NEPSEPY-YONEPSE-FALLBACK-DASHBOARD"
 PUBLIC_API = "https://nepseapi.surajrimal.dev"
 STATIC_API = "https://shubhamnpk.github.io/yonepse/data"
 OPEN_DATA = "https://raw.githubusercontent.com/socrateai-official/nepse-open-data/main"
+YONEPSE_API = "https://shubhamnpk.github.io/yonepse/data"
+YONEPSE_RAW = "https://raw.githubusercontent.com/Shubhamnpk/yonepse/main/data"
+NEPSE_INDEX_CSV = "https://raw.githubusercontent.com/binayabaral/nepal-market-data/main/data/nepse/NEPSE_INDEX.csv"
 CACHE_TTL = {
     "market": 60,
     "index": 120,
@@ -243,6 +246,50 @@ async def static_get(path: str):
         return r.json()
 
 
+async def yonepse_get(path: str):
+    """Static fallback feed maintained by the public YONEPSE dataset.
+
+    It is only used when the primary NEPSE session/API does not return a
+    usable dataset.  This prevents the UI from becoming a blank dashboard
+    during a temporary upstream authentication/rate-limit failure.
+    """
+    last_error = None
+    for base in (YONEPSE_API, YONEPSE_RAW):
+        try:
+            url = base.rstrip("/") + "/" + path.lstrip("/")
+            async with httpx.AsyncClient(timeout=12, follow_redirects=True) as client:
+                r = await client.get(url, headers={"Accept": "application/json"})
+                r.raise_for_status()
+                return r.json()
+        except Exception as exc:
+            last_error = exc
+    raise RuntimeError(f"YONEPSE fallback failed for {path}: {last_error}")
+
+
+async def yonepse_index_history():
+    """Return the long-running NEPSE index OHLCV archive as normalized rows."""
+    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+        r = await client.get(NEPSE_INDEX_CSV, headers={"Accept": "text/csv"})
+        r.raise_for_status()
+        reader = csv.DictReader(io.StringIO(r.text))
+        rows = []
+        for row in reader:
+            close = num(row.get("close"))
+            if close is None:
+                continue
+            op = num(row.get("open")) or close
+            hi = num(row.get("high")) or max(op, close)
+            lo = num(row.get("low")) or min(op, close)
+            rows.append({
+                "date": row.get("published_date") or "",
+                "open": op, "high": hi, "low": lo, "close": close,
+                "volume": num(row.get("traded_quantity")),
+                "turnover": num(row.get("traded_amount")),
+                "perChange": num(row.get("per_change")),
+            })
+        return rows
+
+
 async def first_ok(callables):
     errors=[]
     for label, fn in callables:
@@ -366,6 +413,43 @@ async def get_market():
         if not deep_rows(live_raw):
             live_raw, live_method = await one("today_price", ["today_price"], page=1, size=500)
 
+        # If the primary session is empty (for example after a token/rate-limit
+        # failure), load a single static snapshot from YONEPSE in parallel.
+        # This is a fallback only; primary NEPSE data remains authoritative.
+        fallback_used = False
+        if not deep_rows(live_raw) or index_raw is None or summary_raw is None:
+            try:
+                static_index, static_summary, static_live, static_top = await asyncio.gather(
+                    yonepse_get("market/indices.json"),
+                    yonepse_get("market/summary.json"),
+                    yonepse_get("market/live.json"),
+                    yonepse_get("market/top_stocks.json"),
+                    return_exceptions=True,
+                )
+                if not deep_rows(live_raw) and not isinstance(static_live, Exception):
+                    live_raw, live_method = static_live, "yonepse_static_live"
+                    fallback_used = True
+                if (index_raw is None or not normalize_index(index_raw)) and not isinstance(static_index, Exception):
+                    index_raw, index_method = static_index, "yonepse_static_indices"
+                    fallback_used = True
+                if summary_raw is None and not isinstance(static_summary, Exception):
+                    summary_raw, summary_method = static_summary, "yonepse_static_summary"
+                    fallback_used = True
+                if not deep_rows(gainers_raw) and not isinstance(static_top, Exception) and isinstance(static_top, dict):
+                    gainers_raw = static_top.get("top_gainer") or static_top.get("top_gainers") or []
+                    gainers_method = "yonepse_static_top_gainers"
+                    fallback_used = True
+                if not deep_rows(losers_raw) and not isinstance(static_top, Exception) and isinstance(static_top, dict):
+                    losers_raw = static_top.get("top_loser") or static_top.get("top_losers") or []
+                    losers_method = "yonepse_static_top_losers"
+                    fallback_used = True
+                if not deep_rows(turnover_raw) and not isinstance(static_top, Exception) and isinstance(static_top, dict):
+                    turnover_raw = static_top.get("top_turnover") or []
+                    turnover_method = "yonepse_static_top_turnover"
+                    fallback_used = True
+            except Exception as exc:
+                errors.append(f"yonepse fallback: {exc}")
+
         # Company directory is lazy: it is not needed to paint the dashboard.
         # Showing derived/static values would make the dashboard look live when
         # it is not. The frontend can display LIVE DATA UNAVAILABLE instead.
@@ -396,11 +480,11 @@ async def get_market():
             "transaction": transaction_method,
         }
         failed = [k for k,v in source_methods.items() if k not in ("companies",) and v is None]
-        source = "nepsepy public NEPSE session"
-        stale = False
+        source = "YONEPSE static fallback" if fallback_used else "nepsepy public NEPSE session"
+        stale = bool(fallback_used)
 
         return {
-            "ok": bool(summary_raw is not None or live_rows or gainers or losers),
+            "ok": bool(summary_raw is not None or live_rows or gainers or losers or index_raw is not None),
             "source": source,
             "stale": stale,
             "providerType": "nepsepy public read-only NEPSE session",
@@ -424,6 +508,7 @@ async def get_market():
                 "sourceErrors": errors,
                 "rankingPolicy": "Dedicated nepsepy rankings only; no derived/static dashboard rankings",
                 "failedSources": failed,
+                "fallbackUsed": fallback_used,
             },
         }
     return await cached("market:core", load)
@@ -452,10 +537,32 @@ def normalize_index(raw: Any):
 
 async def get_index():
     async def load():
+        errors = []
+        # Primary: authenticated/public NEPSE session through nepsepy.
         try:
-            return normalize_index(await nepse_call(["nepse_indices", "nepse_index"]))
-        except Exception:
-            return await public_get("/NepseIndex")
+            raw = await nepse_call(["nepse_indices", "nepse_index", "get_nepse_index", "indices"])
+            idx = normalize_index(raw)
+            if idx:
+                return idx
+        except Exception as exc:
+            errors.append(f"nepsepy: {exc}")
+        # Secondary: the existing public API adapter.
+        try:
+            raw = await public_get("/NepseIndex")
+            idx = normalize_index(raw)
+            if idx:
+                return idx
+        except Exception as exc:
+            errors.append(f"public: {exc}")
+        # Last resort: YONEPSE's current static index snapshot.
+        try:
+            raw = await yonepse_get("market/indices.json")
+            idx = normalize_index(raw)
+            if idx:
+                return idx
+        except Exception as exc:
+            errors.append(f"yonepse: {exc}")
+        return {}
     return await cached("index:current", load)
 
 
@@ -464,11 +571,36 @@ async def get_index_history(index_id: int = 58):
     except Exception: index_id=58
     key = f"history:{index_id}"
     async def load():
-        value, errors, source = await first_ok([
-            ("nepsepy.index_history", lambda: nepse_call(["index_history"], index_id, 1, 500)),
-            ("public.daily-index-graph", lambda: public_get("/DailyNepseIndexGraph")),
-        ])
-        return {"ok": bool(value), "source": source, "data": value if value is not None else [], "errors": errors, "updatedAt": now_iso()}
+        errors = []
+        # NEPSE main index is security/index id 58. Prefer the dedicated
+        # index-history method when it returns a real row list.
+        try:
+            raw = await nepse_call(["index_history"], index_id, 1, 500)
+            rows = normalize_history_rows(raw)
+            if rows:
+                return {"ok": True, "source": "NEPSE via nepsepy:index_history", "data": rows, "errors": errors, "updatedAt": now_iso()}
+            errors.append("nepsepy index_history: empty")
+        except Exception as exc:
+            errors.append(f"nepsepy index_history: {exc}")
+        # Public intraday/history adapter.
+        try:
+            raw = await public_get("/DailyNepseIndexGraph")
+            rows = normalize_history_rows(raw)
+            if rows:
+                return {"ok": True, "source": "NEPSE public DailyNepseIndexGraph", "data": rows, "errors": errors, "updatedAt": now_iso()}
+            errors.append("public DailyNepseIndexGraph: empty")
+        except Exception as exc:
+            errors.append(f"public graph: {exc}")
+        # Durable static OHLC history. This is specifically a NEPSE index
+        # archive, not a substitute stock/security feed.
+        try:
+            rows = await yonepse_index_history()
+            if rows:
+                return {"ok": True, "source": "NEPSE index OHLC archive", "data": rows, "errors": errors, "updatedAt": now_iso()}
+            errors.append("index OHLC archive: empty")
+        except Exception as exc:
+            errors.append(f"index OHLC archive: {exc}")
+        return {"ok": False, "source": None, "data": [], "errors": errors, "updatedAt": now_iso()}
     return await cached(key, load)
 
 
@@ -1312,11 +1444,16 @@ async def api_history(index: int = Query(58)):
 
 @app.get("/DailyNepseIndexGraph")
 async def daily_nepse_index_graph():
-    # Dedicated real intraday endpoint. No fallback to the wrong sub-index.
+    # Try the live/intraday graph first, then return the verified NEPSE index
+    # OHLC history rather than an empty response.
     try:
-        return await public_get("/DailyNepseIndexGraph")
+        raw = await public_get("/DailyNepseIndexGraph")
+        rows = normalize_history_rows(raw)
+        if rows:
+            return {"ok": True, "source": "NEPSE public DailyNepseIndexGraph", "data": rows, "updatedAt": now_iso()}
     except Exception:
-        return await get_index_history(58)
+        pass
+    return await get_index_history(58)
 
 
 @app.get("/NepseIndex")

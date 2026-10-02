@@ -1902,20 +1902,20 @@ const PULSE_FEED_CONFIG = {
   pollMs: 60000,
   closedPollMs: 180000,
   timeoutMs: 25000,
-  cacheKey: 'nepsePulseCentralFeedV24_2_REAL',
+  cacheKey: 'nepsePulseCentralFeedV32_REAL',
   listedSymbols: 461
 };
 // V24.2 invalidates older caches that may contain a securities master snapshot rather than live prices.
 try {
-  if(localStorage.getItem('nepsePulseV24_2_cache_version')!=='1'){
+  if(localStorage.getItem('nepsePulseV32_cache_version')!=='1'){
     localStorage.removeItem('nepsePulseCentralFeedV24_1');
     localStorage.removeItem('nepsePulseCentralFeedV24');
-    localStorage.setItem('nepsePulseV24_2_cache_version','1');
+    localStorage.setItem('nepsePulseV32_cache_version','1');
   }
 }catch(e){}
 
 const PulseFeedEngine = (()=>{
-  const state={status:'CONNECTING',updatedAt:null,lastError:null,summary:null,index:null,live:[],gainers:[],losers:[],companies:[],floorsheet:[],health:null,source:'NEPSE API',providerType:'Unofficial NEPSE REST API',marketOpen:null,diagnostics:{listedSymbols:461,coveredRows:0,api:'nepse-pulse.onrender.com'}};
+  const state={status:'CONNECTING',updatedAt:null,lastError:null,summary:null,index:null,live:[],gainers:[],losers:[],companies:[],floorsheet:[],health:null,source:'NEPSE API',providerType:'Unofficial NEPSE REST API',marketOpen:null,diagnostics:{listedSymbols:461,coveredRows:0,api:'nepse-pulse-1.onrender.com'}};
   const subscribers=new Set(); let pollTimer=null;
   const emit=()=>subscribers.forEach(fn=>{try{fn({...state})}catch(e){}});
   const num=v=>{if(v===null||v===undefined||v==='')return null;const n=Number(String(v).replace(/,/g,''));return Number.isFinite(n)?n:null};
@@ -4942,7 +4942,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   async function loadHistory(){
     let raw=null;
     let ok=false;
-    const backend=(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse.onrender.com').replace(/\/$/,'');
+    const backend=(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
     try{
       if(range==='1D'){
         try{
@@ -5254,7 +5254,7 @@ header.topbar .feature-btn{
 <script id="v24-8-nepse-data-fix">
 (function(){
  'use strict';
- const BACKEND=(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse.onrender.com').replace(/\/$/,'');
+ const BACKEND=(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
  const PUBLIC='https://nepseapi.surajrimal.dev';
  const num=v=>{if(v===null||v===undefined||v==='')return null;const x=Number(String(v).replace(/,/g,''));return Number.isFinite(x)?x:null};
  const key=k=>String(k).toLowerCase().replace(/[^a-z0-9]/g,'');
