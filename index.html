@@ -2015,8 +2015,10 @@ const PulseFeedEngine = (()=>{
     return false;
   };
   const setStatus=(s,e)=>{state.status=s;state.lastError=e||null;window.PULSE_FEED_STATUS=s;window.PULSE_FEED_TIMESTAMP=state.updatedAt||'—';emit()};
-  const applySnapshot=(d)=>{
-    const rows=normalizeLive(d.live);
+  const sourceRows = Array.isArray(d.live) && d.live.length
+  ? d.live
+  : (Array.isArray(d.companies) ? d.companies : []);
+const rows = normalizeLive(sourceRows);
     const usable=rows.filter(x=>x.ltp!==null);
     if(usable.length<20)throw new Error('NEPSE API returned insufficient live price rows ('+usable.length+')');
     const rowsToStore=usable;
