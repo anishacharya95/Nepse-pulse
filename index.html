@@ -7,6 +7,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#ffffff">
+<meta name="nepse-pulse-chart-revision" content="red-green-market-direction-v2">
 <meta name="description" content="NEPSE Pulse — premium Nepal market intelligence terminal • Central Feed + Portfolio + Dividends + Screener + Floorsheet + Sector V5">
 <title>NEPSE Pulse — Nepal Market Intelligence</title>
 <style>
@@ -4911,10 +4912,30 @@ document.addEventListener('DOMContentLoaded',()=>{
     if(chartType==='line'){
       const pts=data.map((d,i)=>({x:xOf(i),y:yOf(d.close)})).filter(p=>Number.isFinite(p.y));
       if(!pts.length)return;
+
+      // Match the chart colour to the actual NEPSE market direction.
+      // Prefer the live/index change used by the market card; otherwise compare
+      // the latest two points in the currently displayed series.
+      let direction=null;
+      try{
+        const st=getState()||{};
+        const idx=st.index||{};
+        direction=n(pick(idx,['change','pointChange','changeValue','difference','delta']));
+        if(direction===null) direction=n(pick(idx,['perChange','percentChange','percentageChange','changePercent','pChange','percent_change']));
+      }catch(e){}
+      if(direction===null && data.length>=2){
+        const last=data[data.length-1]?.close, prev=data[data.length-2]?.close;
+        if(last!==null&&prev!==null&&Number.isFinite(last)&&Number.isFinite(prev)) direction=last-prev;
+      }
+      const isDown=direction!==null && direction<0;
+      const lineColor=isDown?'#ef4f59':'#58b96b';
+      const areaTop=isDown?'rgba(239,79,89,.42)':'rgba(102,189,114,.48)';
+      const areaBottom=isDown?'rgba(239,79,89,.07)':'rgba(102,189,114,.08)';
+
       // soft area
       const grad=ctx.createLinearGradient(0,top,0,top+ph);
-      grad.addColorStop(0,'rgba(102,189,114,.48)');
-      grad.addColorStop(1,'rgba(102,189,114,.08)');
+      grad.addColorStop(0,areaTop);
+      grad.addColorStop(1,areaBottom);
       ctx.beginPath();
       pts.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
       ctx.lineTo(pts[pts.length-1].x,top+ph);
@@ -4923,7 +4944,7 @@ document.addEventListener('DOMContentLoaded',()=>{
 
       ctx.beginPath();
       pts.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
-      ctx.strokeStyle='#58b96b';ctx.lineWidth=2.5;ctx.stroke();
+      ctx.strokeStyle=lineColor;ctx.lineWidth=2.5;ctx.stroke();
     }else{
       const step=pw/Math.max(1,data.length);
       const body=Math.max(2,Math.min(10,step*.62));
