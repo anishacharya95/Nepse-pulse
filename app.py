@@ -59,9 +59,8 @@ async def production_call(method: str, *args, **kwargs):
     return await asyncio.to_thread(fn, *args, **kwargs)
 
 
-APP_VERSION = "V29-CENTRAL-LIVE-DATA"
+APP_VERSION = "V31-NEPSEPY-AUTHORITATIVE-DASHBOARD"
 PUBLIC_API = "https://nepseapi.surajrimal.dev"
-BACKEND_PUBLIC_URL = "https://nepse-pulse-1.onrender.com"
 STATIC_API = "https://shubhamnpk.github.io/yonepse/data"
 OPEN_DATA = "https://raw.githubusercontent.com/socrateai-official/nepse-open-data/main"
 CACHE_TTL = {
@@ -306,329 +305,177 @@ def schedule_open() -> bool:
     return n.weekday() in (6, 0, 1, 2, 3) and 11 <= n.hour < 15
 
 
-def _activity_from_live(live_rows: list[dict]):
-    """Build top activity lists from the same verified live snapshot."""
-    def first_num(row, keys):
-        return next((num(pick(row, [k])) for k in keys if num(pick(row, [k])) is not None), None)
-
-    normalized = []
-    for row in live_rows:
-        if not isinstance(row, dict):
-            continue
-        symbol = pick(row, ["symbol","ticker","securitySymbol","stockSymbol"])
-        if not symbol:
-            continue
-        q = first_num(row, ["sharesTraded","shareTraded","totalTradeQuantity","totalTradedQuantity","tradeQuantity","quantity","volume","tradedShares"])
-        value = first_num(row, ["turnover","totalTurnover","totalTradeValue","totalTradedValue","tradedValue","amount","value","totalAmount"])
-        tx = first_num(row, ["transactions","totalTransactions","numberOfTransactions","totalTrades","transactionCount","trades"])
-        item = dict(row)
-        item["symbol"] = str(symbol).upper()
-        if q is not None: item.update({"quantity":q,"volume":q,"sharesTraded":q})
-        if value is not None: item.update({"turnover":value,"value":value,"totalTradeValue":value})
-        if tx is not None: item.update({"transactions":tx,"totalTransactions":tx,"totalTrades":tx})
-        normalized.append(item)
-
-    def top(key):
-        usable=[x for x in normalized if num(x.get(key)) is not None]
-        usable.sort(key=lambda x: num(x.get(key)) or 0, reverse=True)
-        return usable[:10]
-    return top("turnover"), top("volume"), top("transactions")
+async def _sdk_first(methods, *args, **kwargs):
+    """Call the first available nepsepy method and return its raw payload."""
+    errors = []
+    client = await get_nepse_client()
+    async with NEPSE_CALL_LOCK:
+        for name in methods:
+            fn = getattr(client, name, None)
+            if fn is None:
+                continue
+            try:
+                return await fn(*args, **kwargs), name, errors
+            except TypeError:
+                try:
+                    return await fn(*args), name, errors
+                except Exception as exc:
+                    errors.append(f"{name}: {type(exc).__name__}: {exc}")
+            except Exception as exc:
+                errors.append(f"{name}: {type(exc).__name__}: {exc}")
+    raise RuntimeError("; ".join(errors[-6:]) or "No compatible nepsepy method available")
 
 
 async def get_market():
-    """Fast core market feed.
+    """Authoritative dashboard feed.
 
-    The dashboard must not wait for optional nepsepy endpoints.  Fetch the
-    proven public LiveMarket endpoint first, then add index/summary data when
-    available.  Movers are derived from the live rows so the main feed still
-    works if top-ten endpoints are slow or rate-limited.
+    IMPORTANT: dashboard movers/activity are never calculated from an archived
+    snapshot and never taken from the blocked surajrimal API.  They come from
+    nepsepy's public NEPSE session and its dedicated ranking methods.
     """
     async def load():
         errors = []
 
-        async def safe_public(path, params=None):
+        async def one(label, methods, *args, **kwargs):
             try:
-                return await public_get(path, params)
+                raw, method, method_errors = await _sdk_first(methods, *args, **kwargs)
+                errors.extend(method_errors)
+                return raw, method
             except Exception as exc:
-                errors.append(f"{path}: {exc}")
-                return None
+                errors.append(f"{label}: {type(exc).__name__}: {exc}")
+                return None, None
 
-        # Core market snapshot plus the exchange/API's dedicated ranking
-        # endpoints.  Do NOT derive dashboard rankings from LiveMarket when
-        # the provider already publishes authoritative TopGainers/TopLosers
-        # and activity rankings.
-        (live_raw, index_raw, summary_raw, gainers_raw, losers_raw,
-         turnover_raw, trade_raw, transaction_raw) = await asyncio.gather(
-            safe_public("/LiveMarket"),
-            safe_public("/NepseIndex"),
-            safe_public("/Summary"),
-            safe_public("/TopGainers"),
-            safe_public("/TopLosers"),
-            safe_public("/TopTenTurnoverScrips"),
-            safe_public("/TopTenTradeScrips"),
-            safe_public("/TopTenTransactionScrips"),
+        # All dashboard-critical values come from the same nepsepy public
+        # session. The client retains NEPSE's temporary token in memory.
+        status_raw, status_method = await one("market_status", ["market_status"])
+        summary_raw, summary_method = await one("market_summary", ["market_summary", "summary"])
+        index_raw, index_method = await one("nepse_index", ["nepse_index", "get_nepse_index", "indices"])
+        live_raw, live_method = await one("live_market", ["live_market"])
+
+        # Current day's price sheet is a reliable fallback for the live table
+        # when a nepsepy release does not expose live_market().
+        if not deep_rows(live_raw):
+            live_raw, live_method = await one("today_price", ["today_price"], page=1, size=500)
+
+        gainers_raw, gainers_method = await one("top_gainers", ["top_gainers"])
+        losers_raw, losers_method = await one("top_losers", ["top_losers"])
+        turnover_raw, turnover_method = await one(
+            "top_turnover", ["top_ten_turnover_scrips", "top_turnover"]
+        )
+        trade_raw, trade_method = await one(
+            "top_trade", ["top_ten_trade_scrips", "top_trade"]
+        )
+        transaction_raw, transaction_method = await one(
+            "top_transaction", ["top_ten_transaction_scrips", "top_transaction"]
         )
 
-        live = live_raw if live_raw is not None else []
-        live_source = "public API"
-        stale = False
-        sdk_status = None
+        # These lists must remain empty if the dedicated NEPSE method failed.
+        # Showing derived/static values would make the dashboard look live when
+        # it is not. The frontend can display LIVE DATA UNAVAILABLE instead.
+        gainers = deep_rows(gainers_raw) or []
+        losers = deep_rows(losers_raw) or []
+        turnover = deep_rows(turnover_raw) or []
+        trade = deep_rows(trade_raw) or []
+        transactions = deep_rows(transaction_raw) or []
+        live_rows = deep_rows(live_raw, ("content", "data", "results", "rows")) or []
 
-        def has_rows(v):
-            return bool(deep_rows(v))
-
-        # 2) Live fallbacks that talk to NEPSE directly (fresh data).
-        if not has_rows(live):
-            try:
-                cand = await asyncio.wait_for(production_call("live_market"), timeout=25)
-                if has_rows(cand):
-                    live, live_source = cand, "nepse.py SDK"
-                    errors.append("live source switched to nepse.py SDK")
-                    try:
-                        sdk_status = await asyncio.wait_for(production_call("market_status"), timeout=10)
-                    except Exception as exc:
-                        errors.append(f"nepse.py market_status: {exc}")
-            except Exception as exc:
-                errors.append(f"nepse.py live_market: {exc}")
-        if not has_rows(live):
-            try:
-                cand = await asyncio.wait_for(nepse_call(["live_market"]), timeout=25)
-                if has_rows(cand):
-                    live, live_source = cand, "nepsepy"
-                    errors.append("live source switched to nepsepy")
-            except Exception as exc:
-                errors.append(f"nepsepy.live_market: {exc}")
-
-        # 3) Static snapshot LAST. It can be days old, so flag it clearly.
-        if not has_rows(live):
-            for path in ("/market/live.json", "/nepse_data.json"):
-                try:
-                    candidate = await asyncio.wait_for(static_get(path), timeout=10)
-                    if has_rows(candidate):
-                        live, live_source, stale = candidate, "static snapshot", True
-                        errors.append(f"LIVE FEED FAILED - serving static snapshot: {path}")
-                        break
-                except Exception as exc:
-                    errors.append(f"static {path}: {exc}")
-
-        # The public API sometimes wraps rows under data/content/results.
-        live_rows = deep_rows(live, ("content", "data", "results", "rows"))
-        if not live_rows:
-            live_rows = arr(live)
-
-        def ranking_rows(raw):
-            rows = deep_rows(raw, ("content", "data", "results", "rows", "result"))
-            if not rows and isinstance(raw, list):
-                rows = [x for x in raw if isinstance(x, dict)]
-            return rows[:10]
-
-        # These are the provider's own rankings. Only fall back to a live-row
-        # calculation if a dedicated endpoint truly returned no usable rows.
-        gainers = ranking_rows(gainers_raw)
-        losers = ranking_rows(losers_raw)
-        top_turnover = ranking_rows(turnover_raw)
-        top_traded = ranking_rows(trade_raw)
-        top_transactions = ranking_rows(transaction_raw)
-
-        if not gainers or not losers:
-            def row_pct(row):
-                value = num(pick(row, [
-                    "percentageChange", "percentChange", "changePercent",
-                    "perChange", "pct", "pChange", "changePercentage"
-                ]))
-                if value is not None:
-                    return value
-                ltp = num(pick(row, ["ltp", "lastTradedPrice", "lastPrice", "price", "close"]))
-                prev = num(pick(row, ["previousClose", "previousClosingPrice", "prevClose"]))
-                if ltp is not None and prev not in (None, 0):
-                    return ((ltp - prev) / prev) * 100
-                return None
-            enriched = [(row_pct(r), r) for r in live_rows if isinstance(r, dict)]
-            if not gainers:
-                gainers = [r for pct, r in sorted(enriched, key=lambda x: x[0] if x[0] is not None else -1e99, reverse=True) if pct is not None and pct > 0][:10]
-                errors.append("TopGainers endpoint returned no rows; derived fallback used")
-            if not losers:
-                losers = [r for pct, r in sorted(enriched, key=lambda x: x[0] if x[0] is not None else 1e99) if pct is not None and pct < 0][:10]
-                errors.append("TopLosers endpoint returned no rows; derived fallback used")
-
-        # Company directory is optional and deliberately not on the critical
-        # path. Search/company pages can request it separately.
         companies = []
         try:
-            companies = await asyncio.wait_for(public_get("/CompanyList"), timeout=8)
-        except Exception as exc:
-            errors.append(f"/CompanyList: {exc}")
+            companies_raw, _ = await one("companies", ["companies", "company_list", "securities"])
+            companies = arr(companies_raw)
+        except Exception:
+            pass
 
-        status = sdk_status if sdk_status else {"isOpen": None}
-        if not sdk_status:
-            try:
-                status = await asyncio.wait_for(public_get("/IsNepseOpen"), timeout=6)
-            except Exception as exc:
-                errors.append(f"/IsNepseOpen: {exc}")
-        market_open = normalize_open(pick(status, ["isOpen", "marketOpen", "open"], None))
-        open_source = "NEPSE"
-        if market_open is None and not stale:
-            market_open = schedule_open()
-            open_source = "schedule (Sun-Thu 11:00-15:00 NPT)"
-        if stale:
-            market_open = False
-            open_source = "stale snapshot"
+        market_open = normalize_open(pick(status_raw, ["isOpen", "marketOpen", "open"], None))
+        if market_open is None:
+            market_open = normalize_open(pick(summary_raw, ["marketOpen", "isOpen", "open"], None))
+        status = status_raw if isinstance(status_raw, (dict, list)) else {"isOpen": market_open}
 
-        if index_raw is None:
-            try:
-                index_raw = await asyncio.wait_for(static_get("/market/indices.json"), timeout=8)
-            except Exception as exc:
-                errors.append(f"static indices: {exc}")
-        # Prefer the live NEPSE SDK summary when the compatibility API fails.
-        # Static archived summary is the last resort and is explicitly marked.
-        summary_source = "public API" if summary_raw is not None else None
-        if summary_raw is None:
-            try:
-                candidate = await asyncio.wait_for(
-                    production_call("market_summary"), timeout=15
-                )
-                if candidate is not None:
-                    summary_raw = candidate
-                    summary_source = "nepse.py SDK"
-            except Exception as exc:
-                errors.append(f"nepse.py market_summary: {exc}")
-        if summary_raw is None:
-            try:
-                summary_raw = await asyncio.wait_for(static_get("/market/summary.json"), timeout=8)
-                if summary_raw is not None:
-                    summary_source = "static snapshot"
-                    errors.append("SUMMARY FEED FAILED - serving static snapshot")
-            except Exception as exc:
-                errors.append(f"static summary: {exc}")
+        source_methods = {
+            "status": status_method,
+            "summary": summary_method,
+            "index": index_method,
+            "live": live_method,
+            "gainers": gainers_method,
+            "losers": losers_method,
+            "turnover": turnover_method,
+            "trade": trade_method,
+            "transaction": transaction_method,
+        }
+        failed = [k for k,v in source_methods.items() if k not in ("companies",) and v is None]
+        source = "nepsepy public NEPSE session"
+        stale = False
 
-        # If the dedicated activity endpoints are unavailable, use the same
-        # live snapshot as a last-resort fallback and explicitly record it.
-        if not top_turnover and not top_traded and not top_transactions:
-            top_turnover, top_traded, top_transactions = _activity_from_live(live_rows)
-            errors.append("Dedicated activity endpoints returned no rows; derived fallback used")
-
-        # If the summary endpoint is an object, preserve it. If it is a list,
-        # keep it intact; the frontend/command center normalizes both forms.
         return {
-            "ok": True,
-            "source": live_source,
+            "ok": bool(summary_raw is not None or live_rows or gainers or losers),
+            "source": source,
             "stale": stale,
-            "marketOpenSource": open_source,
-            "providerType": "Unofficial public read-only client",
+            "providerType": "nepsepy public read-only NEPSE session",
             "updatedAt": now_iso(),
             "marketOpen": market_open,
             "status": status or {},
             "summary": summary_raw if summary_raw is not None else {},
-            "summarySource": summary_source,
+            "summarySource": source,
             "index": normalize_index(index_raw),
             "live": live_rows,
             "gainers": gainers,
             "losers": losers,
-            "topTurnover": top_turnover,
-            "topTraded": top_traded,
-            "topTransactions": top_transactions,
-            "companies": arr(companies),
+            "topTurnover": turnover,
+            "topTraded": trade,
+            "topTransactions": transactions,
+            "companies": companies,
             "diagnostics": {
-                "listedSymbols": max(461, len(arr(companies))),
+                "listedSymbols": max(461, len(companies)) if companies else 461,
                 "coveredRows": len(live_rows),
-                "rankingSources": {
-                    "gainers": "dedicated endpoint" if gainers_raw is not None and gainers else "fallback/derived",
-                    "losers": "dedicated endpoint" if losers_raw is not None and losers else "fallback/derived",
-                    "turnover": "dedicated endpoint" if turnover_raw is not None and top_turnover else "fallback/derived",
-                    "trade": "dedicated endpoint" if trade_raw is not None and top_traded else "fallback/derived",
-                    "transaction": "dedicated endpoint" if transaction_raw is not None and top_transactions else "fallback/derived",
-                },
+                "sourceMethods": source_methods,
                 "sourceErrors": errors,
+                "rankingPolicy": "Dedicated nepsepy rankings only; no derived/static dashboard rankings",
+                "failedSources": failed,
             },
         }
     return await cached("market:core", load)
 
 
 def normalize_index(raw: Any):
-    """Return the actual main NEPSE index only; never pick a random sub-index."""
-    candidates = []
-
-    def walk(v, depth=0):
-        if depth > 8:
-            return
-        if isinstance(v, list):
-            for item in v:
-                if isinstance(item, dict):
-                    candidates.append(item)
-                    walk(item, depth + 1)
-        elif isinstance(v, dict):
-            # Inspect wrapper values without assuming the first key is NEPSE.
-            for value in v.values():
-                if isinstance(value, (list, dict)):
-                    walk(value, depth + 1)
-
     if isinstance(raw, dict):
-        candidates.append(raw)
-    walk(raw)
-
-    def ident(row):
-        name = str(pick(row, ["indexName","index","symbol","name","description"], "") or "").strip().upper()
-        iid = str(pick(row, ["id","indexId","index_id"], "") or "").strip()
-        return name, iid
-
-    # Strongest match: exact NEPSE name or official main-index id 58.
-    for row in candidates:
-        name, iid = ident(row)
-        if name == "NEPSE" or iid == "58":
-            return row
-
-    # Second-best: a name containing NEPSE, but reject obvious sector/sub-index rows.
-    for row in candidates:
-        name, iid = ident(row)
-        if "NEPSE" in name and not any(x in name for x in ("BANK", "HYDRO", "FINANCE", "HOTEL", "LIFE", "NON LIFE", "MICRO", "MANUFACTURING", "TRADING", "INVESTMENT")):
-            return row
-
+        # Some NEPSE responses wrap the index rows in data/content/results.
+        for key in ("data", "content", "results", "result", "items", "records", "rows"):
+            value = raw.get(key)
+            if isinstance(value, list):
+                for row in value:
+                    if isinstance(row, dict):
+                        return row
+            elif isinstance(value, dict):
+                return value
+        return raw
+    if isinstance(raw, list):
+        for row in raw:
+            if isinstance(row, dict):
+                # Prefer the actual NEPSE index (id 58 / symbol NEPSE) when present.
+                if str(pick(row, ["index", "symbol", "indexName", "name"], "")).upper() == "NEPSE" or str(pick(row, ["id", "indexId"], "")) == "58":
+                    return row
+        return next((row for row in raw if isinstance(row, dict)), {})
     return {}
 
 async def get_index():
     async def load():
-        errors = []
-        # Public live index is preferred because it is the same public NEPSE
-        # source used by the compatibility endpoints.
-        for label, fn in (
-            ("public.NepseIndex", lambda: public_get("/NepseIndex")),
-            ("nepsepy.nepse_indices", lambda: nepse_call(["nepse_indices", "nepse_index"])),
-            ("production.nepse_indices", lambda: production_call("nepse_indices")),
-        ):
-            try:
-                raw = await asyncio.wait_for(fn(), timeout=20)
-                idx = normalize_index(raw)
-                if idx:
-                    return {"ok": True, "index": idx, "source": label, "updatedAt": now_iso(), "errors": errors}
-                errors.append(f"{label}: no main NEPSE index row")
-            except Exception as e:
-                errors.append(f"{label}: {e}")
-        return {"ok": False, "index": {}, "source": None, "updatedAt": now_iso(), "errors": errors}
+        try:
+            return normalize_index(await nepse_call(["nepse_indices", "nepse_index"]))
+        except Exception:
+            return await public_get("/NepseIndex")
     return await cached("index:current", load)
 
 
 async def get_index_history(index_id: int = 58):
-    # NEPSE main index is officially index 58. Ignore arbitrary sub-index ids
-    # for the Pulse main chart.
-    index_id = 58
-    key = "index-history:58"
+    try: index_id=int(index_id)
+    except Exception: index_id=58
+    key = f"history:{index_id}"
     async def load():
-        errors = []
-        # Public graph first, then nepsepy. Do not use archived static data for
-        # the main NEPSE chart.
-        for label, fn in (
-            ("public.DailyNepseIndexGraph", lambda: public_get("/DailyNepseIndexGraph")),
-            ("nepsepy.index_history", lambda: nepse_call(["index_history"], 58, 1, 500)),
-        ):
-            try:
-                raw = await asyncio.wait_for(fn(), timeout=25)
-                rows = normalize_history_rows(raw)
-                if rows:
-                    return {"ok": True, "source": label, "data": rows, "updatedAt": now_iso(), "errors": errors}
-                errors.append(f"{label}: no usable history rows")
-            except Exception as e:
-                errors.append(f"{label}: {e}")
-        return {"ok": False, "source": None, "data": [], "updatedAt": now_iso(), "errors": errors}
+        value, errors, source = await first_ok([
+            ("nepsepy.index_history", lambda: nepse_call(["index_history"], index_id, 1, 500)),
+            ("public.daily-index-graph", lambda: public_get("/DailyNepseIndexGraph")),
+        ])
+        return {"ok": bool(value), "source": source, "data": value if value is not None else [], "errors": errors, "updatedAt": now_iso()}
     return await cached(key, load)
 
 
@@ -1537,85 +1384,189 @@ async def floorsheet_of(symbol: str):
 
 @app.get("/api/command-center")
 async def command_center():
-    """Single authoritative snapshot for the Pulse Command Center."""
-    m = await get_market()
-    idx_payload = await get_index()
-    sectors_payload = await get_sectors()
-    brokers_payload = await get_broker_analysis()
+    tasks={
+      "market":get_market(), "index":get_index(), "sectors":get_sectors(), "brokers":get_broker_analysis(),
+      "gainers":nepse_call(["top_gainers"],True), "losers":nepse_call(["top_losers"],True),
+      "turnover":nepse_call(["top_turnover"],True), "volume":nepse_call(["top_traded_shares","top_active"],True),
+      "transactions":nepse_call(["top_transactions"],True),
+    }
+    results={}; errors=[]
+    async def one(k,coro):
+        try: results[k]=await coro
+        except Exception as e: results[k]=[]; errors.append(f"{k}: {e}")
+    await asyncio.gather(*[one(k,v) for k,v in tasks.items()])
 
-    live = deep_rows(m.get("live"))
-    idx = idx_payload.get("index") if isinstance(idx_payload, dict) else {}
-    summary_raw = m.get("summary") or {}
+    m=results.get("market") or {}; idx=results.get("index")
+    summary={}
+    for x in deep_rows(m.get("summary") if isinstance(m,dict) else {}):
+        label=str(pick(x,["detail","label","name","title"],"" )).lower()
+        val=num(pick(x,["value","amount","total","turnover","totalTurnover","volume","transactions","scripsTraded"]))
+        if 'turnover' in label: summary['turnover']=val
+        elif 'traded shares' in label or 'volume' in label: summary['volume']=val
+        elif 'transactions' in label or 'trade count' in label: summary['transactions']=val
+        elif 'scrips' in label or 'securities' in label: summary['scripsTraded']=val
+    # Some market_summary versions are a single object rather than rows.
+    ms=m.get("summary") if isinstance(m,dict) else {}
+    if isinstance(ms,dict):
+        summary.setdefault('turnover', num(pick(ms,["turnover","totalTurnover","totalTradeValue"])))
+        summary.setdefault('volume', num(pick(ms,["volume","totalTradedQuantity","totalTradeQuantity","tradedShares"])))
+        summary.setdefault('transactions', num(pick(ms,["transactions","totalTransactions","totalTrades"])))
+        summary.setdefault('scripsTraded', num(pick(ms,["scripsTraded","totalScrips","totalSecuritiesTraded"])))
 
-    def first_num(row, keys):
-        for k in keys:
-            v = num(pick(row, [k]))
-            if v is not None:
-                return v
+    live=deep_rows(m.get('live') if isinstance(m,dict) else {})
+    # get_market normally fills live with today_price when live_market is empty.
+    # If a provider still returns no rows, make one direct, paginated attempt here.
+    if not live:
+        try:
+            live=deep_rows(await nepse_call(["today_price"], page=1, size=500))
+        except Exception as e:
+            errors.append(f"breadth today_price: {e}")
+
+    def row_change_pct(x):
+        p=num(pick(x,["perChange","percentageChange","percentChange","changePercent","pChange","changePercentage"]))
+        if p is not None:
+            return p
+        change=num(pick(x,["change","pointChange","difference"]))
+        prev=num(pick(x,["previousClose","previousPrice","prevClose","previousLtp","previousLtpPrice"]))
+        if change is not None and prev not in (None,0):
+            return (change/prev)*100
+        ltp=num(pick(x,["lastTradedPrice","lastPrice","ltp","LTP","closePrice","price"]))
+        if ltp is not None and prev not in (None,0):
+            return ((ltp-prev)/prev)*100
         return None
 
-    summary = {
-        "turnover": first_num(summary_raw, ["turnover","totalTurnover","totalTradeValue","totalTradedValue"]),
-        "volume": first_num(summary_raw, ["volume","totalTradedQuantity","totalTradeQuantity","tradedShares"]),
-        "transactions": first_num(summary_raw, ["transactions","totalTransactions","totalTrades"]),
-        "scripsTraded": first_num(summary_raw, ["scripsTraded","totalScrips","totalSecuritiesTraded"]),
-        "marketCap": first_num(summary_raw, ["totalMarketCap","marketCap","marketCapitalization"]),
-        "floatMarketCap": first_num(summary_raw, ["totalFloatMarketCap","floatMarketCap"]),
-    }
+    breadth={"advancing":0,"declining":0,"unchanged":0}
+    counted=0
+    for x in live:
+        p=row_change_pct(x)
+        if p is None:
+            continue
+        counted += 1
+        if p>0: breadth['advancing']+=1
+        elif p<0: breadth['declining']+=1
+        else: breadth['unchanged']+=1
 
-    # Some NEPSE summary responses are row-oriented.
-    if not isinstance(summary_raw, dict):
-        for row in deep_rows(summary_raw):
-            label = str(pick(row, ["detail","label","name","title"], "") or "").lower()
-            val = first_num(row, ["value","amount","total","turnover","totalTurnover","volume","transactions","scripsTraded"])
-            if "turnover" in label: summary["turnover"] = val
-            elif "traded shares" in label or "volume" in label: summary["volume"] = val
-            elif "transaction" in label: summary["transactions"] = val
-            elif "scrip" in label or "securit" in label: summary["scripsTraded"] = val
-            elif "market cap" in label and "float" in label: summary["floatMarketCap"] = val
-            elif "market cap" in label: summary["marketCap"] = val
+    # If full live rows are unavailable, use provider summary breadth when it
+    # exists. Do not fabricate unchanged counts from a capped 50-row mover list.
+    if counted == 0:
+        ms=m.get("summary") if isinstance(m,dict) else {}
+        breadth["advancing"] = int(num(pick(ms,["advancing","advancers","advance"])) or 0) if isinstance(ms,dict) else 0
+        breadth["declining"] = int(num(pick(ms,["declining","decliners","decline"])) or 0) if isinstance(ms,dict) else 0
+        breadth["unchanged"] = int(num(pick(ms,["unchanged","unchangedCount"])) or 0) if isinstance(ms,dict) else 0
 
-    def pct(row):
-        p=first_num(row,["percentageChange","percentChange","changePercent","perChange","pChange","changePercentage"])
-        if p is not None: return p
-        ltp=first_num(row,["ltp","lastTradedPrice","lastPrice","price","close"])
-        prev=first_num(row,["previousClose","previousClosingPrice","prevClose","previousPrice"])
-        return ((ltp-prev)/prev*100) if ltp is not None and prev not in (None,0) else None
+    def clean(xs): return deep_rows(xs)[:50]
 
-    # Preserve the provider's authoritative rankings from get_market().
-    # Do not recompute them from LiveMarket here; that was causing the
-    # dashboard to disagree with the dedicated TopGainers/TopLosers feeds.
-    gainers=list(m.get("gainers") or [])[:10]
-    losers=list(m.get("losers") or [])[:10]
+    # Build a symbol -> live row index so top lists can be enriched with the
+    # actual volume/value/transaction fields when their endpoint omits them.
+    live_by_symbol={}
+    for row in live:
+        sym=pick(row,["symbol","ticker","securitySymbol","stockSymbol"])
+        if sym: live_by_symbol[str(sym).upper()]=row
 
-    enriched=[(pct(x),x) for x in live]
-    breadth={"advancing":sum(1 for p,_ in enriched if p is not None and p>0),
-             "declining":sum(1 for p,_ in enriched if p is not None and p<0),
-             "unchanged":sum(1 for p,_ in enriched if p is not None and p==0)}
+    def first_num(row, keys):
+        for key in keys:
+            n=num(pick(row,[key]))
+            if n is not None:
+                return n
+        return None
 
-    return {
-        "ok": bool(m.get("ok")),
-        "updatedAt": m.get("updatedAt") or now_iso(),
-        "stale": bool(m.get("stale")),
-        "source": m.get("source"),
-        "providerType": m.get("providerType"),
-        "summary": summary,
-        "breadth": breadth,
-        "nepse": idx,
-        "movers": {"gainers": gainers, "losers": losers},
-        "activity": {
-            "turnover": m.get("topTurnover") or [],
-            "volume": m.get("topTraded") or [],
-            "transactions": m.get("topTransactions") or []
-        },
-        "sectors": (sectors_payload or {}).get("data",[]) if isinstance(sectors_payload,dict) else [],
-        "brokers": (brokers_payload or {}).get("data",[]) if isinstance(brokers_payload,dict) else [],
-        "counts": {
-            "live": len(live), "gainers": len(gainers), "losers": len(losers),
-            "sectors": len((sectors_payload or {}).get("data",[])) if isinstance(sectors_payload,dict) else 0
-        },
-        "diagnostics": m.get("diagnostics",{})
-    }
+    def activity_rows(xs, kind):
+        source=clean(xs)
+        out=[]
+        for row in source:
+            if not isinstance(row,dict): continue
+            symbol=pick(row,["symbol","ticker","securitySymbol","stockSymbol"])
+            live_row=live_by_symbol.get(str(symbol).upper()) if symbol else None
+            merged={}
+            if isinstance(live_row,dict): merged.update(live_row)
+            merged.update(row)
+            quantity=first_num(merged,["sharesTraded","shareTraded","totalTradeQuantity","totalTradedQuantity","tradeQuantity","quantity","volume","tradedShares"])
+            value=first_num(merged,["turnover","totalTurnover","totalTradeValue","totalTradedValue","tradedValue","amount","value","totalAmount"])
+            transactions=first_num(merged,["transactions","totalTransactions","totalTrades","transactionCount","trades"])
+            item=dict(row)
+            if symbol is not None: item["symbol"]=symbol
+            if quantity is not None:
+                item.update({"quantity":quantity,"volume":quantity,"sharesTraded":quantity})
+            if value is not None:
+                item.update({"value":value,"turnover":value,"totalTradeValue":value})
+            if transactions is not None:
+                item.update({"transactions":transactions,"totalTransactions":transactions,"totalTrades":transactions})
+            out.append(item)
+        # If the dedicated volume endpoint returned rows without usable volume,
+        # derive Top Volume from the full live snapshot instead.
+        if kind=="volume" and (not out or sum(1 for r in out if num(r.get("volume")) not in (None,0))<min(5,len(out))):
+            derived=[]
+            for row in live:
+                q=first_num(row,["sharesTraded","shareTraded","totalTradeQuantity","totalTradedQuantity","tradeQuantity","quantity","volume","tradedShares"])
+                if q is None: continue
+                item=dict(row)
+                sym=pick(row,["symbol","ticker","securitySymbol","stockSymbol"])
+                val=first_num(row,["turnover","totalTurnover","totalTradeValue","totalTradedValue","tradedValue","amount","value","totalAmount"])
+                if sym is not None: item["symbol"]=sym
+                item["quantity"]=q; item["volume"]=q; item["sharesTraded"]=q
+                if val is not None: item["value"]=val; item["turnover"]=val; item["totalTradeValue"]=val
+                derived.append(item)
+            derived.sort(key=lambda r:num(r.get("volume")) or 0, reverse=True)
+            if derived: return derived[:50]
+        return out
+
+    turnover_rows=activity_rows(results.get('turnover') or m.get('topTurnover'), 'turnover')
+    volume_rows=activity_rows(results.get('volume') or m.get('topTraded'), 'volume')
+    transaction_rows=activity_rows(results.get('transactions') or m.get('topTransactions'), 'transactions')
+    gainers_rows=clean(results.get('gainers')) or clean(m.get('gainers'))
+    losers_rows=clean(results.get('losers')) or clean(m.get('losers'))
+
+    # Sector snapshot: prefer real sub-index rows. If unavailable, enrich live
+    # rows with company sector metadata and aggregate a verified snapshot from
+    # those constituent rows.
+    sector_payload=results.get('sectors') or {}
+    sector_rows=deep_rows(sector_payload, ("data","content","sectorIndices","subIndices"))
+    companies=deep_rows(m.get("companies") if isinstance(m,dict) else {})
+    company_by_symbol={}
+    for c in companies:
+        sym=pick(c,["symbol","ticker","securitySymbol","stockSymbol"])
+        if sym: company_by_symbol[str(sym).upper()]=c
+    sector_groups={}
+    for row in live:
+        sym=pick(row,["symbol","ticker","securitySymbol","stockSymbol"])
+        c=company_by_symbol.get(str(sym).upper(),{}) if sym else {}
+        sec=pick(row,["sector","sectorName","industry"]) or pick(c,["sector","sectorName","sectorNameEnglish","industry","indexName"])
+        if not sec: continue
+        key=str(sec).strip(); sector_groups.setdefault(key,[]).append(row)
+
+    normalized_sectors=[]
+    for x in sector_rows:
+        name=pick(x,["indexName","sectorName","sector","name","index","symbol"],"—")
+        normalized_sectors.append({
+            **x, "sector":name, "name":name,
+            "change":num(pick(x,["pointChange","difference","change"])),
+            "changePercent":num(pick(x,["perChange","percentageChange","percentChange","changePercent"])),
+            "turnover":num(pick(x,["turnover","totalTurnover","totalTradeValue","totalTradedValue"])),
+            "volume":num(pick(x,["volume","totalTradedQuantity","tradedShares","sharesTraded"])),
+        })
+    if not normalized_sectors:
+        for name, rows in sector_groups.items():
+            changes=[row_change_pct(r) for r in rows if row_change_pct(r) is not None]
+            turnover=sum(first_num(r,["turnover","totalTurnover","totalTradeValue","totalTradedValue","tradedValue","amount","value"]) or 0 for r in rows)
+            volume=sum(first_num(r,["sharesTraded","totalTradeQuantity","totalTradedQuantity","tradeQuantity","quantity","volume"]) or 0 for r in rows)
+            normalized_sectors.append({
+                "sector":name,"name":name,
+                "change":sum(changes)/len(changes) if changes else None,
+                "changePercent":sum(changes)/len(changes) if changes else None,
+                "turnover":turnover,"volume":volume,"stocks":len(rows),
+            })
+    else:
+        # Attach constituent counts where available.
+        for s in normalized_sectors:
+            name=str(s.get("name") or s.get("sector") or "").lower()
+            match=next((rows for key,rows in sector_groups.items() if key.lower()==name),[])
+            if match:
+                s["stocks"]=len(match)
+
+    broker_payload=results.get('brokers') or {}
+    broker_rows=deep_rows(broker_payload, ("data","content"))
+
+    return {"ok":True,"updatedAt":now_iso(),"summary":summary,"breadth":breadth,"nepse":idx,"movers":{"gainers":gainers_rows,"losers":losers_rows},"activity":{"turnover":turnover_rows,"volume":volume_rows,"transactions":transaction_rows},"sectors":normalized_sectors,"brokers":broker_rows,"counts":{"live":len(live),"gainers":len(gainers_rows),"losers":len(losers_rows),"sectors":len(normalized_sectors)},"diagnostics":{"errors":errors,"marketSource":m.get('source') if isinstance(m,dict) else None,"breadthRows":counted}}
 
 @app.get("/api/diagnostics")
 async def diagnostics():
@@ -1668,7 +1619,4 @@ async def is_open(): return (await get_market()).get("status", {"isOpen": None})
 
 @app.get("/")
 async def root():
-    return {"service": "NEPSE Pulse Central Data Engine", "version": APP_VERSION,
-            "backend": BACKEND_PUBLIC_URL, "health": "/health", "market": "/api/market",
-            "dataPolicy": "Live-first; stale sources explicitly flagged; no synthetic market values",
-            "features": ["floorsheet", "brokers", "fundamentals", "technical", "sectors", "stock-xray", "command-center"]}
+    return {"service": "NEPSE Pulse Central Data Engine", "version": APP_VERSION, "health": "/health", "market": "/api/market", "features": ["floorsheet", "brokers", "fundamentals", "technical", "sectors", "stock-xray", "command-center"]}
