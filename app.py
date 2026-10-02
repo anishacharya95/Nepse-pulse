@@ -515,24 +515,36 @@ async def get_market():
 
 
 def normalize_index(raw: Any):
-    if isinstance(raw, dict):
-        # Some NEPSE responses wrap the index rows in data/content/results.
-        for key in ("data", "content", "results", "result", "items", "records", "rows"):
-            value = raw.get(key)
-            if isinstance(value, list):
-                for row in value:
-                    if isinstance(row, dict):
-                        return row
-            elif isinstance(value, dict):
-                return value
-        return raw
-    if isinstance(raw, list):
-        for row in raw:
-            if isinstance(row, dict):
-                # Prefer the actual NEPSE index (id 58 / symbol NEPSE) when present.
-                if str(pick(row, ["index", "symbol", "indexName", "name"], "")).upper() == "NEPSE" or str(pick(row, ["id", "indexId"], "")) == "58":
-                    return row
-        return next((row for row in raw if isinstance(row, dict)), {})
+    """Return ONLY the headline NEPSE Index (id 58), never Sensitive/Float/etc."""
+    def is_nepse(row: dict) -> bool:
+        rid = pick(row, ["id", "indexId", "index_id", "exchangeIndexId"], None)
+        name = str(pick(row, ["index", "symbol", "indexName", "name"], "") or "").strip().upper()
+        try:
+            if rid is not None and int(float(rid)) == 58:
+                return True
+        except Exception:
+            pass
+        return name in {"NEPSE", "NEPSE INDEX"} or name.startswith("NEPSE INDEX")
+
+    def rows_from(x):
+        if isinstance(x, list):
+            return [r for r in x if isinstance(r, dict)]
+        if isinstance(x, dict):
+            for key in ("data", "content", "results", "result", "items", "records", "rows", "indices"):
+                v = x.get(key)
+                if isinstance(v, list):
+                    rows = [r for r in v if isinstance(r, dict)]
+                    if rows:
+                        return rows
+                if isinstance(v, dict) and is_nepse(v):
+                    return [v]
+            if is_nepse(x):
+                return [x]
+        return []
+
+    for row in rows_from(raw):
+        if is_nepse(row):
+            return row
     return {}
 
 async def get_index():
@@ -626,8 +638,14 @@ async def get_index_history(index_id: int = 58):
             errors.append("public graph returned no usable NEPSE rows")
         except Exception as e:
             errors.append(f"public graph: {e}")
-        # Never substitute stock OHLC, market-summary data, or a stale static
-        # dataset for the index. Wrong data is worse than an empty chart.
+        if int(index_id) == 58:
+            try:
+                rows = await yonepse_index_history()
+                if rows:
+                    return {"ok":True,"source":"NEPSE_INDEX.csv headline NEPSE index archive","data":rows,"errors":errors,"updatedAt":now_iso()}
+                errors.append("NEPSE_INDEX.csv returned no rows")
+            except Exception as e:
+                errors.append(f"NEPSE_INDEX.csv: {e}")
         return {"ok":False,"source":None,"data":[],"errors":errors,"updatedAt":now_iso()}
     return await cached(key,load)
 

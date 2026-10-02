@@ -4948,11 +4948,9 @@ document.addEventListener('DOMContentLoaded',()=>{
     const backend=(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
     try{
       if(range==='1D'){
-        try{
-          raw=await fetch(backend+'/DailyNepseIndexGraph',{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw new Error('intraday graph HTTP '+r.status);return r.json();});
-        }catch(_e){
-          raw=await fetch(backend+'/api/history?index=58',{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw new Error('history HTTP '+r.status);return r.json();});
-        }
+        // 1D must be real intraday data. Never fall back to daily history.
+        raw=await fetch(backend+'/DailyNepseIndexGraph',{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw new Error('intraday graph HTTP '+r.status);return r.json();});
+        if(raw && raw.ok===false) throw new Error((raw.errors||[]).join('; ') || 'intraday history unavailable');
       }else{
         raw=await fetch(backend+'/api/history?index=58',{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw new Error('history HTTP '+r.status);return r.json();});
       }
@@ -4961,7 +4959,7 @@ document.addEventListener('DOMContentLoaded',()=>{
       console.warn('NEPSE real chart unavailable:',e);
     }
     history=ok?normalize(raw):[];
-    if(subtitle) subtitle.textContent=history.length ? (range==='1D'?'Verified intraday NEPSE index':'Verified NEPSE index history') : 'Real market history unavailable';
+    if(subtitle) subtitle.textContent=history.length ? (range==='1D'?'Live intraday NEPSE index':'NEPSE daily index history') : 'Real market history unavailable';
     draw();
   }
 
