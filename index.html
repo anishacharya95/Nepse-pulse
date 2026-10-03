@@ -5926,6 +5926,274 @@ window.npOpenAllMarket=()=>{$('npAllMarket').classList.add('open');document.body
 document.addEventListener('click',e=>{const tr=e.target.closest('#npamRows tr[data-symbol]');if(!tr)return;const symbol=tr.dataset.symbol;npCloseAllMarket();if(typeof window.npOpenCompany==='function')window.npOpenCompany(symbol);else if(typeof window.openCompanyPage==='function')window.openCompanyPage(symbol);});})();
 </script>
 
+
+<!-- NEPSE Pulse TradingView Advanced Charts integration -->
+<style id="pulse-tv-advanced-v1">
+  #pc8AdvancedWrap{display:none;position:relative;width:100%;height:640px;min-height:520px;background:#fff;border-top:1px solid #e5e7eb}
+  #pc8AdvancedChart{position:absolute;inset:0}
+  #pc8AdvancedMissing{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center;font:13px/1.55 system-ui;color:#667085;background:#fff;z-index:2}
+  #pc8AdvancedMissing[hidden]{display:none}
+  @media(max-width:800px){#pc8AdvancedWrap{height:560px;min-height:460px}}
+</style>
+<script>
+(function(){
+  'use strict';
+  const rootId='professional-charting-v8';
+  const base=()=>String(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
+  const localLibrary='charting_library/charting_library.standalone.js';
+  let widget=null, poller=null, activeSymbol='NABIL';
+
+  function root(){return document.getElementById(rootId)}
+  function input(){return document.getElementById('pc8Symbol')}
+  function setStatus(text,good){const e=document.getElementById('pc8Status'),d=document.getElementById('pc8Dot');if(e)e.textContent=text;if(d)d.style.background=good?'#20a464':'#b78300'}
+  function ensureHost(){
+    const r=root(); if(!r)return null;
+    let wrap=document.getElementById('pc8AdvancedWrap');
+    if(!wrap){
+      const old=document.getElementById('pc8TvChartWrap')||document.getElementById('pc8Canvas')?.parentElement;
+      if(!old)return null;
+      wrap=document.createElement('div');wrap.id='pc8AdvancedWrap';
+      wrap.innerHTML='<div id="pc8AdvancedChart"></div><div id="pc8AdvancedMissing">TradingView Advanced Charts package not installed yet.<br>Place the official <b>charting_library/</b> folder in the project root, then reload this page.</div>';
+      old.parentNode.insertBefore(wrap,old);old.style.display='none';
+    }
+    return wrap;
+  }
+  async function loadScript(src){
+    if(window.TradingView?.widget)return true;
+    try{
+      const res=await fetch(src,{method:'GET',cache:'no-store'});
+      if(!res.ok)return false;
+      const code=await res.text();
+      if(!code.includes('TradingView'))return false;
+      const s=document.createElement('script');s.text=code;document.head.appendChild(s);
+      await new Promise(r=>setTimeout(r,0));
+      return !!window.TradingView?.widget;
+    }catch(e){return false}
+  }
+  function api(path,params){const u=new URL(base()+path);Object.entries(params||{}).forEach(([k,v])=>u.searchParams.set(k,v));return fetch(u.toString(),{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw Error('HTTP '+r.status);return r.json()})}
+
+  const configuration={
+    supported_resolutions:['D','W','M'],
+    supports_search:true,
+    supports_group_request:false,
+    supports_marks:false,
+    supports_timescale_marks:false,
+    supports_time:true,
+    exchanges:[{value:'NEPSE',name:'NEPSE',desc:'Nepal Stock Exchange'}],
+    symbols_types:[{name:'stock',value:'stock'}]
+  };
+  const datafeed={
+    onReady(cb){setTimeout(()=>cb(configuration),0)},
+    searchSymbols(userInput,exchange,fullSymbolType,onResult){
+      api('/api/tv/search',{q:userInput||'',limit:50}).then(rows=>setTimeout(()=>onResult((rows||[]).map(x=>({symbol:x.symbol,full_name:x.full_name||x.symbol,description:x.description||x.symbol,exchange:x.exchange||'NEPSE',ticker:x.ticker||x.symbol,type:x.type||'stock'}))),0)).catch(()=>setTimeout(()=>onResult([]),0));
+    },
+    resolveSymbol(symbolName,onResolve,onError){
+      const sym=String(symbolName||'').split(':').pop().trim().toUpperCase();
+      api('/api/tv/symbols',{symbol:sym}).then(x=>setTimeout(()=>onResolve({
+        ticker:sym,name:sym,description:x.description||sym,type:'stock',session:x.session||'1100-1500',timezone:x.timezone||'Asia/Kathmandu',exchange:x.exchange||'NEPSE',listed_exchange:'NEPSE',
+        minmov:Number(x.minmov||1),pricescale:Number(x.pricescale||100),has_intraday:false,has_daily:true,has_weekly_and_monthly:true,supported_resolutions:['D','W','M'],volume_precision:0,data_status:'streaming'
+      }),0)).catch(e=>setTimeout(()=>onError(String(e.message||e)),0));
+    },
+    getBars(symbolInfo,resolution,periodParams,onResult,onError){
+      const p={symbol:symbolInfo.ticker||symbolInfo.name,resolution,from:Math.floor(periodParams.from||0),to:Math.floor(periodParams.to||0),countback:Math.min(Number(periodParams.countBack||5000),5000)};
+      api('/api/tv/history',p).then(d=>{
+        if(d.s!=='ok'||!Array.isArray(d.t)||!d.t.length){setTimeout(()=>onResult([], {noData:true}),0);return}
+        const bars=d.t.map((t,i)=>({time:Number(t)*1000,open:Number(d.o[i]),high:Number(d.h[i]),low:Number(d.l[i]),close:Number(d.c[i]),volume:Number(d.v?.[i]||0)})).filter(b=>[b.time,b.open,b.high,b.low,b.close].every(Number.isFinite));
+        setTimeout(()=>onResult(bars,{noData:!bars.length}),0);
+      }).catch(e=>setTimeout(()=>onError(String(e.message||e)),0));
+    },
+    subscribeBars(symbolInfo,resolution,onRealtimeCallback,subscriberUID,resetCacheNeededCallback){
+      const sym=symbolInfo.ticker||symbolInfo.name; let last=0;
+      poller=poller||setInterval(()=>{
+        api('/api/tv/history',{symbol:sym,resolution,countback:2}).then(d=>{
+          if(d.s!=='ok'||!d.t?.length)return; const i=d.t.length-1; const bar={time:Number(d.t[i])*1000,open:Number(d.o[i]),high:Number(d.h[i]),low:Number(d.l[i]),close:Number(d.c[i]),volume:Number(d.v?.[i]||0)};
+          if(Number.isFinite(bar.time)&&bar.time!==last){last=bar.time;onRealtimeCallback(bar)} else if(Number.isFinite(bar.time)){onRealtimeCallback(bar)}
+        }).catch(()=>{});
+      },10000);
+    },
+    unsubscribeBars(){if(poller){clearInterval(poller);poller=null}},
+    getServerTime(cb){api('/api/tv/time').then(x=>cb(Number(x))).catch(()=>cb(Math.floor(Date.now()/1000)))}
+  };
+
+  async function start(){
+    const r=root();if(!r)return;
+    const host=ensureHost();if(!host)return;
+    const loaded=await loadScript(localLibrary);
+    if(!loaded){
+      const missing=document.getElementById('pc8AdvancedMissing');if(missing)missing.hidden=false;
+      return;
+    }
+    const missing=document.getElementById('pc8AdvancedMissing');if(missing)missing.hidden=true;
+    host.style.display='block';
+    const old=document.getElementById('pc8TvChartWrap');if(old)old.style.display='none';
+    activeSymbol=String(input()?.value||'NABIL').trim().toUpperCase()||'NABIL';
+    setStatus('CONNECTING TRADINGVIEW…',false);
+    try{
+      widget=new TradingView.widget({
+        container:'pc8AdvancedChart',library_path:'charting_library/',datafeed,symbol:'NEPSE:'+activeSymbol,interval:'D',timezone:'Asia/Kathmandu',locale:'en',autosize:true,
+        theme:'Light',
+        enabled_features:['side_toolbar_in_fullscreen_mode','header_in_fullscreen_mode','header_saveload'],
+        disabled_features:['use_localstorage_for_settings'],
+        overrides:{'mainSeriesProperties.candleStyle.upColor':'#16864a','mainSeriesProperties.candleStyle.downColor':'#c0392b','mainSeriesProperties.candleStyle.borderUpColor':'#16864a','mainSeriesProperties.candleStyle.borderDownColor':'#c0392b','mainSeriesProperties.candleStyle.wickUpColor':'#16864a','mainSeriesProperties.candleStyle.wickDownColor':'#c0392b'},
+        studies_overrides:{},
+        loading_screen:{backgroundColor:'#ffffff',foregroundColor:'#16864a'},
+        debug:false
+      });
+      widget.onChartReady(()=>{
+        setStatus('TRADINGVIEW ADVANCED · NEPSE FEED',true);
+        const title=document.getElementById('pc8Title');if(title)title.textContent=activeSymbol+' · NEPSE · Advanced Charts';
+        const legend=document.getElementById('pc8Legend');if(legend)legend.textContent='TradingView Advanced Charts · NEPSE Pulse datafeed';
+      });
+      const load=document.getElementById('pc8Load');if(load)load.onclick=()=>{
+        const sym=String(input()?.value||'').trim().toUpperCase();if(!sym||!widget)return;activeSymbol=sym;widget.setSymbol('NEPSE:'+sym,'D',()=>setStatus('TRADINGVIEW ADVANCED · NEPSE FEED',true));
+      };
+    }catch(e){console.error('TradingView Advanced Charts init:',e);setStatus('ADVANCED CHART ERROR',false)}
+  }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(start,50));else setTimeout(start,50);
+  window.PULSE_TRADINGVIEW_ADVANCED={start,datafeed,getWidget:()=>widget};
+})();
+</script>
+
+<!-- NEPSE Pulse TradingView-compatible chart engine -->
+<style id="pulse-tv-chart-v1">
+  #pc8TvChartWrap{display:block!important;height:440px;min-height:320px;border-top:1px solid var(--border,#e5e7eb);background:#fff}
+  #pc8TvChart{width:100%;height:100%}
+  .pc8-tv-note{padding:7px 12px;font-size:10px;color:#667085;border-top:1px solid #edf0f3;background:#fafbfc}
+  @media(max-width:800px){#pc8TvChartWrap{height:360px}}
+</style>
+<script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
+<script>
+(function(){
+  'use strict';
+  function start(){
+    if(!window.LightweightCharts)return;
+    const root=document.getElementById('professional-charting-v8');
+    const oldCanvas=document.getElementById('pc8Canvas');
+    if(!root||!oldCanvas)return;
+    const host=oldCanvas.parentElement;
+    if(!host)return;
+
+    let wrap=document.getElementById('pc8TvChartWrap');
+    if(!wrap){
+      wrap=document.createElement('div');
+      wrap.id='pc8TvChartWrap';
+      wrap.innerHTML='<div id="pc8TvChart"></div><div class="pc8-tv-note">TradingView Lightweight Charts · NEPSE Pulse datafeed · daily OHLCV</div>';
+      host.appendChild(wrap);
+      host.style.height='auto';
+      oldCanvas.style.display='none';
+      const oldVol=document.getElementById('pc8Volume');
+      if(oldVol) oldVol.style.display='none';
+    }
+
+    const chart=LightweightCharts.createChart(document.getElementById('pc8TvChart'),{
+      layout:{background:{color:'#ffffff'},textColor:'#667085'},
+      grid:{vertLines:{color:'#edf0f3'},horzLines:{color:'#edf0f3'}},
+      rightPriceScale:{borderColor:'#d8e0ea'},
+      timeScale:{borderColor:'#d8e0ea',timeVisible:false,secondsVisible:false},
+      crosshair:{mode:LightweightCharts.CrosshairMode.Normal},
+      handleScroll:true,handleScale:true
+    });
+    const candles=chart.addCandlestickSeries({
+      upColor:'#16864a',downColor:'#c0392b',
+      borderUpColor:'#16864a',borderDownColor:'#c0392b',
+      wickUpColor:'#16864a',wickDownColor:'#c0392b'
+    });
+    const volume=chart.addHistogramSeries({
+      priceFormat:{type:'volume'},priceScaleId:'volume',
+      scaleMargins:{top:0.82,bottom:0}
+    });
+
+    function resize(){
+      const el=document.getElementById('pc8TvChart');
+      if(el)chart.resize(el.clientWidth,el.clientHeight);
+    }
+    window.addEventListener('resize',resize);
+    if(window.ResizeObserver)new ResizeObserver(resize).observe(wrap);
+
+    const rangeMap={1D:2,1W:7,1M:31,6M:140,1Y:260,ALL:5000};
+    let currentRange='1Y';
+    let requestSeq=0;
+
+    function setStatus(text,good){
+      const el=document.getElementById('pc8Status'),dot=document.getElementById('pc8Dot');
+      if(el)el.textContent=text;
+      if(dot)dot.style.background=good?'#20a464':'#b78300';
+    }
+
+    async function loadTv(symbol,range){
+      const sym=String(symbol||'').trim().toUpperCase();
+      if(!sym)return;
+      const seq=++requestSeq;
+      currentRange=range||currentRange;
+      setStatus('LOADING CHART…',false);
+      try{
+        const base=(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
+        const countback=rangeMap[currentRange]||260;
+        const u=base+'/api/tv/history?symbol='+encodeURIComponent(sym)+'&resolution=D&countback='+countback+'&_tv='+Date.now();
+        const res=await fetch(u,{cache:'no-store',headers:{Accept:'application/json'}});
+        if(!res.ok)throw new Error('TV datafeed HTTP '+res.status);
+        const d=await res.json();
+        if(seq!==requestSeq)return;
+        if(d.s!=='ok'||!Array.isArray(d.t)||!d.t.length)throw new Error('No OHLCV history for '+sym);
+        const bars=d.t.map((t,i)=>({
+          time:new Date(t*1000).toISOString().slice(0,10),
+          open:Number(d.o[i]),high:Number(d.h[i]),low:Number(d.l[i]),close:Number(d.c[i])
+        })).filter(x=>[x.open,x.high,x.low,x.close].every(Number.isFinite));
+        const vols=d.t.map((t,i)=>({
+          time:new Date(t*1000).toISOString().slice(0,10),
+          value:Number(d.v[i])||0,
+          color:Number(d.c[i])>=Number(d.o[i])?'rgba(22,134,74,.35)':'rgba(192,57,43,.35)'
+        })).filter(x=>Number.isFinite(x.value));
+        candles.setData(bars);volume.setData(vols);
+        chart.timeScale().fitContent();
+        const title=document.getElementById('pc8Title');
+        if(title)title.textContent=sym+' · NEPSE · TradingView chart';
+        const legend=document.getElementById('pc8Legend');
+        if(legend)legend.textContent=bars.length+' daily candles · '+currentRange+' range';
+        setStatus('LIVE DATAFEED',true);
+      }catch(err){
+        console.warn('TradingView NEPSE datafeed:',err);
+        candles.setData([]);volume.setData([]);
+        const legend=document.getElementById('pc8Legend');
+        if(legend)legend.textContent='Chart data unavailable';
+        setStatus('DATA UNAVAILABLE',false);
+      }finally{resize();}
+    }
+
+    function selectedSymbol(){
+      const input=document.getElementById('pc8Symbol');
+      return String(input&&input.value||'').trim().toUpperCase();
+    }
+    const loadBtn=document.getElementById('pc8Load');
+    if(loadBtn)loadBtn.addEventListener('click',function(){loadTv(selectedSymbol(),currentRange);});
+    const input=document.getElementById('pc8Symbol');
+    if(input)input.addEventListener('keydown',function(e){if(e.key==='Enter')loadTv(selectedSymbol(),currentRange);});
+
+    root.querySelectorAll('[data-tf]').forEach(btn=>{
+      btn.addEventListener('click',function(){
+        root.querySelectorAll('[data-tf]').forEach(x=>x.classList.remove('active'));
+        btn.classList.add('active');
+        loadTv(selectedSymbol(),btn.dataset.tf);
+      });
+    });
+
+    root.querySelectorAll('[data-tf]').forEach(x=>x.classList.toggle('active',x.dataset.tf==='1Y'));
+    window.PULSE_TV_DATAFEED={load:loadTv,chart:chart,candles:candles,volume:volume};
+    resize();
+
+    window.addEventListener('pulse-central-snapshot',function(e){
+      const rows=(e.detail&&e.detail.live)||[];
+      if(!selectedSymbol()&&rows.length){
+        const sym=rows[0].symbol||rows[0].ticker||rows[0].code;
+        if(sym){input.value=String(sym).toUpperCase();loadTv(sym,currentRange);}
+      }
+    });
+  }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start);
+  else start();
+})();
+</script>
+
 </body>
 </html><script>
 // NEPSE Pulse Professional Charting V1 extension
@@ -6149,5 +6417,224 @@ input,select{background:#fff!important;color:var(--text)!important}
   }catch(e){loaded='';}
  }
  const observer=new MutationObserver(()=>{if(root.classList.contains('open'))enrich()});observer.observe(content,{childList:true,subtree:true});document.getElementById('npcoTabs')?.addEventListener('click',()=>{loaded='';setTimeout(enrich,80)});setInterval(()=>{if(root.classList.contains('open'))enrich()},1500);
+})();
+</script>
+
+<!-- NEPSE Pulse: standalone TradingView-style Technical Analysis Terminal -->
+<style id="pulse-ta-terminal-v2">
+#pulseTATerminal{position:fixed;inset:0;z-index:100000;background:#f7f9fc;color:#182230;display:none;overflow:hidden;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+#pulseTATerminal.open{display:flex;flex-direction:column}
+.pulse-ta-top{height:58px;flex:0 0 58px;background:#fff;border-bottom:1px solid #dfe5ec;display:flex;align-items:center;gap:8px;padding:0 10px;box-sizing:border-box}
+.pulse-ta-logo{font-weight:900;font-size:14px;white-space:nowrap;color:#12344b;padding:0 8px}.pulse-ta-logo b{color:#16a36a}
+.pulse-ta-symbol{height:36px;min-width:145px;border:1px solid #cfd7e1;border-radius:7px;background:#fff;padding:0 10px;font-weight:800;color:#172033;outline:none}
+.pulse-ta-search{height:36px;min-width:235px;border:1px solid #cfd7e1;border-radius:7px;background:#fff;padding:0 10px;color:#172033;outline:none}
+.pulse-ta-top button,.pulse-ta-tool{height:34px;border:1px solid #d6dde6;background:#fff;border-radius:6px;padding:0 10px;font-weight:750;color:#334155;cursor:pointer;white-space:nowrap}
+.pulse-ta-top button:hover,.pulse-ta-tool:hover{background:#f1f5f9}.pulse-ta-close{margin-left:auto;font-size:18px;width:38px;padding:0!important}
+.pulse-ta-status{font-size:10px;color:#667085;white-space:nowrap}.pulse-ta-status.ok{color:#16864a}
+.pulse-ta-main{min-height:0;flex:1;display:flex;overflow:hidden}
+.pulse-ta-left{width:46px;flex:0 0 46px;background:#fff;border-right:1px solid #dfe5ec;display:flex;flex-direction:column;align-items:center;padding-top:7px;gap:4px}
+.pulse-ta-left button{width:34px;height:34px;border:0;background:transparent;border-radius:6px;font-size:17px;color:#526173;cursor:pointer}.pulse-ta-left button:hover,.pulse-ta-left button.active{background:#edf2f7;color:#111827}
+.pulse-ta-center{min-width:0;flex:1;display:flex;flex-direction:column;background:#fff}
+.pulse-ta-chartbar{height:42px;flex:0 0 42px;border-bottom:1px solid #e5e9ef;display:flex;align-items:center;gap:4px;padding:0 8px;overflow:auto}
+.pulse-ta-chartbar button{border:0;background:transparent;border-radius:5px;height:28px;padding:0 9px;color:#536173;font-weight:700;white-space:nowrap}.pulse-ta-chartbar button:hover,.pulse-ta-chartbar button.active{background:#edf2f7;color:#111827}
+.pulse-ta-chart{position:relative;min-height:0;flex:1;background:#fff}.pulse-ta-chart iframe,.pulse-ta-chart>div{width:100%;height:100%}
+.pulse-ta-right{width:245px;flex:0 0 245px;background:#fff;border-left:1px solid #dfe5ec;display:flex;flex-direction:column;overflow:auto}
+.pulse-ta-panel{padding:12px;border-bottom:1px solid #e5e9ef}.pulse-ta-panel h4{margin:0 0 9px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#667085}.pulse-ta-stat{display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:5px 0}.pulse-ta-stat b{font-weight:800}.pulse-ta-indicator{width:100%;margin:4px 0;padding:9px 10px;border:1px solid #dbe2ea;background:#fff;border-radius:7px;text-align:left;font-weight:750;color:#334155;cursor:pointer}.pulse-ta-indicator:hover{background:#f6f8fb}
+.pulse-ta-bottom{height:31px;flex:0 0 31px;border-top:1px solid #dfe5ec;background:#fff;display:flex;align-items:center;gap:14px;padding:0 12px;font-size:10px;color:#667085} .pulse-ta-dot{width:7px;height:7px;border-radius:50%;background:#b78300;display:inline-block;margin-right:5px}.pulse-ta-dot.ok{background:#16864a}
+/* When official TradingView Advanced Charts is installed, let its native terminal UI own the workspace. */
+#pulseTATerminal.advanced-mode .pulse-ta-main{display:block;position:relative}
+#pulseTATerminal.advanced-mode .pulse-ta-left,#pulseTATerminal.advanced-mode .pulse-ta-chartbar,#pulseTATerminal.advanced-mode .pulse-ta-right,#pulseTATerminal.advanced-mode .pulse-ta-bottom{display:none}
+#pulseTATerminal.advanced-mode .pulse-ta-center{position:absolute;inset:0;background:#fff}
+#pulseTATerminal.advanced-mode .pulse-ta-chart{position:absolute;inset:0}
+#pulseTATerminal.advanced-mode .pulse-ta-symbol,#pulseTATerminal.advanced-mode .pulse-ta-search,#pulseTATerminal.advanced-mode #pulseTaLoad,#pulseTATerminal.advanced-mode #pulseTaInterval{display:none}
+#pulseTATerminal.advanced-mode .pulse-ta-top{height:44px;flex-basis:44px;padding-left:12px}
+#pulseTATerminal.advanced-mode .pulse-ta-close{margin-left:auto}
+@media(max-width:850px){.pulse-ta-logo{display:none}.pulse-ta-right{display:none}.pulse-ta-left{width:40px;flex-basis:40px}.pulse-ta-search{min-width:130px;width:130px}.pulse-ta-symbol{min-width:92px;width:92px}.pulse-ta-status{display:none}}
+</style>
+<div id="pulseTATerminal" aria-hidden="true">
+  <div class="pulse-ta-top">
+    <div class="pulse-ta-logo">NEPSE <b>Pulse</b></div>
+    <input id="pulseTaSymbol" class="pulse-ta-symbol" value="NABIL" aria-label="Symbol">
+    <input id="pulseTaSearch" class="pulse-ta-search" list="pc8Symbols" placeholder="Search NEPSE symbol…" aria-label="Search symbol">
+    <button id="pulseTaLoad">Load</button>
+    <button id="pulseTaInterval">D ▾</button>
+    <span id="pulseTaStatus" class="pulse-ta-status"><span id="pulseTaDot" class="pulse-ta-dot"></span>Connecting datafeed…</span>
+    <button id="pulseTaClose" class="pulse-ta-close" title="Close technical analysis">×</button>
+  </div>
+  <div class="pulse-ta-main">
+    <aside class="pulse-ta-left" aria-label="Drawing tools">
+      <button title="Cursor" class="active">⌁</button><button title="Trend line">╱</button><button title="Horizontal line">—</button><button title="Vertical line">│</button><button title="Crosshair">✣</button><button title="Fibonacci">F</button>
+    </aside>
+    <section class="pulse-ta-center">
+      <div class="pulse-ta-chartbar" id="pulseTaTimeframes">
+        <button data-i="D" class="active">1D</button><button data-i="W">1W</button><button data-i="M">1M</button><button data-i="6M">6M</button><button data-i="1Y">1Y</button><button data-i="ALL">ALL</button>
+        <span style="width:1px;height:22px;background:#e2e8f0;margin:0 4px"></span>
+        <button id="pulseTaCandle">Candles</button><button id="pulseTaCompare">Compare</button><button id="pulseTaFullscreen">Fullscreen</button>
+      </div>
+      <div id="pulseTaChart" class="pulse-ta-chart"></div>
+    </section>
+    <aside class="pulse-ta-right">
+      <div class="pulse-ta-panel"><h4>Technical Analysis</h4>
+        <button class="pulse-ta-indicator" data-study="Moving Average" data-arg="20">＋ SMA 20</button>
+        <button class="pulse-ta-indicator" data-study="Moving Average" data-arg="50">＋ SMA 50</button>
+        <button class="pulse-ta-indicator" data-study="Exponential Moving Average" data-arg="20">＋ EMA 20</button>
+        <button class="pulse-ta-indicator" data-study="Relative Strength Index">＋ RSI 14</button>
+        <button class="pulse-ta-indicator" data-study="MACD">＋ MACD</button>
+        <button class="pulse-ta-indicator" data-study="Bollinger Bands">＋ Bollinger Bands</button>
+      </div>
+      <div class="pulse-ta-panel"><h4>Chart</h4><div class="pulse-ta-stat"><span>Exchange</span><b>NEPSE</b></div><div class="pulse-ta-stat"><span>Timezone</span><b>Asia/Kathmandu</b></div><div class="pulse-ta-stat"><span>Data</span><b>OHLCV</b></div><div class="pulse-ta-stat"><span>Session</span><b>11:00–15:00</b></div></div>
+      <div class="pulse-ta-panel"><h4>Workspace</h4><button class="pulse-ta-indicator" id="pulseTaReset">Reset studies</button><button class="pulse-ta-indicator" id="pulseTaWatch">Add to watchlist</button></div>
+    </aside>
+  </div>
+  <div class="pulse-ta-bottom"><span><span id="pulseTaBottomDot" class="pulse-ta-dot"></span>NEPSE Pulse datafeed</span><span>Daily historical OHLCV</span><span>TradingView-compatible terminal</span></div>
+</div>
+<script id="pulse-ta-terminal-controller-v2">
+(function(){
+  'use strict';
+  const API=(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
+  const $=id=>document.getElementById(id);
+  let widget=null, lw=null, candle=null, volume=null, current='NABIL', resolution='D', seq=0;
+  const terminal=$('pulseTATerminal');
+  function status(text,ok){$('pulseTaStatus').innerHTML='<span class="pulse-ta-dot '+(ok?'ok':'')+'"></span>'+text;$('pulseTaBottomDot').className='pulse-ta-dot '+(ok?'ok':'')}
+  function open(sym){current=String(sym||$('pulseTaSymbol').value||'NABIL').trim().toUpperCase();$('pulseTaSymbol').value=current;terminal.classList.add('open');terminal.setAttribute('aria-hidden','false');document.body.style.overflow='hidden';startChart()}
+  function close(){terminal.classList.remove('open');terminal.setAttribute('aria-hidden','true');document.body.style.overflow='';}
+  function tv(){return window.PULSE_TRADINGVIEW_ADVANCED&&window.PULSE_TRADINGVIEW_ADVANCED.datafeed&&window.TradingView?.widget}
+  function makeSaveLoadAdapter(){
+    const prefix='nepsePulseTVAdvanced:';
+    const read=(key, fallback)=>{try{const raw=localStorage.getItem(prefix+key);return raw?JSON.parse(raw):fallback}catch(e){return fallback}};
+    const write=(key,value)=>{try{localStorage.setItem(prefix+key,JSON.stringify(value))}catch(e){}};
+    const uid=()=>String(Date.now())+'-'+Math.random().toString(36).slice(2,9);
+    const bucket=(name, fallback)=>read(name,fallback);
+    const saveBucket=(name,value)=>write(name,value);
+    return {
+      getAllCharts:async()=>bucket('charts',[]),
+      saveChart:async chartData=>{const charts=bucket('charts',[]);const id=chartData.id||uid();const item={...chartData,id,timestamp:Math.round(Date.now()/1000)};const next=charts.filter(x=>String(x.id)!==String(id));next.push(item);saveBucket('charts',next);return id},
+      removeChart:async id=>saveBucket('charts',bucket('charts',[]).filter(x=>String(x.id)!==String(id))),
+      getChartContent:async id=>{const x=bucket('charts',[]).find(c=>String(c.id)===String(id));return x?.content||''},
+      getAllStudyTemplates:async()=>bucket('studyTemplates',[]).map(x=>x.meta),
+      saveStudyTemplate:async data=>{const xs=bucket('studyTemplates',[]).filter(x=>x.meta?.name!==data.name);xs.push({meta:{...data},content:data.content});saveBucket('studyTemplates',xs)},
+      removeStudyTemplate:async data=>saveBucket('studyTemplates',bucket('studyTemplates',[]).filter(x=>x.meta?.name!==data.name)),
+      getStudyTemplateContent:async info=>bucket('studyTemplates',[]).find(x=>x.meta?.name===info.name)?.content||'',
+      getAllChartTemplates:async()=>Object.keys(bucket('chartTemplates',{})),
+      saveChartTemplate:async(name,theme)=>{const x=bucket('chartTemplates',{});x[name]=theme;saveBucket('chartTemplates',x)},
+      removeChartTemplate:async name=>{const x=bucket('chartTemplates',{});delete x[name];saveBucket('chartTemplates',x)},
+      getChartTemplateContent:async name=>bucket('chartTemplates',{})[name],
+      getDrawingTemplates:async toolName=>Object.keys(bucket('drawingTemplates',{})[toolName]||{}),
+      saveDrawingTemplate:async(toolName,name,content)=>{const x=bucket('drawingTemplates',{});x[toolName]=x[toolName]||{};x[toolName][name]=content;saveBucket('drawingTemplates',x)},
+      removeDrawingTemplate:async(toolName,name)=>{const x=bucket('drawingTemplates',{});if(x[toolName])delete x[toolName][name];saveBucket('drawingTemplates',x)},
+      loadDrawingTemplate:async(toolName,name)=>bucket('drawingTemplates',{})[toolName]?.[name]||''
+    };
+  }
+  function buildAdvanced(){
+    if(!tv())return false;
+    const host=$('pulseTaChart');host.innerHTML='';
+    terminal.classList.add('advanced-mode');
+    try{
+      const feed=window.PULSE_TRADINGVIEW_ADVANCED.datafeed;
+      widget=new TradingView.widget({
+        container:'pulseTaChart',
+        library_path:'charting_library/',
+        datafeed:feed,
+        symbol:'NEPSE:'+current,
+        interval:resolution,
+        timezone:'Asia/Kathmandu',
+        locale:'en',
+        autosize:true,
+        theme:'Light',
+        fullscreen:false,
+        allow_symbol_change:true,
+        withdateranges:true,
+        hide_side_toolbar:false,
+        details:false,
+        hotlist:false,
+        calendar:false,
+        load_last_chart:true,
+        auto_save_delay:5,
+        save_load_adapter:makeSaveLoadAdapter(),
+        studies:['Volume'],
+        time_frames:[
+          {text:'1D',resolution:'D',description:'Daily'},
+          {text:'1W',resolution:'W',description:'Weekly'},
+          {text:'1M',resolution:'M',description:'Monthly'},
+          {text:'6M',resolution:'D',description:'6 Months'},
+          {text:'1Y',resolution:'D',description:'1 Year'},
+          {text:'5Y',resolution:'D',description:'5 Years'},
+          {text:'ALL',resolution:'D',description:'All History'}
+        ],
+        enabled_features:[
+          'header_widget','header_symbol_search','header_resolutions','header_chart_type',
+          'header_indicators','header_compare','header_settings','header_undo_redo',
+          'header_quick_search','header_screenshot','header_fullscreen_button','header_saveload',
+          'left_toolbar','control_bar','timeframes_toolbar','legend_widget',
+          'context_menus','pane_context_menu','scales_context_menu','legend_context_menu',
+          'main_series_scale_menu','display_market_status','go_to_date',
+          'timezone_menu','items_favoriting','show_object_tree',
+          'edit_buttons_in_legend','show_hide_button_in_legend','format_button_in_legend',
+          'delete_button_in_legend','datasource_copypaste','save_shortcut',
+          'header_in_fullscreen_mode','side_toolbar_in_fullscreen_mode',
+          'horz_touch_drag_scroll','mouse_wheel_scroll','mouse_wheel_scale','pinch_scale',
+          'show_zoom_and_move_buttons_on_touch','always_show_legend_values_on_mobile',
+          'create_volume_indicator_by_default','create_volume_indicator_by_default_once',
+          'study_templates','legend_context_menu','pane_context_menu','chart_property_page_background',
+          'chart_property_page_scales','chart_property_page_status_line','chart_property_page_trading'
+        ],
+        overrides:{
+          'mainSeriesProperties.candleStyle.upColor':'#16864a',
+          'mainSeriesProperties.candleStyle.downColor':'#c0392b',
+          'mainSeriesProperties.candleStyle.borderUpColor':'#16864a',
+          'mainSeriesProperties.candleStyle.borderDownColor':'#c0392b',
+          'mainSeriesProperties.candleStyle.wickUpColor':'#16864a',
+          'mainSeriesProperties.candleStyle.wickDownColor':'#c0392b'
+        }
+      });
+      widget.onChartReady(()=>{
+        status('TRADINGVIEW ADVANCED · NEPSE FEED',true);
+        try{widget.activeChart().setChartType(1)}catch(e){}
+        try{widget.subscribe('onAutoSaveNeeded',()=>widget.saveChartToServer?.())}catch(e){}
+      });
+      return true;
+    }catch(e){
+      console.warn('Advanced Charts initialization failed',e);
+      widget=null;
+      terminal.classList.remove('advanced-mode');
+      return false;
+    }
+  }
+  async function apiHistory(){const r=await fetch(API+'/api/tv/history?symbol='+encodeURIComponent(current)+'&resolution=D&countback=5000&_ta='+Date.now(),{cache:'no-store'});if(!r.ok)throw Error('HTTP '+r.status);return r.json()}
+  async function buildLight(){
+    if(!window.LightweightCharts){status('Chart library unavailable',false);return}
+    const host=$('pulseTaChart');host.innerHTML='';lw=LightweightCharts.createChart(host,{layout:{background:{color:'#fff'},textColor:'#667085'},grid:{vertLines:{color:'#edf0f3'},horzLines:{color:'#edf0f3'}},rightPriceScale:{borderColor:'#d8e0ea'},timeScale:{borderColor:'#d8e0ea',timeVisible:false},crosshair:{mode:LightweightCharts.CrosshairMode.Normal},handleScroll:true,handleScale:true});
+    candle=lw.addCandlestickSeries({upColor:'#16864a',downColor:'#c0392b',borderUpColor:'#16864a',borderDownColor:'#c0392b',wickUpColor:'#16864a',wickDownColor:'#c0392b'});volume=lw.addHistogramSeries({priceFormat:{type:'volume'},priceScaleId:'volume',scaleMargins:{top:.82,bottom:0}});
+    try{const d=await apiHistory();if(d.s!=='ok')throw Error('No OHLCV history');const bars=d.t.map((t,i)=>({time:new Date(Number(t)*1000).toISOString().slice(0,10),open:+d.o[i],high:+d.h[i],low:+d.l[i],close:+d.c[i]}));const vols=d.t.map((t,i)=>({time:new Date(Number(t)*1000).toISOString().slice(0,10),value:+d.v?.[i]||0}));candle.setData(bars);volume.setData(vols);lw.timeScale().fitContent();status('NEPSE PULSE · DAILY OHLCV',true)}catch(e){status('NO CHART DATA',false)}
+    new ResizeObserver(()=>lw?.applyOptions({width:host.clientWidth,height:host.clientHeight})).observe(host);
+  }
+  async function startChart(){seq++;status('CONNECTING DATAFEED…',false);if(buildAdvanced())return;await buildLight()}
+  $('pulseTaLoad').onclick=()=>{current=String($('pulseTaSymbol').value||'').trim().toUpperCase();if(current){if(widget){widget.setSymbol('NEPSE:'+current,resolution,()=>status('TRADINGVIEW ADVANCED · NEPSE FEED',true))}else startChart()}};
+  $('pulseTaSearch').addEventListener('change',()=>{const v=$('pulseTaSearch').value.trim().toUpperCase();if(v){$('pulseTaSymbol').value=v;$('pulseTaLoad').click()}});
+  $('pulseTaClose').onclick=close;
+  $('pulseTaFullscreen').onclick=()=>terminal.requestFullscreen?.();
+  $('pulseTaReset').onclick=()=>{try{widget?.activeChart().removeAllStudies()}catch(e){}};
+  $('pulseTaTimeframes').querySelectorAll('[data-i]').forEach(b=>b.onclick=()=>{resolution=b.dataset.i;b.parentElement.querySelectorAll('[data-i]').forEach(x=>x.classList.remove('active'));b.classList.add('active');if(widget)widget.setInterval(resolution,()=>{});else startChart()});
+  document.querySelectorAll('.pulse-ta-indicator[data-study]').forEach(b=>b.onclick=()=>{if(!widget){status('Install TradingView Advanced Charts for indicators',false);return}try{const args=b.dataset.arg?[Number(b.dataset.arg)]:undefined;widget.activeChart().createStudy(b.dataset.study,false,false,args)}catch(e){status('Indicator unavailable in this library build',false)}});
+  $('pulseTaCandle').onclick=()=>{if(widget){try{widget.activeChart().setChartType(1)}catch(e){}}};
+  $('pulseTaCompare').onclick=()=>{if(widget)try{widget.activeChart().compare('NEPSE:'+current,{color:'#6b7280',lineWidth:2})}catch(e){}};
+  document.querySelectorAll('.pulse-ta-left button').forEach(b=>b.onclick=()=>{document.querySelectorAll('.pulse-ta-left button').forEach(x=>x.classList.remove('active'));b.classList.add('active');if(widget)try{widget.activeChart().executeActionById('drawingToolbarAction')}catch(e){}});
+  window.openProfessionalChart=function(symbol){open(symbol||$('pulseTaSymbol').value||'NABIL')};
+  const oldOpenFeature=window.openFeatureWorkspace;
+  window.openFeatureWorkspace=function(id,title){
+    const label=String(title||id||'');
+    if(/Professional Charting/i.test(label)||String(id||'').toLowerCase().includes('professional-charting')){open($('pc8Symbol')?.value||'NABIL');return}
+    if(/Command Center/i.test(label)){
+      return oldOpenFeature?oldOpenFeature.apply(this,arguments):undefined;
+    }
+    return oldOpenFeature?oldOpenFeature.apply(this,arguments):undefined;
+  };
+  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&terminal.classList.contains('open'))close()});
+  window.PULSE_TA_TERMINAL={open,close,getWidget:()=>widget};
+  const previousOpenModule=window.openModule;
+  window.openModule=function(name){
+    if(String(name||'').trim()==='Professional Charting'){open($('pc8Symbol')?.value||'NABIL');return;}
+    if(typeof previousOpenModule==='function')return previousOpenModule.apply(this,arguments);
+  };
 })();
 </script>

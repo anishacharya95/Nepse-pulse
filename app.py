@@ -1628,25 +1628,143 @@ async def production_events():
     return await production_call("events")
 
 # TradingView UDF-shaped adapter for the NEPSE Pulse chart frontend.
+# The adapter is backed by the same NEPSE history layer used by the rest of
+# the app. TradingView supplies the chart engine; NEPSE Pulse supplies data.
+async def _tv_daily_rows(symbol: str, countback: int = 5000):
+    payload = await get_history(symbol.upper().strip())
+    rows = payload.get("data", []) if isinstance(payload, dict) else payload
+    clean = []
+    for r in rows or []:
+        if not isinstance(r, dict):
+            continue
+        c = num(pick(r, ["close", "price", "ltp", "lastPrice"]))
+        if c is None:
+            continue
+        d = pick(r, ["date", "businessDate", "publishedDate", "published_date", "tradeDate"])
+        if not d:
+            continue
+        o = num(pick(r, ["open", "openingPrice"])) or c
+        h = num(pick(r, ["high", "highPrice"])) or max(o, c)
+        l = num(pick(r, ["low", "lowPrice"])) or min(o, c)
+        v = num(pick(r, ["volume", "tradedQuantity", "totalTradedQuantity", "quantity"])) or 0
+        try:
+            if isinstance(d, (int, float)):
+                ts = int(d)
+            else:
+                dt = datetime.fromisoformat(str(d).replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=NPT)
+                ts = int(dt.timestamp())
+        except Exception:
+            try:
+                dt = datetime.strptime(str(d)[:10], "%Y-%m-%d").replace(tzinfo=NPT)
+                ts = int(dt.timestamp())
+            except Exception:
+                continue
+        clean.append({"t": ts, "o": o, "h": h, "l": l, "c": c, "v": v})
+    clean.sort(key=lambda x: x["t"])
+    dedup = {}
+    for row in clean:
+        dedup[row["t"]] = row
+    return list(dedup.values())[-countback:]
+
+def _tv_resample(rows: list[dict], resolution: str):
+    resolution = str(resolution or "D").upper()
+    if resolution in ("D", "1D"):
+        return rows
+    buckets = {}
+    for r in rows:
+        dt = datetime.fromtimestamp(r["t"], tz=NPT)
+        if resolution in ("W", "1W"):
+            key = (dt.date() - timedelta(days=dt.weekday())).isoformat()
+        elif resolution in ("M", "1M"):
+            key = f"{dt.year:04d}-{dt.month:02d}"
+        else:
+            key = dt.date().isoformat()
+        b = buckets.get(key)
+        if b is None:
+            buckets[key] = dict(r)
+        else:
+            b["h"] = max(b["h"], r["h"])
+            b["l"] = min(b["l"], r["l"])
+            b["c"] = r["c"]
+            b["v"] = (b.get("v") or 0) + (r.get("v") or 0)
+    return list(sorted(buckets.values(), key=lambda x: x["t"]))
+
 @app.get("/api/tv/config")
 async def tv_config():
-    return await production_call("tv_config")
+    return {
+        "supports_search": True,
+        "supports_group_request": False,
+        "supports_marks": False,
+        "supports_timescale_marks": False,
+        "supports_time": True,
+        "supported_resolutions": ["D", "W", "M"],
+        "supports_seconds": False,
+    }
 
 @app.get("/api/tv/time")
 async def tv_time():
-    return await production_call("tv_time")
+    return int(time.time())
 
 @app.get("/api/tv/search")
 async def tv_search(q: str = Query(""), limit: int = Query(30, ge=1, le=100)):
-    return await production_call("tv_search", q, limit)
+    query = str(q or "").strip().upper()
+    raw = await company_list()
+    companies = arr(raw)
+    out = []
+    for c in companies:
+        sym = str(pick(c, ["symbol", "ticker", "code"], "") or "").upper()
+        name = str(pick(c, ["companyName", "company", "securityName", "name"], "") or "")
+        if not sym:
+            continue
+        if not query or query in sym or query in name.upper():
+            out.append({
+                "symbol": sym, "full_name": sym,
+                "description": name or sym, "exchange": "NEPSE",
+                "ticker": sym, "type": "stock",
+            })
+        if len(out) >= limit:
+            break
+    return out
 
 @app.get("/api/tv/symbols")
 async def tv_symbols(symbol: str):
-    return await production_call("tv_symbol", symbol)
+    sym = symbol.upper().strip()
+    return {
+        "name": sym, "ticker": sym, "description": f"{sym} · NEPSE",
+        "type": "stock", "session": "1100-1500",
+        "timezone": "Asia/Kathmandu", "exchange": "NEPSE",
+        "listed_exchange": "NEPSE", "minmov": 1, "pricescale": 100,
+        "has_intraday": False, "has_daily": True,
+        "has_weekly_and_monthly": True,
+        "supported_resolutions": ["D", "W", "M"],
+        "volume_precision": 0, "data_status": "streaming",
+    }
 
 @app.get("/api/tv/history")
-async def tv_history(symbol: str, resolution: str = "D", from_: int = Query(0, alias="from"), to: int = Query(0), countback: int = Query(500, ge=1, le=5000)):
-    return await production_call("tv_history", symbol, resolution=resolution, from_ts=from_, to_ts=to, countback=countback)
+async def tv_history(
+    symbol: str, resolution: str = "D",
+    from_: int = Query(0, alias="from"), to: int = Query(0),
+    countback: int = Query(500, ge=1, le=5000),
+):
+    rows = _tv_resample(await _tv_daily_rows(symbol, countback=5000), resolution)
+    if from_:
+        rows = [r for r in rows if r["t"] >= from_]
+    if to:
+        rows = [r for r in rows if r["t"] <= to]
+    rows = rows[-countback:]
+    if not rows:
+        return {"s": "no_data"}
+    return {
+        "s": "ok",
+        "t": [r["t"] for r in rows],
+        "o": [r["o"] for r in rows],
+        "h": [r["h"] for r in rows],
+        "l": [r["l"] for r in rows],
+        "c": [r["c"] for r in rows],
+        "v": [r["v"] for r in rows],
+    }
 
 @app.get("/health")
 async def health():
