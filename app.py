@@ -1739,9 +1739,86 @@ async def api_company(symbol: str):
     return await get_company(symbol)
 
 
+async def get_public_fundamentals(symbol: str):
+    """Merge openly published YONEPSE datasets for a symbol; absent fields stay null."""
+    symbol = symbol.upper().strip()
+    key = f"public-fundamentals:{symbol}"
+    async def load():
+        paths = {
+            "prices": "nepse_data.json",
+            "profiles": "company/profiles.json",
+            "financials": "company/financials.json",
+            "securities": "other/securities.json",
+            "dividends": "proposed_dividend/history_all_years.json",
+            "dividendLatest": "proposed_dividend/latest_1y.json",
+            "highLow": "market/top_stocks.json",
+        }
+        async def fetch(label, path):
+            try: return label, await yonepse_get(path)
+            except Exception: return label, None
+        got = dict(await asyncio.gather(*(fetch(k,v) for k,v in paths.items())))
+        def rows(obj):
+            if isinstance(obj, list): return obj
+            if isinstance(obj, dict):
+                for k in ("data","results","items","content","stocks","companies"):
+                    if isinstance(obj.get(k), list): return obj[k]
+                # financials/profiles can be keyed by company symbol
+                if symbol in obj:
+                    v=obj[symbol]
+                    return v if isinstance(v,list) else [v]
+            return []
+        def sym(row):
+            return str(row.get("symbol") or row.get("stockSymbol") or row.get("ticker") or row.get("symbolCode") or "").upper()
+        def matching(obj):
+            if isinstance(obj,dict) and symbol in obj:
+                v=obj[symbol]; return v if isinstance(v,list) else [v]
+            return [x for x in rows(obj) if isinstance(x,dict) and sym(x)==symbol]
+        price=matching(got.get("prices"))
+        profile=matching(got.get("profiles"))
+        security=matching(got.get("securities"))
+        financial=matching(got.get("financials"))
+        dividends=matching(got.get("dividends"))+matching(got.get("dividendLatest"))
+        hl=matching(got.get("highLow"))
+        # de-duplicate dividend records without discarding source fields
+        seen=set(); div=[]
+        for d in dividends:
+            marker=str((d.get("fiscalYear"),d.get("bookCloseDate"),d.get("cashDividend"),d.get("bonusDividend"),d.get("date")))
+            if marker not in seen: seen.add(marker); div.append(d)
+        return {"ok":bool(price or profile or security or financial or div or hl),"symbol":symbol,
+                "price":price,"profile":profile,"security":security,"financials":financial,
+                "dividends":div,"highLow":hl,"sources":{"prices":"YONEPSE public static market feed",
+                "profile":"YONEPSE public company profiles","financials":"YONEPSE public financial reports",
+                "dividends":"YONEPSE public proposed-dividend archive","highLow":"YONEPSE market snapshot; 52-week fields only when present"},
+                "updatedAt":now_iso()}
+    return await cached(key,load)
+
+@app.get("/api/public/fundamentals/{symbol}")
+async def api_public_fundamentals(symbol: str):
+    return await get_public_fundamentals(symbol)
+
 @app.get("/api/fundamentals/{symbol}")
 async def api_fundamentals(symbol: str):
-    return await get_fundamentals(symbol)
+    base=await get_fundamentals(symbol)
+    try:
+        public=await get_public_fundamentals(symbol)
+        base["publicData"]=public
+        # Fill only missing summary metrics from actual public rows.
+        def first(rows, keys):
+            for row in rows:
+                if isinstance(row,dict):
+                    for k in keys:
+                        v=row.get(k)
+                        if v not in (None, "", "-"): return num(v)
+            return None
+        val=base.setdefault("valuation",{})
+        pubrows=public.get("financials",[])+public.get("price",[])+public.get("highLow",[])
+        aliases={"eps":["eps","earningPerShare","earningsPerShare"],"bookValue":["bookValue","book_value","netWorthPerShare"],"pe":["pe","peRatio","priceEarningRatio"],"pb":["pb","pbv","pbRatio","priceBookRatio"],"marketCap":["marketCap","marketCapitalization"],"fiftyTwoWeekHigh":["fiftyTwoWeekHigh","high52","yearHigh"],"fiftyTwoWeekLow":["fiftyTwoWeekLow","low52","yearLow"]}
+        for field,keys in aliases.items():
+            if val.get(field) is None: val[field]=first(pubrows,keys)
+        base["publicSources"]=public.get("sources",{})
+    except Exception as exc:
+        base.setdefault("errors",[]).append(f"public datasets: {exc}")
+    return base
 
 
 @app.get("/PriceVolumeHistory")
@@ -1949,7 +2026,7 @@ async def _historical_floor_rows(start_date: datetime.date, end_date: datetime.d
             path = item.get("path", "")
             low = path.lower()
             day = date_from_path(path)
-            if (item.get("type") == "blob" and low.startswith("floorsheet/")
+            if (item.get("type") == "blob" and (low.startswith("floorsheet/") or low.split("/")[-1].startswith("floorsheet_"))
                     and day and start_date <= day <= end_date
                     and low.endswith((".csv", ".json", ".csv.gz", ".json.gz"))):
                 paths.append((day, path))
@@ -2060,7 +2137,7 @@ def _build_broker_report(rows: list[dict]):
     return broker_rows, symbol_rows, daily_rows
 
 @app.get("/api/brokers/history")
-async def api_brokers_history(months: int = Query(6, ge=1, le=6), symbol: Optional[str] = None,
+async def api_brokers_history(months: int = Query(3, ge=1, le=3), symbol: Optional[str] = None,
                               start: Optional[str] = None, end: Optional[str] = None):
     """Historical broker flow from archived floorsheets, with data for charts."""
     today = datetime.now().date()
@@ -2071,10 +2148,6 @@ async def api_brokers_history(months: int = Query(6, ge=1, le=6), symbol: Option
         raise HTTPException(status_code=400, detail="start/end must use YYYY-MM-DD")
     if start_day > end_day:
         raise HTTPException(status_code=400, detail="start must be on or before end")
-    # Hard-limit floorsheet history to six months even when callers pass dates.
-    earliest_allowed = _subtract_months(datetime.combine(end_day, datetime.min.time()), 6).date()
-    if start_day < earliest_allowed:
-        start_day = earliest_allowed
     cache_key = f"brokers-history:{start_day}:{end_day}:{(symbol or 'all').upper()}"
     async def load():
         rows = await _historical_floor_rows(start_day, end_day, symbol)
