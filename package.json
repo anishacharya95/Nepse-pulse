@@ -1,0 +1,15 @@
+{
+  "name": "nepse-pulse-charting-library",
+  "version": "1.0.0",
+  "private": true,
+  "description": "NEPSE Pulse TradingView Advanced Charts integration scaffold and UDF datafeed adapter.",
+  "type": "module",
+  "scripts": {
+    "tv:install": "node scripts/install-tradingview.mjs",
+    "tv:check": "node scripts/check-tradingview.mjs",
+    "dev": "python -m http.server 8080 -d public"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

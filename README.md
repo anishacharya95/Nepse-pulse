@@ -1,30 +1,87 @@
-# NEPSE Pulse V26 — Real Feature Data Engine
+# NEPSE Pulse Charting Library Package
 
-V26 upgrades the V25.1 central backend so feature modules are independently sourced and normalized.
+This is a GitHub-ready integration package for **TradingView Advanced Charts** and the NEPSE Pulse UDF datafeed.
 
-## Included
-- Central market/index/history feed
-- Floorsheet endpoint with normalized trade rows
-- Broker analysis calculated from floorsheet trades
-- Sector endpoint
-- Company/fundamental endpoint with financials, dividends and corporate-action attempts
-- Historical price endpoint
-- Technical endpoint calculating SMA20, SMA50, EMA20 and RSI14 from returned history
-- Stock X-Ray aggregation endpoint
-- Command Center with independent datasets and diagnostics
-- Verified-source policy: unavailable data stays unavailable; no demo values are generated
+## Important licensing note
 
-## Deploy
+TradingView Advanced Charts is distributed through TradingView's private GitHub repository and is **not redistributable**. Do not commit the proprietary `public/charting_library/` contents to a public GitHub repository.
 
-1. Push `app.py`, `index.html`, `requirements.txt`, `config.js`, `render.yaml`, `auth-config.js`, and `splash.png` to the repository.
-2. Create/redeploy the Render web service from `render.yaml`. The service starts with `uvicorn app:app --host 0.0.0.0 --port $PORT` and uses `/health` as its health check.
-3. Confirm the Render service URL. If Render assigns a different URL than `https://nepse-pulse.onrender.com`, update `config.js` with that exact URL.
-4. After deployment, test these endpoints in the browser: `/health`, `/api/market`, `/api/command-center`, `/api/floorsheet`, `/api/brokers`, `/api/sectors`, `/api/stock-xray/NABIL`, and `/api/diagnostics`.
-5. Hard-refresh the frontend so the browser uses the new central-feed code.
+TradingView's official installation flow requires authorized GitHub access to the private repository.
 
-### Central feed architecture
+## Install
 
-The browser uses the configured Render backend as the single market-data source. The FastAPI process keeps one persistent `AsyncNepseClient` session so the temporary NEPSE token is reused instead of creating a new session for every metric request.
+```bash
+npm install
+npm run tv:install
+```
 
-## Data sources
-Primary source is the public NEPSE frontend through `nepsepy`. The backend can use public API/static fallbacks when a primary call is unavailable. `nepsepy` documents market, floorsheet, index, company, financial report, dividend and corporate-action access. Public open datasets provide OHLC/floorsheet/reference data for historical fallback.
+To install a specific authorized release:
+
+```bash
+npm run tv:install -- 32.0.0
+```
+
+The installer places the library at:
+
+```text
+public/charting_library/
+```
+
+## NEPSE datafeed
+
+The adapter in `src/nepse-udf.js` connects Advanced Charts to the existing NEPSE Pulse endpoints:
+
+- `/api/tv/config`
+- `/api/tv/time`
+- `/api/tv/search`
+- `/api/tv/symbols`
+- `/api/tv/history`
+
+Copy or load `src/nepse-udf.js` before creating the TradingView widget.
+
+Example:
+
+```html
+<script src="charting_library/charting_library.standalone.js"></script>
+<script src="../src/nepse-udf.js"></script>
+<script>
+  new TradingView.widget({
+    container: "chartContainer",
+    library_path: "charting_library/",
+    datafeed: window.NEPSE_PULSE_UDF_DATAFEED,
+    symbol: "NEPSE:NABIL",
+    interval: "1D",
+    timezone: "Asia/Kathmandu",
+    locale: "en",
+    autosize: true
+  });
+</script>
+```
+
+## Current NEPSE data limitation
+
+The existing backend supports daily/weekly/monthly historical data. It does not invent intraday data. A verified NEPSE intraday/live stream is required for 1m/5m/15m/30m/1h charts and real-time `subscribeBars`.
+
+## GitHub publishing
+
+You may publish this **integration scaffold** publicly. Do not publish TradingView's proprietary `charting_library` files.
+
+Suggested repository name:
+
+`nepse-pulse-charting`
+
+Suggested structure:
+
+```text
+nepse-pulse-charting/
+├── public/
+│   └── charting_library/       # installed privately; DO NOT COMMIT
+├── scripts/
+│   ├── install-tradingview.mjs
+│   └── check-tradingview.mjs
+├── src/
+│   └── nepse-udf.js
+├── .gitignore
+├── package.json
+└── README.md
+```
