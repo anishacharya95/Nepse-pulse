@@ -5941,6 +5941,8 @@ document.addEventListener('click',e=>{const tr=e.target.closest('#npamRows tr[da
   const rootId='professional-charting-v8';
   const base=()=>String(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
   const localLibrary='charting_library/charting_library.standalone.js';
+  const remoteLibrary='https://charting-library.tradingview-widget.com/charting_library/charting_library.standalone.js';
+  const remoteLibraryPath='https://charting-library.tradingview-widget.com/charting_library/';
   let widget=null, poller=null, activeSymbol='NABIL';
 
   function root(){return document.getElementById(rootId)}
@@ -5953,22 +5955,29 @@ document.addEventListener('click',e=>{const tr=e.target.closest('#npamRows tr[da
       const old=document.getElementById('pc8TvChartWrap')||document.getElementById('pc8Canvas')?.parentElement;
       if(!old)return null;
       wrap=document.createElement('div');wrap.id='pc8AdvancedWrap';
-      wrap.innerHTML='<div id="pc8AdvancedChart"></div><div id="pc8AdvancedMissing">TradingView Advanced Charts package not installed yet.<br>Place the official <b>charting_library/</b> folder in the project root, then reload this page.</div>';
+      wrap.innerHTML='<div id="pc8AdvancedChart"></div><div id="pc8AdvancedMissing">Loading TradingView Advanced Charts…<br>If the official runtime is unavailable, install the authorized <b>charting_library/</b> package in the project root.</div>';
       old.parentNode.insertBefore(wrap,old);old.style.display='none';
     }
     return wrap;
   }
-  async function loadScript(src){
-    if(window.TradingView?.widget)return true;
-    try{
-      const res=await fetch(src,{method:'GET',cache:'no-store'});
-      if(!res.ok)return false;
-      const code=await res.text();
-      if(!code.includes('TradingView'))return false;
-      const s=document.createElement('script');s.text=code;document.head.appendChild(s);
-      await new Promise(r=>setTimeout(r,0));
-      return !!window.TradingView?.widget;
-    }catch(e){return false}
+  function loadScript(src){
+    if(window.TradingView?.widget)return Promise.resolve(true);
+    return new Promise(resolve=>{
+      const existing=document.querySelector('script[data-pulse-tv-runtime]');
+      if(existing){
+        existing.addEventListener('load',()=>resolve(!!window.TradingView?.widget),{once:true});
+        existing.addEventListener('error',()=>resolve(false),{once:true});
+        if(window.TradingView?.widget)resolve(true);
+        return;
+      }
+      const s=document.createElement('script');
+      s.src=src;
+      s.async=true;
+      s.dataset.pulseTvRuntime='1';
+      s.onload=()=>resolve(!!window.TradingView?.widget);
+      s.onerror=()=>resolve(false);
+      document.head.appendChild(s);
+    });
   }
   function api(path,params){const u=new URL(base()+path);Object.entries(params||{}).forEach(([k,v])=>u.searchParams.set(k,v));return fetch(u.toString(),{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw Error('HTTP '+r.status);return r.json()})}
 
@@ -6060,7 +6069,12 @@ document.addEventListener('click',e=>{const tr=e.target.closest('#npamRows tr[da
   async function start(){
     const r=root();if(!r)return;
     const host=ensureHost();if(!host)return;
-    const loaded=await loadScript(localLibrary);
+    let loaded=await loadScript(remoteLibrary);
+    let libraryPath=remoteLibraryPath;
+    if(!loaded){
+      loaded=await loadScript(localLibrary);
+      libraryPath='charting_library/';
+    }
     if(!loaded){
       const missing=document.getElementById('pc8AdvancedMissing');if(missing)missing.hidden=false;
       return;
@@ -6072,7 +6086,7 @@ document.addEventListener('click',e=>{const tr=e.target.closest('#npamRows tr[da
     setStatus('CONNECTING TRADINGVIEW…',false);
     try{
       widget=new TradingView.widget({
-        container:'pc8AdvancedChart',library_path:'charting_library/',datafeed,symbol:'NEPSE:'+activeSymbol,interval:'D',withdateranges:true,allow_symbol_change:true,timezone:'Asia/Kathmandu',locale:'en',autosize:true,
+        container:'pc8AdvancedChart',library_path:libraryPath,datafeed,symbol:'NEPSE:'+activeSymbol,interval:'D',withdateranges:true,allow_symbol_change:true,timezone:'Asia/Kathmandu',locale:'en',autosize:true,
         theme:'Light',
         enabled_features:['header_widget','header_symbol_search','header_resolutions','header_chart_type','header_indicators','header_compare','header_settings','header_undo_redo','header_quick_search','header_screenshot','header_fullscreen_button','header_saveload','left_toolbar','control_bar','timeframes_toolbar','legend_widget','context_menus','pane_context_menu','scales_context_menu','legend_context_menu','main_series_scale_menu','display_market_status','go_to_date','timezone_menu','items_favoriting','show_object_tree','edit_buttons_in_legend','show_hide_button_in_legend','format_button_in_legend','delete_button_in_legend','datasource_copypaste','save_shortcut','side_toolbar_in_fullscreen_mode','header_in_fullscreen_mode','horz_touch_drag_scroll','mouse_wheel_scroll','mouse_wheel_scale','pinch_scale','show_zoom_and_move_buttons_on_touch','always_show_legend_values_on_mobile','create_volume_indicator_by_default','study_templates'],
         disabled_features:[],
@@ -6092,6 +6106,7 @@ document.addEventListener('click',e=>{const tr=e.target.closest('#npamRows tr[da
     }catch(e){console.error('TradingView Advanced Charts init:',e);setStatus('ADVANCED CHART ERROR',false)}
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(start,50));else setTimeout(start,50);
+  window.PULSE_TV_LIBRARY_PATH=remoteLibraryPath;
   window.PULSE_TRADINGVIEW_ADVANCED={start,datafeed,getWidget:()=>widget};
 })();
 </script>
@@ -6573,9 +6588,10 @@ input,select{background:#fff!important;color:var(--text)!important}
     terminal.classList.add('advanced-mode');
     try{
       const feed=window.PULSE_TRADINGVIEW_ADVANCED.datafeed;
+      const libraryPath=window.PULSE_TV_LIBRARY_PATH||'https://charting-library.tradingview-widget.com/charting_library/';
       widget=new TradingView.widget({
         container:'pulseTaChart',
-        library_path:'charting_library/',
+        library_path:libraryPath,
         datafeed:feed,
         symbol:'NEPSE:'+current,
         interval:resolution,
