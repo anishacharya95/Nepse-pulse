@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -1649,7 +1649,7 @@ async def _tv_daily_rows(symbol: str, countback: int = 5000):
         v = num(pick(r, ["volume", "tradedQuantity", "totalTradedQuantity", "quantity"])) or 0
         try:
             if isinstance(d, (int, float)):
-                ts = int(d)
+                ts = int(d / 1000) if d > 10_000_000_000 else int(d)
             else:
                 dt = datetime.fromisoformat(str(d).replace("Z", "+00:00"))
                 if dt.tzinfo is None:
@@ -1668,9 +1668,78 @@ async def _tv_daily_rows(symbol: str, countback: int = 5000):
         dedup[row["t"]] = row
     return list(dedup.values())[-countback:]
 
+def _tv_parse_trade_time(value):
+    if value is None:
+        return None
+    try:
+        if isinstance(value, (int, float)):
+            n = float(value)
+            return int(n / 1000) if n > 10_000_000_000 else int(n)
+        raw = str(value).strip()
+        if not raw:
+            return None
+        if raw.isdigit():
+            n = int(raw)
+            return int(n / 1000) if n > 10_000_000_000 else n
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=NPT)
+        return int(dt.timestamp())
+    except Exception:
+        return None
+
+async def _tv_trade_rows(symbol: str, limit: int = 5000):
+    try:
+        payload = await production_call("trades", symbol=symbol.upper().strip(), max_pages=20, size=min(max(limit, 100), 500))
+    except Exception:
+        return []
+    rows = arr(payload.get("data") if isinstance(payload, dict) else payload)
+    out = []
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        price = num(pick(r, ["price", "rate", "ltp", "lastPrice", "tradePrice", "close"]))
+        if price is None:
+            continue
+        ts = _tv_parse_trade_time(pick(r, ["timestamp", "time", "tradeTime", "tradeDateTime", "date", "businessDate", "createdAt"]))
+        if ts is None:
+            continue
+        qty = num(pick(r, ["quantity", "qty", "volume", "tradedQuantity", "tradeQuantity"])) or 0
+        out.append({"t": ts, "p": price, "v": qty})
+    out.sort(key=lambda x: x["t"])
+    return out[-limit:]
+
+def _tv_intraday_resample(trades: list[dict], resolution: str):
+    try:
+        minutes = int(str(resolution).upper().replace("MIN", ""))
+    except Exception:
+        minutes = 1
+    minutes = max(1, minutes)
+    bucket_seconds = minutes * 60
+    buckets = {}
+    for tr in trades:
+        ts = int(tr["t"])
+        # Anchor to Nepal local session clock while retaining epoch timestamps.
+        dt = datetime.fromtimestamp(ts, tz=NPT)
+        midnight = dt.replace(hour=0, minute=0, second=0, microsecond=0)
+        elapsed = int((dt - midnight).total_seconds())
+        start = midnight + timedelta(seconds=(elapsed // bucket_seconds) * bucket_seconds)
+        key = int(start.timestamp())
+        b = buckets.get(key)
+        if b is None:
+            buckets[key] = {"t": key, "o": tr["p"], "h": tr["p"], "l": tr["p"], "c": tr["p"], "v": tr.get("v", 0) or 0}
+        else:
+            b["h"] = max(b["h"], tr["p"])
+            b["l"] = min(b["l"], tr["p"])
+            b["c"] = tr["p"]
+            b["v"] += tr.get("v", 0) or 0
+    return [buckets[k] for k in sorted(buckets)]
+
 def _tv_resample(rows: list[dict], resolution: str):
     resolution = str(resolution or "D").upper()
     if resolution in ("D", "1D"):
+        return rows
+    if resolution.endswith("MIN") or resolution.isdigit():
         return rows
     buckets = {}
     for r in rows:
@@ -1691,6 +1760,16 @@ def _tv_resample(rows: list[dict], resolution: str):
             b["v"] = (b.get("v") or 0) + (r.get("v") or 0)
     return list(sorted(buckets.values(), key=lambda x: x["t"]))
 
+TV_INTRADAY_RESOLUTIONS = ["1", "3", "5", "10", "15", "30", "60"]
+TV_ALL_RESOLUTIONS = TV_INTRADAY_RESOLUTIONS + ["D", "W", "M"]
+
+async def _tv_rows_for_resolution(symbol: str, resolution: str, countback: int = 5000):
+    resolution = str(resolution or "D").upper()
+    if resolution in TV_INTRADAY_RESOLUTIONS or resolution.endswith("MIN"):
+        trades = await _tv_trade_rows(symbol, limit=max(1000, min(countback * 20, 10000)))
+        return _tv_intraday_resample(trades, resolution)[-countback:]
+    return _tv_resample(await _tv_daily_rows(symbol, countback=5000), resolution)[-countback:]
+
 @app.get("/api/tv/config")
 async def tv_config():
     return {
@@ -1699,7 +1778,7 @@ async def tv_config():
         "supports_marks": False,
         "supports_timescale_marks": False,
         "supports_time": True,
-        "supported_resolutions": ["D", "W", "M"],
+        "supported_resolutions": TV_ALL_RESOLUTIONS,
         "supports_seconds": False,
     }
 
@@ -1736,9 +1815,9 @@ async def tv_symbols(symbol: str):
         "type": "stock", "session": "1100-1500",
         "timezone": "Asia/Kathmandu", "exchange": "NEPSE",
         "listed_exchange": "NEPSE", "minmov": 1, "pricescale": 100,
-        "has_intraday": False, "has_daily": True,
+        "has_intraday": True, "has_daily": True,
         "has_weekly_and_monthly": True,
-        "supported_resolutions": ["D", "W", "M"],
+        "supported_resolutions": TV_ALL_RESOLUTIONS,
         "volume_precision": 0, "data_status": "streaming",
     }
 
@@ -1748,7 +1827,7 @@ async def tv_history(
     from_: int = Query(0, alias="from"), to: int = Query(0),
     countback: int = Query(500, ge=1, le=5000),
 ):
-    rows = _tv_resample(await _tv_daily_rows(symbol, countback=5000), resolution)
+    rows = await _tv_rows_for_resolution(symbol, resolution, countback=5000)
     if from_:
         rows = [r for r in rows if r["t"] >= from_]
     if to:
@@ -1765,6 +1844,40 @@ async def tv_history(
         "c": [r["c"] for r in rows],
         "v": [r["v"] for r in rows],
     }
+
+
+@app.get("/api/tv/realtime")
+async def tv_realtime(symbol: str, resolution: str = "1"):
+    rows = await _tv_rows_for_resolution(symbol, resolution, countback=2)
+    if not rows:
+        return {"s": "no_data"}
+    r = rows[-1]
+    return {"s": "ok", "bar": r}
+
+@app.websocket("/api/tv/ws")
+async def tv_websocket(websocket: WebSocket):
+    """Optional shared realtime transport for clients that prefer WebSocket.
+
+    The endpoint polls the project's configured NEPSE trade source and emits the
+    latest aggregated bar. It never fabricates quotes when the upstream source
+    has no trade data.
+    """
+    await websocket.accept()
+    try:
+        while True:
+            msg = await websocket.receive_json()
+            symbol = str(msg.get("symbol", "")).upper().strip()
+            resolution = str(msg.get("resolution", "1"))
+            if not symbol:
+                await websocket.send_json({"s": "error", "message": "symbol required"})
+                continue
+            rows = await _tv_rows_for_resolution(symbol, resolution, countback=2)
+            if rows:
+                await websocket.send_json({"s": "ok", "symbol": symbol, "resolution": resolution, "bar": rows[-1]})
+            else:
+                await websocket.send_json({"s": "no_data", "symbol": symbol, "resolution": resolution})
+    except WebSocketDisconnect:
+        return
 
 @app.get("/health")
 async def health():

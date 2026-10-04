@@ -5972,8 +5972,10 @@ document.addEventListener('click',e=>{const tr=e.target.closest('#npamRows tr[da
   }
   function api(path,params){const u=new URL(base()+path);Object.entries(params||{}).forEach(([k,v])=>u.searchParams.set(k,v));return fetch(u.toString(),{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw Error('HTTP '+r.status);return r.json()})}
 
+  const INTRADAY=['1','3','5','10','15','30','60'];
+  const ALL_RES=INTRADAY.concat(['D','W','M']);
   const configuration={
-    supported_resolutions:['D','W','M'],
+    supported_resolutions:ALL_RES,
     supports_search:true,
     supports_group_request:false,
     supports_marks:false,
@@ -5982,6 +5984,12 @@ document.addEventListener('click',e=>{const tr=e.target.closest('#npamRows tr[da
     exchanges:[{value:'NEPSE',name:'NEPSE',desc:'Nepal Stock Exchange'}],
     symbols_types:[{name:'stock',value:'stock'}]
   };
+  const subscriptions=new Map();
+  function toBar(d){
+    if(d?.s!=='ok'||!d.bar)return null;
+    const r=d.bar;
+    return {time:Number(r.t)*1000,open:Number(r.o),high:Number(r.h),low:Number(r.l),close:Number(r.c),volume:Number(r.v||0)};
+  }
   const datafeed={
     onReady(cb){setTimeout(()=>cb(configuration),0)},
     searchSymbols(userInput,exchange,fullSymbolType,onResult){
@@ -5991,7 +5999,7 @@ document.addEventListener('click',e=>{const tr=e.target.closest('#npamRows tr[da
       const sym=String(symbolName||'').split(':').pop().trim().toUpperCase();
       api('/api/tv/symbols',{symbol:sym}).then(x=>setTimeout(()=>onResolve({
         ticker:sym,name:sym,description:x.description||sym,type:'stock',session:x.session||'1100-1500',timezone:x.timezone||'Asia/Kathmandu',exchange:x.exchange||'NEPSE',listed_exchange:'NEPSE',
-        minmov:Number(x.minmov||1),pricescale:Number(x.pricescale||100),has_intraday:false,has_daily:true,has_weekly_and_monthly:true,supported_resolutions:['D','W','M'],volume_precision:0,data_status:'streaming'
+        minmov:Number(x.minmov||1),pricescale:Number(x.pricescale||100),has_intraday:true,has_daily:true,has_weekly_and_monthly:true,supported_resolutions:ALL_RES,volume_precision:0,data_status:'streaming'
       }),0)).catch(e=>setTimeout(()=>onError(String(e.message||e)),0));
     },
     getBars(symbolInfo,resolution,periodParams,onResult,onError){
@@ -6003,15 +6011,49 @@ document.addEventListener('click',e=>{const tr=e.target.closest('#npamRows tr[da
       }).catch(e=>setTimeout(()=>onError(String(e.message||e)),0));
     },
     subscribeBars(symbolInfo,resolution,onRealtimeCallback,subscriberUID,resetCacheNeededCallback){
-      const sym=symbolInfo.ticker||symbolInfo.name; let last=0;
-      poller=poller||setInterval(()=>{
-        api('/api/tv/history',{symbol:sym,resolution,countback:2}).then(d=>{
-          if(d.s!=='ok'||!d.t?.length)return; const i=d.t.length-1; const bar={time:Number(d.t[i])*1000,open:Number(d.o[i]),high:Number(d.h[i]),low:Number(d.l[i]),close:Number(d.c[i]),volume:Number(d.v?.[i]||0)};
-          if(Number.isFinite(bar.time)&&bar.time!==last){last=bar.time;onRealtimeCallback(bar)} else if(Number.isFinite(bar.time)){onRealtimeCallback(bar)}
-        }).catch(()=>{});
-      },10000);
+      const sym=String(symbolInfo.ticker||symbolInfo.name||'').toUpperCase();
+      const sub={symbol:sym,resolution:String(resolution),callback:onRealtimeCallback,lastTime:0,timer:null,ws:null,wsTimer:null,closed:false};
+      const emit=bar=>{
+        if(!bar||!Number.isFinite(bar.time))return;
+        if(sub.lastTime && bar.time < sub.lastTime)return;
+        sub.lastTime=bar.time;
+        try{onRealtimeCallback(bar)}catch(e){}
+      };
+      const poll=async()=>{
+        if(sub.closed)return;
+        try{emit(toBar(await api('/api/tv/realtime',{symbol:sym,resolution:sub.resolution})))}catch(e){}
+      };
+      const startHttp=()=>{
+        if(sub.closed||sub.timer)return;
+        poll();
+        sub.timer=setInterval(poll,2500);
+      };
+      const startWs=()=>{
+        if(sub.closed||!('WebSocket' in window))return startHttp();
+        try{
+          const u=new URL(base()+'/api/tv/ws');
+          u.protocol=u.protocol==='https:'?'wss:':'ws:';
+          const ws=new WebSocket(u.toString()); sub.ws=ws;
+          ws.onopen=()=>{
+            const send=()=>{if(ws.readyState===1)ws.send(JSON.stringify({symbol:sym,resolution:sub.resolution}))};
+            send(); sub.wsTimer=setInterval(send,2500);
+          };
+          ws.onmessage=e=>{try{const d=JSON.parse(e.data);if(d?.s==='ok')emit(toBar({s:'ok',bar:d.bar}))}catch(err){}};
+          ws.onerror=()=>{try{ws.close()}catch(e){}};
+          ws.onclose=()=>{if(sub.wsTimer)clearInterval(sub.wsTimer);sub.wsTimer=null;sub.ws=null;if(!sub.closed)startHttp()};
+        }catch(e){startHttp()}
+      };
+      subscriptions.set(subscriberUID,sub);
+      startWs();
     },
-    unsubscribeBars(){if(poller){clearInterval(poller);poller=null}},
+    unsubscribeBars(subscriberUID){
+      const sub=subscriptions.get(subscriberUID);if(!sub)return;
+      sub.closed=true;
+      if(sub.timer)clearInterval(sub.timer);
+      if(sub.wsTimer)clearInterval(sub.wsTimer);
+      try{sub.ws?.close()}catch(e){}
+      subscriptions.delete(subscriberUID);
+    },
     getServerTime(cb){api('/api/tv/time').then(x=>cb(Number(x))).catch(()=>cb(Math.floor(Date.now()/1000)))}
   };
 
@@ -6030,10 +6072,10 @@ document.addEventListener('click',e=>{const tr=e.target.closest('#npamRows tr[da
     setStatus('CONNECTING TRADINGVIEW…',false);
     try{
       widget=new TradingView.widget({
-        container:'pc8AdvancedChart',library_path:'charting_library/',datafeed,symbol:'NEPSE:'+activeSymbol,interval:'D',timezone:'Asia/Kathmandu',locale:'en',autosize:true,
+        container:'pc8AdvancedChart',library_path:'charting_library/',datafeed,symbol:'NEPSE:'+activeSymbol,interval:'D',withdateranges:true,allow_symbol_change:true,timezone:'Asia/Kathmandu',locale:'en',autosize:true,
         theme:'Light',
-        enabled_features:['side_toolbar_in_fullscreen_mode','header_in_fullscreen_mode','header_saveload'],
-        disabled_features:['use_localstorage_for_settings'],
+        enabled_features:['header_widget','header_symbol_search','header_resolutions','header_chart_type','header_indicators','header_compare','header_settings','header_undo_redo','header_quick_search','header_screenshot','header_fullscreen_button','header_saveload','left_toolbar','control_bar','timeframes_toolbar','legend_widget','context_menus','pane_context_menu','scales_context_menu','legend_context_menu','main_series_scale_menu','display_market_status','go_to_date','timezone_menu','items_favoriting','show_object_tree','edit_buttons_in_legend','show_hide_button_in_legend','format_button_in_legend','delete_button_in_legend','datasource_copypaste','save_shortcut','side_toolbar_in_fullscreen_mode','header_in_fullscreen_mode','horz_touch_drag_scroll','mouse_wheel_scroll','mouse_wheel_scale','pinch_scale','show_zoom_and_move_buttons_on_touch','always_show_legend_values_on_mobile','create_volume_indicator_by_default','study_templates'],
+        disabled_features:[],
         overrides:{'mainSeriesProperties.candleStyle.upColor':'#16864a','mainSeriesProperties.candleStyle.downColor':'#c0392b','mainSeriesProperties.candleStyle.borderUpColor':'#16864a','mainSeriesProperties.candleStyle.borderDownColor':'#c0392b','mainSeriesProperties.candleStyle.wickUpColor':'#16864a','mainSeriesProperties.candleStyle.wickDownColor':'#c0392b'},
         studies_overrides:{},
         loading_screen:{backgroundColor:'#ffffff',foregroundColor:'#16864a'},
