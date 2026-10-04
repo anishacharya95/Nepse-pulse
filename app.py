@@ -1787,8 +1787,16 @@ async def tv_time():
     return int(time.time())
 
 @app.get("/api/tv/search")
-async def tv_search(q: str = Query(""), limit: int = Query(30, ge=1, le=100)):
-    query = str(q or "").strip().upper()
+async def tv_search(
+    q: str = Query(""),
+    query: str = Query(""),
+    limit: int = Query(30, ge=1, le=100),
+    exchange: str = Query(""),
+    type: str = Query(""),
+):
+    # Accept both the existing Pulse parameter (q) and TradingView UDF
+    # parameter (query). The native UDF adapter calls /search directly.
+    query = str(query or q or "").strip().upper()
     raw = await company_list()
     companies = arr(raw)
     out = []
@@ -1796,6 +1804,10 @@ async def tv_search(q: str = Query(""), limit: int = Query(30, ge=1, le=100)):
         sym = str(pick(c, ["symbol", "ticker", "code"], "") or "").upper()
         name = str(pick(c, ["companyName", "company", "securityName", "name"], "") or "")
         if not sym:
+            continue
+        if exchange and exchange.upper() not in ("NEPSE", ""):
+            continue
+        if type and type.lower() not in ("stock", ""):
             continue
         if not query or query in sym or query in name.upper():
             out.append({
@@ -1818,7 +1830,11 @@ async def tv_symbols(symbol: str):
         "has_intraday": True, "has_daily": True,
         "has_weekly_and_monthly": True,
         "supported_resolutions": TV_ALL_RESOLUTIONS,
-        "volume_precision": 0, "data_status": "streaming",
+        "volume_precision": 0,
+        # The endpoint can serve trade-derived bars, but it is not itself a
+        # WebSocket stream. Advertise streaming only when the production SDK
+        # is available; otherwise make the delayed state explicit.
+        "data_status": "streaming" if PRODUCTION_SDK_ENABLED else "delayed_streaming",
     }
 
 @app.get("/api/tv/history")
