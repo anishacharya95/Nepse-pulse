@@ -1748,6 +1748,8 @@ def _tv_resample(rows: list[dict], resolution: str):
             key = (dt.date() - timedelta(days=dt.weekday())).isoformat()
         elif resolution in ("M", "1M"):
             key = f"{dt.year:04d}-{dt.month:02d}"
+        elif resolution in ("Y", "1Y"):
+            key = f"{dt.year:04d}"
         else:
             key = dt.date().isoformat()
         b = buckets.get(key)
@@ -1761,7 +1763,7 @@ def _tv_resample(rows: list[dict], resolution: str):
     return list(sorted(buckets.values(), key=lambda x: x["t"]))
 
 TV_INTRADAY_RESOLUTIONS = ["1", "3", "5", "10", "15", "30", "60"]
-TV_ALL_RESOLUTIONS = TV_INTRADAY_RESOLUTIONS + ["D", "W", "M"]
+TV_ALL_RESOLUTIONS = TV_INTRADAY_RESOLUTIONS + ["D", "W", "M", "Y"]
 
 async def _tv_rows_for_resolution(symbol: str, resolution: str, countback: int = 5000):
     resolution = str(resolution or "D").upper()

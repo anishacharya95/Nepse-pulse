@@ -4154,63 +4154,9 @@ document.addEventListener('DOMContentLoaded',()=>{
 @media(max-width:800px){.pc8{margin:16px 10px 26px;border-radius:19px}.pc8-head,.pc8-search,.pc8-toolbar{padding-left:16px;padding-right:16px}.pc8-layout{grid-template-columns:1fr;padding:0 16px 16px}.pc8-canvaswrap{height:300px}.pc8-volume{height:80px}.pc8-search{flex-direction:column}}
 </style>
 
-<section id="professional-charting-v8" class="pc8 pulse-home-feature-module">
-  <div class="pc8-head">
-    <div>
-      <div class="pc8-kicker">Pulse Charts · V8</div>
-      <h2>Professional Charting</h2>
-      <p class="pc8-sub">Feed-aware price, volume and technical chart workspace.</p>
-    </div>
-    <div class="pc8-status"><span id="pc8Dot" class="pc8-dot"></span><span id="pc8Status">WAITING FOR FEED</span></div>
-  </div>
+<!-- Existing Professional Charting implementation is retained below as an inert source archive. -->
+<script type="text/plain" id="nepse-pulse-legacy-charting-source">
 
-  <div class="pc8-search">
-    <input id="pc8Symbol" list="pc8Symbols" placeholder="Search symbol, e.g. NABIL">
-    <datalist id="pc8Symbols"></datalist>
-    <button id="pc8Load" class="pc8-btn">Load Chart</button>
-  </div>
-
-  <div class="pc8-toolbar">
-    <div class="pc8-timeframes">
-      <button class="pc8-pill active" data-tf="1D">1D</button>
-      <button class="pc8-pill" data-tf="1W">1W</button>
-      <button class="pc8-pill" data-tf="1M">1M</button>
-      <button class="pc8-pill" data-tf="6M">6M</button>
-      <button class="pc8-pill" data-tf="1Y">1Y</button>
-      <button class="pc8-pill" data-tf="ALL">ALL</button>
-    </div>
-    <div class="pc8-tools">
-      <button class="pc8-pill active" id="pc8PriceBtn">Price</button>
-      <button class="pc8-pill" id="pc8CandleBtn">OHLC</button>
-      <button class="pc8-pill" id="pc8SmaBtn">SMA20</button>
-      <button class="pc8-pill" id="pc8EmaBtn">EMA50</button>
-      <button class="pc8-pill" id="pc8RsiBtn">RSI</button>
-    </div>
-  </div>
-
-  <div class="pc8-layout">
-    <div class="pc8-chartcard">
-      <div class="pc8-charthead"><div id="pc8Title" class="pc8-title">Select a security</div><div id="pc8Legend" class="pc8-legend">No chart data</div></div>
-      <div id="pc8Empty" class="pc8-empty">Choose a security with usable price history from the Central Feed.</div>
-      <div id="pc8CanvasWrap" class="pc8-canvaswrap" hidden><canvas id="pc8Canvas"></canvas></div>
-      <div id="pc8VolumeWrap" class="pc8-volume" hidden><canvas id="pc8Volume"></canvas></div>
-    </div>
-    <div>
-      <div class="pc8-card">
-        <h3>Market Snapshot</h3>
-        <div id="pc8Metrics" class="pc8-metrics"></div>
-      </div>
-      <div class="pc8-card" style="margin-top:12px">
-        <h3>Technical Signals</h3>
-        <div id="pc8Signals"></div>
-      </div>
-      <div class="pc8-card" style="margin-top:12px">
-        <h3>Chart Data</h3>
-        <div id="pc8DataInfo" class="pc8-legend">History fields are used only when supplied by the feed.</div>
-      </div>
-    </div>
-  </div>
-</section>
 
 <script>
 (function(){
@@ -6165,6 +6111,64 @@ document.addEventListener('click',e=>{const tr=e.target.closest('#npamRows tr[da
 })();
 </script>
 
+<script id="nepse-pulse-professional-charting-router-fix">
+(function(){
+  function boot(){
+    // The file contains an older archived chart module plus the active TradeX module.
+    // Give the archived module a different id so getElementById() always finds TradeX.
+    var modules=document.querySelectorAll('#professional-charting-v8');
+    if(modules.length>1){
+      for(var i=0;i<modules.length-1;i++) modules[i].id='professional-charting-legacy-v8-'+i;
+    }
+    var root=document.getElementById('professional-charting-v8');
+    var ws=document.getElementById('pulseFeatureWorkspace');
+    var body=document.getElementById('pulseWorkspaceBody');
+    var title=document.getElementById('pulseWorkspaceTitle');
+    function openChart(symbol){
+      root=document.getElementById('professional-charting-v8');
+      ws=document.getElementById('pulseFeatureWorkspace');
+      body=document.getElementById('pulseWorkspaceBody');
+      title=document.getElementById('pulseWorkspaceTitle');
+      if(!root){ if(window.toast) window.toast('Professional Charting is not available.'); return; }
+      if(!ws||!body){ root.classList.add('pulse-feature-mounted'); root.style.removeProperty('display'); root.scrollIntoView({behavior:'smooth',block:'start'}); if(typeof window.PULSE_TA_TERMINAL?.open==='function') window.PULSE_TA_TERMINAL.open(symbol||'NABIL'); return; }
+      // Remove any previous mounted feature.
+      document.querySelectorAll('.pulse-feature-mounted').forEach(function(el){ if(el!==root) el.classList.remove('pulse-feature-mounted'); });
+      // Restore TradeX module if another feature currently owns it.
+      if(root.parentNode!==body){
+        if(title) title.textContent='📈 Professional Charting';
+        root.classList.add('pulse-feature-mounted');
+        root.style.removeProperty('display');
+        body.appendChild(root);
+      }
+      ws.classList.add('open');
+      try{window.scrollTo(0,0)}catch(e){}
+      if(typeof window.PULSE_TA_TERMINAL?.open==='function'){
+        try{ window.PULSE_TA_TERMINAL.open(symbol||document.getElementById('txpSymbol')?.value||'NABIL'); }catch(e){ console.warn(e); }
+      }
+    }
+    window.openProfessionalChart=openChart;
+    window.openModule=function(name){
+      var n=String(name||'').toLowerCase();
+      if(n.indexOf('professional charting')!==-1){ openChart('NABIL'); return; }
+      // Preserve the app's existing module router for everything else.
+      if(typeof window.PULSE_V25_OPEN_FEATURE==='function') return window.PULSE_V25_OPEN_FEATURE(name);
+      if(typeof window._originalOpenModule==='function') return window._originalOpenModule(name);
+    };
+    window.openFeatureWorkspace=function(id,label){
+      var text=String(id||'')+' '+String(label||'');
+      if(/professional charting/i.test(text)){ openChart(document.getElementById('txpSymbol')?.value||'NABIL'); return; }
+      // Use the original feature workspace engine for all other features.
+      var el=document.getElementById(id);
+      if(el && ws && body){
+        ws.classList.add('open'); if(title) title.textContent=label||'Pulse Feature';
+        el.classList.add('pulse-feature-mounted'); el.style.removeProperty('display'); body.appendChild(el); return;
+      }
+      if(typeof window.PULSE_V25_OPEN_FEATURE==='function') return window.PULSE_V25_OPEN_FEATURE(label||id);
+    };
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',boot,{once:true}); else boot();
+})();
+</script>
 </body>
 </html><script>
 // NEPSE Pulse Professional Charting V1 extension
@@ -6611,3 +6615,116 @@ input,select{background:#fff!important;color:var(--text)!important}
   };
 })();
 </script>
+
+</script>
+
+<!-- NEPSE Pulse Professional Charting · TradeX Chart integration -->
+<section id="professional-charting-v8" class="pc8 pulse-home-feature-module">
+<style>
+#professional-charting-v8{margin:24px 16px 36px;border:1px solid var(--border,#dfe5ec);border-radius:22px;background:var(--card,#fff);box-shadow:0 12px 36px rgba(15,23,42,.08);overflow:hidden}
+#professional-charting-v8 *{box-sizing:border-box}.txp-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:20px 22px 14px}.txp-kicker{font-size:10px;font-weight:900;letter-spacing:.14em;text-transform:uppercase;opacity:.55}.txp-head h2{margin:5px 0 3px;font-size:24px}.txp-sub{margin:0;font-size:12px;opacity:.62}.txp-status{font-size:10px;font-weight:900;white-space:nowrap}.txp-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#b78300;margin-right:6px}
+.txp-search{display:flex;gap:8px;padding:0 22px 12px}.txp-search input{min-width:0;flex:1;border:1px solid var(--border,#d9dee7);border-radius:10px;padding:11px 12px;background:var(--bg,#fff);color:inherit;font-weight:700}.txp-btn{border:1px solid #172033;background:#172033;color:#fff;border-radius:10px;padding:10px 14px;font-weight:800;cursor:pointer}.txp-btn.alt{background:transparent;color:inherit;border-color:var(--border,#d9dee7)}.txp-tools{display:flex;gap:6px;flex-wrap:wrap;padding:0 22px 10px}.txp-group-label{display:inline-flex;align-items:center;padding:0 4px;font-size:9px;font-weight:900;letter-spacing:.08em;opacity:.5}.txp-pill.active{background:#172033;color:#fff;border-color:#172033}.txp-ind-label{margin-left:10px}.txp-pill{border:1px solid var(--border,#dfe5ec);background:transparent;color:inherit;border-radius:9px;padding:7px 10px;font-size:10px;font-weight:800;cursor:pointer}.txp-pill:hover{background:rgba(100,116,139,.08)}
+.txp-chart-shell{margin:0 16px 16px;border:1px solid #dfe5ec;border-radius:16px;overflow:hidden;background:#fff;position:relative;min-height:650px}.txp-chart-shell:fullscreen{width:100vw;height:100vh;border:0;border-radius:0;margin:0}.txp-chart-shell:fullscreen #txpChartMount{height:100vh}.txp-chart-shell:fullscreen .txp-loading{height:100vh}#txpChartMount{width:100%;height:650px;position:relative}.txp-loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:30px;font-size:12px;color:#667085;background:#fff;z-index:4}.txp-loading.hidden{display:none}.txp-foot{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:8px 16px;border-top:1px solid #edf0f3;font-size:10px;color:#667085;background:#fafbfc}
+@media(max-width:800px){#professional-charting-v8{margin:14px 8px 22px;border-radius:18px}.txp-head{padding:16px}.txp-search{padding:0 16px 10px;flex-direction:column}.txp-tools{padding:0 16px 12px;overflow:auto;flex-wrap:nowrap}.txp-chart-shell{margin:0 8px 8px}.txp-chart-shell,#txpChartMount{min-height:520px;height:520px}.txp-foot{font-size:9px}}
+</style>
+<div class="txp-head"><div><div class="txp-kicker">Pulse Charts · TradeX</div><h2>Professional Charting</h2><p class="txp-sub">NEPSE technical-analysis terminal powered by TradeX Chart.</p></div><div class="txp-status"><span id="txpDot" class="txp-dot"></span><span id="txpStatus">READY</span></div></div>
+<div class="txp-search"><input id="txpSymbol" list="txpSymbols" value="NABIL" placeholder="Search NEPSE symbol, e.g. NABIL" autocomplete="off"><datalist id="txpSymbols"></datalist><button id="txpLoad" class="txp-btn">Load Chart</button><button id="txpFullscreen" class="txp-btn alt">Fullscreen</button></div>
+<div class="txp-tools txp-timeframes"><span class="txp-group-label">CANDLE</span><button class="txp-pill txp-res active" data-txp-res="D">Daily</button><button class="txp-pill txp-res" data-txp-res="1">1m</button><button class="txp-pill txp-res" data-txp-res="5">5m</button><button class="txp-pill txp-res" data-txp-res="15">15m</button><button class="txp-pill txp-res" data-txp-res="30">30m</button><button class="txp-pill txp-res" data-txp-res="60">1H</button><button class="txp-pill txp-res" data-txp-res="W">Weekly</button><button class="txp-pill txp-res" data-txp-res="M">Monthly</button><button class="txp-pill txp-res" data-txp-res="Y">Yearly</button></div>
+<div class="txp-tools txp-chart-controls"><span class="txp-group-label">VIEW</span><button class="txp-pill" id="txpZoomOut">Zoom −</button><button class="txp-pill" id="txpZoomIn">Zoom +</button><button class="txp-pill" id="txpFit">Fit All</button><button class="txp-pill" id="txpBack">Latest</button><span class="txp-group-label txp-ind-label">INDICATORS</span><button class="txp-pill" data-txp-ind="SMA">SMA 20</button><button class="txp-pill" data-txp-ind="EMA">EMA 20</button><button class="txp-pill" data-txp-ind="RSI">RSI 14</button><button class="txp-pill" data-txp-ind="MACD">MACD</button><button class="txp-pill" data-txp-ind="BB">Bollinger Bands</button><button class="txp-pill" data-txp-ind="ADX">ADX</button><button class="txp-pill" data-txp-ind="OBV">OBV</button><button class="txp-pill" data-txp-ind="Volume">Volume</button><button class="txp-pill" id="txpReset">Reset Indicators</button></div>
+<div class="txp-chart-shell" id="txpShell"><div id="txpChartMount"><div id="txpLoading" class="txp-loading">Loading TradeX Chart…</div></div></div><div class="txp-foot"><span id="txpInfo">NEPSE Pulse datafeed · Daily OHLCV</span><span>TradeX Chart · GPL-3.0</span></div>
+</section>
+<script type="module" id="nepse-pulse-tradex-chart">
+(function(){'use strict';
+const API=String(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');const $=id=>document.getElementById(id);let chart=null,current='NABIL',resolution='D',requestId=0,tradexModule=null,talibModule=null;const rangeMap={1:500,3:500,5:500,10:500,15:500,30:500,60:500,D:500,W:260,M:120,Y:50},resolutionLabel={1:'1-minute',3:'3-minute',5:'5-minute',10:'10-minute',15:'15-minute',30:'30-minute',60:'1-hour',D:'Daily',W:'Weekly',M:'Monthly',Y:'Yearly'};
+function status(msg,ok){const e=$('txpStatus'),d=$('txpDot');if(e)e.textContent=msg;if(d)d.style.background=ok?'#20a464':'#b78300'}function setLoading(show,msg){const e=$('txpLoading');if(!e)return;e.textContent=msg||'Loading TradeX Chart…';e.classList.toggle('hidden',!show)}function toNum(v){const n=Number(v);return Number.isFinite(n)?n:null}
+async function getHistory(symbol,res){const id=++requestId;const u=API+'/api/tv/history?symbol='+encodeURIComponent(symbol)+'&resolution='+encodeURIComponent(res)+'&countback='+(rangeMap[res]||500)+'&_tradex='+Date.now();const r=await fetch(u,{cache:'no-store',headers:{Accept:'application/json'}});if(!r.ok)throw Error('History HTTP '+r.status);const d=await r.json();if(id!==requestId)throw Error('Request superseded');if(d.s!=='ok'||!Array.isArray(d.t)||!d.t.length)throw Error('No OHLCV history for '+symbol);const rows=[];for(let i=0;i<d.t.length;i++){const o=toNum(d.o?.[i]),h=toNum(d.h?.[i]),l=toNum(d.l?.[i]),c=toNum(d.c?.[i]),v=toNum(d.v?.[i])??0;if([o,h,l,c].every(Number.isFinite))rows.push([Number(d.t[i])*1000,o,h,l,c,v])}if(!rows.length)throw Error('Feed returned no usable candles');return rows}
+function destroyChart(){try{chart?.stopStream?.()}catch(e){}const host=$('txpChartMount');if(host)host.innerHTML='<div id="txpLoading" class="txp-loading">Loading TradeX Chart…</div>';chart=null}
+async function ensureLibraries(){if(tradexModule)return tradexModule;status('LOADING TRADEX…',false);setLoading(true,'Loading TradeX Chart library…');try{tradexModule=await Promise.race([import('https://cdn.jsdelivr.net/npm/tradex-chart@0.158.7/+esm'),new Promise((_,rej)=>setTimeout(()=>rej(Error('TradeX CDN timed out after 15 seconds')),15000))]);}catch(e){tradexModule=null;throw Error('TradeX library failed to load. Check GitHub Pages network/CSP access to jsDelivr. '+(e?.message||''))}try{talibModule=await Promise.race([import('https://cdn.jsdelivr.net/npm/talib-web@0.1.3/+esm'),new Promise((_,rej)=>setTimeout(()=>rej(Error('TA-Lib timeout')),10000))]);}catch(e){talibModule=null;console.warn('TA-Lib module unavailable; chart will still load.',e)}return tradexModule}
+async function render(symbol,res){current=String(symbol||'NABIL').trim().toUpperCase()||'NABIL';resolution=res||resolution;$('txpSymbol').value=current;setLoading(true,'Loading '+current+' '+resolutionLabel[resolution]+' candles…');try{await ensureLibraries();const rows=await getHistory(current,resolution);destroyChart();const mount=$('txpChartMount'),el=document.createElement('tradex-chart');el.style.width='100%';el.style.height='100%';mount.appendChild(el);const config={id:'NEPSE_Pulse_'+current,title:current+' · NEPSE',width:mount.clientWidth||1000,height:mount.clientHeight||650,rangeLimit:Math.min(120,Math.max(30,rows.length)),timeFrame:(resolution==='D'?'1d':resolution==='W'?'1w':resolution==='M'?'1M':resolution==='Y'?'1y':resolution+'m'),theme:{candle:{Type:'candle_solid'}},state:{ohlcv:rows},tools:{location:'left'},utils:{location:'right'},time:{navigation:true},legend:{controls:true},logs:false,infos:false,warnings:true,errors:true,...(talibModule?{talib:talibModule}:{})};chart=el;el.start(config);setLoading(false);status('NEPSE FEED · '+resolutionLabel[resolution],true);$('txpInfo').textContent=rows.length+' '+resolutionLabel[resolution].toLowerCase()+' candles · '+current+' · NEPSE Pulse';setTimeout(()=>{try{el.jumpToEnd?.(false)}catch(e){}},80)}catch(err){console.error('TradeX NEPSE chart:',err);setLoading(true,'TradeX could not load this symbol. '+(err?.message||'Unknown error'));status('CHART ERROR',false);$('txpInfo').textContent='Check the NEPSE Pulse datafeed and browser console.'}}
+function addIndicator(type){if(!chart){status('LOAD A CHART FIRST',false);return}try{const name=type+'_'+Date.now();const ind=chart.addIndicator(type,name);if(ind){status(type+' ADDED',true);setTimeout(()=>{try{chart.calcAllIndicators?.();chart.refresh?.()}catch(e){}},60);return}status(type+' UNAVAILABLE',false)}catch(e){console.warn('TradeX indicator:',type,e);status(type+' UNAVAILABLE',false)}}
+function resetIndicators(){if(!chart)return;try{const ids=[];if(chart.Chart?.indicators)Object.keys(chart.Chart.indicators).forEach(k=>ids.push(k));ids.forEach(id=>{try{chart.removeIndicator(id)}catch(e){}});status('INDICATORS RESET',true)}catch(e){console.warn('TradeX reset:',e)}}
+function populateSymbols(){const list=$('txpSymbols');if(!list)return;fetch(API+'/api/tv/search?query='+encodeURIComponent('')+'&limit=500',{cache:'no-store'}).then(r=>r.json()).then(d=>{const rows=Array.isArray(d)?d:(d.result||d.data||[]);list.innerHTML='';rows.slice(0,500).forEach(x=>{const s=x.symbol||x.ticker||x.code||x.full_name||'';if(s){const o=document.createElement('option');o.value=String(s).replace(/^NEPSE:/i,'');list.appendChild(o)}})}).catch(()=>{})}
+function setViewRange(mode){if(!chart)return;try{const data=chart.state?.ohlcv||chart.state?.data?.ohlcv||chart.allData?.ohlcv||[];const n=Array.isArray(data)?data.length:0;const r=chart.getRange?.();let end=n? n-1 : null;if(r&&typeof r==='object'){end=Number.isFinite(r.end)?r.end:(Number.isFinite(r[1])?r[1]:end)}if(end==null||!n)return;if(mode==='all'){chart.setRange?.(0,end);return}const currentStart=(r&&typeof r==='object'&&Number.isFinite(r.start))?r.start:(Number.isFinite(r?.[0])?r[0]:Math.max(0,end-80));let visible=Math.max(20,end-currentStart+1);if(mode==='out')visible=Math.min(n,Math.ceil(visible*1.6));if(mode==='in')visible=Math.max(20,Math.floor(visible/1.6));const start=Math.max(0,end-visible+1);chart.setRange?.(start,end);chart.refresh?.()}catch(e){console.warn('TradeX range:',e)}}
+function resizeTradeX(){try{if(!chart)return;const m=$('txpChartMount');if(m)chart.resize?.(m.clientWidth||window.innerWidth,m.clientHeight||window.innerHeight);chart.refresh?.()}catch(e){}}
+
+function bind(){
+$('txpLoad')?.addEventListener('click',()=>render($('txpSymbol').value,resolution));
+$('txpSymbol')?.addEventListener('keydown',e=>{if(e.key==='Enter')render(e.currentTarget.value,resolution)});
+$('txpFullscreen')?.addEventListener('click',async()=>{const shell=$('txpShell');try{if(document.fullscreenElement)await document.exitFullscreen();else await shell?.requestFullscreen?.()}catch(e){console.warn('Fullscreen:',e)}setTimeout(resizeTradeX,80)});
+document.addEventListener('fullscreenchange',()=>setTimeout(resizeTradeX,120));
+$('txpReset')?.addEventListener('click',resetIndicators);
+$('txpZoomOut')?.addEventListener('click',()=>setViewRange('out'));
+$('txpZoomIn')?.addEventListener('click',()=>setViewRange('in'));
+$('txpFit')?.addEventListener('click',()=>setViewRange('all'));
+$('txpBack')?.addEventListener('click',()=>{try{chart?.jumpToEnd?.(false)}catch(e){}});
+document.querySelectorAll('[data-txp-res]').forEach(b=>b.addEventListener('click',()=>{resolution=b.dataset.txpRes;document.querySelectorAll('[data-txp-res]').forEach(x=>x.classList.toggle('active',x===b));render($('txpSymbol').value,resolution)}));
+document.querySelectorAll('[data-txp-ind]').forEach(b=>b.addEventListener('click',()=>addIndicator(b.dataset.txpInd)));
+window.addEventListener('resize',()=>setTimeout(resizeTradeX,60));
+window.openProfessionalChart=function(symbol){const s=String(symbol||$('txpSymbol')?.value||'NABIL').trim().toUpperCase();const root=$('professional-charting-v8');if(root){root.scrollIntoView({behavior:'smooth',block:'start'});render(s,resolution)}};
+const oldOpenFeature=window.openFeatureWorkspace;window.openFeatureWorkspace=function(id,title){if(/professional charting/i.test(String(id||''))||/professional charting/i.test(String(title||''))){window.openProfessionalChart($('txpSymbol')?.value||'NABIL');return}return typeof oldOpenFeature==='function'?oldOpenFeature.apply(this,arguments):undefined};
+const oldOpenModule=window.openModule;window.openModule=function(name){if(/professional charting/i.test(String(name||''))){window.openProfessionalChart($('txpSymbol')?.value||'NABIL');return}return typeof oldOpenModule==='function'?oldOpenModule.apply(this,arguments):undefined};
+window.PULSE_TA_TERMINAL={open:window.openProfessionalChart,close:()=>{},getWidget:()=>chart};populateSymbols();render(current,'D')}
+
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bind,{once:true});else bind();})();
+</script>
+
+<script id="nepse-pulse-professional-charting-router-fix">
+(function(){
+  function boot(){
+    // The file contains an older archived chart module plus the active TradeX module.
+    // Give the archived module a different id so getElementById() always finds TradeX.
+    var modules=document.querySelectorAll('#professional-charting-v8');
+    if(modules.length>1){
+      for(var i=0;i<modules.length-1;i++) modules[i].id='professional-charting-legacy-v8-'+i;
+    }
+    var root=document.getElementById('professional-charting-v8');
+    var ws=document.getElementById('pulseFeatureWorkspace');
+    var body=document.getElementById('pulseWorkspaceBody');
+    var title=document.getElementById('pulseWorkspaceTitle');
+    function openChart(symbol){
+      root=document.getElementById('professional-charting-v8');
+      ws=document.getElementById('pulseFeatureWorkspace');
+      body=document.getElementById('pulseWorkspaceBody');
+      title=document.getElementById('pulseWorkspaceTitle');
+      if(!root){ if(window.toast) window.toast('Professional Charting is not available.'); return; }
+      if(!ws||!body){ root.classList.add('pulse-feature-mounted'); root.style.removeProperty('display'); root.scrollIntoView({behavior:'smooth',block:'start'}); if(typeof window.PULSE_TA_TERMINAL?.open==='function') window.PULSE_TA_TERMINAL.open(symbol||'NABIL'); return; }
+      // Remove any previous mounted feature.
+      document.querySelectorAll('.pulse-feature-mounted').forEach(function(el){ if(el!==root) el.classList.remove('pulse-feature-mounted'); });
+      // Restore TradeX module if another feature currently owns it.
+      if(root.parentNode!==body){
+        if(title) title.textContent='📈 Professional Charting';
+        root.classList.add('pulse-feature-mounted');
+        root.style.removeProperty('display');
+        body.appendChild(root);
+      }
+      ws.classList.add('open');
+      try{window.scrollTo(0,0)}catch(e){}
+      if(typeof window.PULSE_TA_TERMINAL?.open==='function'){
+        try{ window.PULSE_TA_TERMINAL.open(symbol||document.getElementById('txpSymbol')?.value||'NABIL'); }catch(e){ console.warn(e); }
+      }
+    }
+    window.openProfessionalChart=openChart;
+    window.openModule=function(name){
+      var n=String(name||'').toLowerCase();
+      if(n.indexOf('professional charting')!==-1){ openChart('NABIL'); return; }
+      // Preserve the app's existing module router for everything else.
+      if(typeof window.PULSE_V25_OPEN_FEATURE==='function') return window.PULSE_V25_OPEN_FEATURE(name);
+      if(typeof window._originalOpenModule==='function') return window._originalOpenModule(name);
+    };
+    window.openFeatureWorkspace=function(id,label){
+      var text=String(id||'')+' '+String(label||'');
+      if(/professional charting/i.test(text)){ openChart(document.getElementById('txpSymbol')?.value||'NABIL'); return; }
+      // Use the original feature workspace engine for all other features.
+      var el=document.getElementById(id);
+      if(el && ws && body){
+        ws.classList.add('open'); if(title) title.textContent=label||'Pulse Feature';
+        el.classList.add('pulse-feature-mounted'); el.style.removeProperty('display'); body.appendChild(el); return;
+      }
+      if(typeof window.PULSE_V25_OPEN_FEATURE==='function') return window.PULSE_V25_OPEN_FEATURE(label||id);
+    };
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',boot,{once:true}); else boot();
+})();
+</script>
+</body>
+</html>
