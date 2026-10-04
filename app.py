@@ -2070,6 +2070,273 @@ async def api_fundamentals(symbol: str):
     return base
 
 
+
+# ---------------------------------------------------------------------------
+# Dedicated technical screener API
+# ---------------------------------------------------------------------------
+def _ts_sma(a: list[float], n: int):
+    return (sum(a[-n:]) / n) if len(a) >= n else None
+
+def _ts_ema(a: list[float], n: int):
+    if len(a) < n:
+        return None
+    e = sum(a[:n]) / n
+    k = 2 / (n + 1)
+    for v in a[n:]:
+        e = v * k + e * (1 - k)
+    return e
+
+def _ts_rsi(a: list[float], n: int = 14):
+    if len(a) < n + 1:
+        return None
+    gains = sum(max(a[i] - a[i-1], 0) for i in range(1, n+1)) / n
+    losses = sum(max(a[i-1] - a[i], 0) for i in range(1, n+1)) / n
+    for i in range(n + 1, len(a)):
+        d = a[i] - a[i-1]
+        gains = (gains * (n - 1) + max(d, 0)) / n
+        losses = (losses * (n - 1) + max(-d, 0)) / n
+    if losses == 0:
+        return 100.0
+    return 100 - (100 / (1 + gains / losses))
+
+def _ts_macd(a: list[float]):
+    e12 = _ts_ema(a, 12)
+    e26 = _ts_ema(a, 26)
+    if e12 is None or e26 is None:
+        return None, None, None
+    # Build the MACD series so the signal line is calculated from the same history.
+    macd_series=[]
+    for i in range(26, len(a)+1):
+        left=a[:i]
+        x12=_ts_ema(left,12); x26=_ts_ema(left,26)
+        if x12 is not None and x26 is not None:
+            macd_series.append(x12-x26)
+    line=macd_series[-1] if macd_series else None
+    signal=_ts_ema(macd_series,9) if len(macd_series)>=9 else None
+    hist=(line-signal) if line is not None and signal is not None else None
+    return line, signal, hist
+
+def _ts_bbands(a: list[float], n: int = 20, mult: float = 2):
+    if len(a) < n:
+        return None, None, None
+    w=a[-n:]; mid=sum(w)/n
+    variance=sum((x-mid)**2 for x in w)/n
+    sd=variance**0.5
+    return mid+mult*sd, mid, mid-mult*sd
+
+def _ts_stoch(a: list[float], n: int = 14):
+    if len(a) < n:
+        return None
+    w=a[-n:]; hi=max(w); lo=min(w)
+    return ((w[-1]-lo)/(hi-lo)*100) if hi != lo else 50.0
+
+def _ts_atr(rows: list[dict], n: int = 14):
+    if len(rows) < n+1:
+        return None
+    trs=[]
+    for i in range(1,len(rows)):
+        r=rows[i]; prev=rows[i-1]
+        h=num(r.get('high')); l=num(r.get('low')); pc=num(prev.get('close'))
+        if h is None or l is None: continue
+        trs.append(max(h-l, abs(h-pc)) if pc is not None else h-l)
+    return (sum(trs[-n:])/n) if len(trs)>=n else None
+
+def _ts_adx(rows: list[dict], n: int = 14):
+    if len(rows) < n*2+1:
+        return None, None, None
+    trs=[]; plus=[]; minus=[]
+    for i in range(1,len(rows)):
+        r=rows[i]; p=rows[i-1]
+        h=num(r.get('high')); l=num(r.get('low')); ph=num(p.get('high')); pl=num(p.get('low')); pc=num(p.get('close'))
+        if None in (h,l,ph,pl,pc): continue
+        trs.append(max(h-l,abs(h-pc),abs(l-pc)))
+        up=h-ph; dn=pl-l
+        plus.append(up if up>dn and up>0 else 0)
+        minus.append(dn if dn>up and dn>0 else 0)
+    if len(trs)<n*2: return None,None,None
+    atr=sum(trs[:n])/n; pdi=sum(plus[:n])/n; mdi=sum(minus[:n])/n; dxs=[]
+    for i in range(n,len(trs)):
+        atr=(atr*(n-1)+trs[i])/n; pdi=(pdi*(n-1)+plus[i])/n; mdi=(mdi*(n-1)+minus[i])/n
+        p=100*pdi/atr if atr else 0; m=100*mdi/atr if atr else 0
+        dxs.append(100*abs(p-m)/(p+m) if p+m else 0)
+    adx=_ts_ema(dxs,n) if len(dxs)>=n else None
+    return adx, (100*pdi/atr if atr else None), (100*mdi/atr if atr else None)
+
+def _aggregate_technical_history(rows: list[dict], timeframe: str):
+    tf=str(timeframe or 'D').upper()
+    if tf in ('D','1D','DAILY'):
+        return rows
+    groups={}
+    for r in rows:
+        raw=str(r.get('date') or '')[:10]
+        try:
+            d=datetime.fromisoformat(raw).date()
+        except Exception:
+            continue
+        if tf in ('1W','W','WEEKLY'):
+            key=(d - timedelta(days=d.weekday())).isoformat()
+        elif tf in ('1M','M','MONTHLY'):
+            key=f'{d.year:04d}-{d.month:02d}-01'
+        else:
+            key=raw
+        groups.setdefault(key,[]).append(r)
+    out=[]
+    for key,items in sorted(groups.items()):
+        items=sorted(items,key=lambda x:str(x.get('date') or ''))
+        first,last=items[0],items[-1]
+        opens=num(first.get('open')) or num(first.get('close'))
+        closes=num(last.get('close')) or opens
+        highs=[num(x.get('high')) for x in items if num(x.get('high')) is not None]
+        lows=[num(x.get('low')) for x in items if num(x.get('low')) is not None]
+        vols=[num(x.get('volume')) for x in items if num(x.get('volume')) is not None]
+        out.append({'date':key,'open':opens,'high':max(highs) if highs else closes,'low':min(lows) if lows else closes,'close':closes,'volume':sum(vols) if vols else None})
+    return out
+
+def _technical_snapshot(rows: list[dict]):
+    closes=[num(r.get('close')) for r in rows]
+    closes=[x for x in closes if x is not None]
+    vols=[num(r.get('volume')) for r in rows]
+    vols=[x for x in vols if x is not None]
+    if not closes: return {}
+    price=closes[-1]
+    sma20=_ts_sma(closes,20); sma50=_ts_sma(closes,50); sma100=_ts_sma(closes,100); sma200=_ts_sma(closes,200)
+    ema9=_ts_ema(closes,9); ema20=_ts_ema(closes,20); ema50=_ts_ema(closes,50); ema200=_ts_ema(closes,200)
+    macd,macd_signal,macd_hist=_ts_macd(closes); upper,bbmid,lower=_ts_bbands(closes); stoch=_ts_stoch(closes); atr=_ts_atr(rows); adx,pdi,mdi=_ts_adx(rows)
+    avgvol20=_ts_sma(vols,20); relvol=(vols[-1]/avgvol20) if vols and avgvol20 else None
+    high52=max(closes[-min(len(closes),252):]) if closes else None
+    low52=min(closes[-min(len(closes),252):]) if closes else None
+    prev=closes[-2] if len(closes)>1 else None
+    change=((price-prev)/prev*100) if prev else None
+    trend='Bullish' if price>= (sma20 or price) and (sma20 is None or sma50 is None or sma20>=sma50) else ('Bearish' if sma20 is not None and sma50 is not None and price<=sma20<=sma50 else 'Mixed')
+    return {'historyPoints':len(closes),'price':price,'change':change,'sma20':sma20,'sma50':sma50,'sma100':sma100,'sma200':sma200,'ema9':ema9,'ema20':ema20,'ema50':ema50,'ema200':ema200,'rsi':_ts_rsi(closes),'macd':macd,'macdSignal':macd_signal,'macdHistogram':macd_hist,'bbUpper':upper,'bbMiddle':bbmid,'bbLower':lower,'stochastic':stoch,'atr':atr,'adx':adx,'plusDI':pdi,'minusDI':mdi,'volume':vols[-1] if vols else None,'avgVolume20':avgvol20,'relativeVolume':relvol,'high52':high52,'low52':low52,'trend':trend}
+
+@app.get('/api/technical-screener')
+async def technical_screener(
+    limit: int = Query(60, ge=1, le=500),
+    technical: bool = Query(True),
+    timeframe: str = Query('D'),
+    search: str = Query('', max_length=80),
+    search_type: str = Query('any', pattern='^(any|symbol|company)$'),
+):
+    """Independent NEPSE technical screener.
+
+    The screener deliberately uses the market endpoint directly instead of the
+    Command Center state.  Search is server-side, so a symbol/company that is
+    not in the first liquid slice can still be scanned.  Live market fields
+    are preserved even when historical OHLC is temporarily unavailable.
+    """
+    tf = str(timeframe or 'D').upper()
+    q = str(search or '').strip().upper()
+    st = str(search_type or 'any').lower()
+    key = f'technical-screener:{limit}:{technical}:{tf}:{st}:{q}'
+
+    async def load():
+        errors = []
+        live = []
+        # Fast path: the screener needs only the live security universe.  Do
+        # not wait for the full Command Center (index, sectors, brokers, etc.).
+        try:
+            raw = await production_call('live_market')
+            live = deep_rows(raw, ('content','data','results','rows'))
+        except Exception as exc:
+            errors.append(f'production live market: {exc}')
+        if not live:
+            try:
+                raw = await nepse_call(['live_market','today_price'], page=1, size=500)
+                live = deep_rows(raw, ('content','data','results','rows'))
+            except Exception as exc:
+                errors.append(f'NEPSE live market: {exc}')
+        if not live:
+            try:
+                market = await get_market()
+                live = market.get('live') or []
+            except Exception as exc:
+                errors.append(f'market fallback: {exc}')
+
+        def symbol_of(r):
+            return str(pick(r, ['symbol','ticker','securitySymbol','code','stockSymbol'], '') or '').upper().strip()
+        def company_of(r):
+            return str(pick(r, ['companyName','company','securityName','name','company_name'], '') or '').strip()
+        def turnover_key(r):
+            return num(pick(r,['turnover','totalTurnover','value','totalTradedValue'])) or 0
+
+        # Server-side search.  This is important: the browser must not be
+        # limited to whatever happened to be in a previous 150-row snapshot.
+        if q:
+            def match(r):
+                sym, name = symbol_of(r), company_of(r).upper()
+                if st == 'symbol': return q in sym
+                if st == 'company': return q in name
+                return q in sym or q in name
+            live = [r for r in live if match(r)]
+            # A search should never silently disappear just because the live
+            # snapshot contains no company-name field. Resolve exact symbols.
+            if not live and st in ('any','symbol'):
+                try:
+                    company = await resolve_company(q)
+                    if company:
+                        cid = pick(company,['id','securityId','security_id'])
+                        live = [company]
+                        if cid is not None:
+                            try:
+                                snap = await nepse_call(['today_price'], page=1, size=500)
+                                rows = deep_rows(snap, ('content','data','results','rows'))
+                                exact = [r for r in rows if symbol_of(r) == q]
+                                if exact: live = exact
+                            except Exception:
+                                pass
+                except Exception as exc:
+                    errors.append(f'resolve search symbol: {exc}')
+        else:
+            live = sorted(live, key=turnover_key, reverse=True)[:limit]
+
+        # Search results are intentionally small; all-stock scans are capped
+        # for responsiveness while still showing real live market rows.
+        if q:
+            live = live[:max(1, min(limit, 25))]
+
+        sem = asyncio.Semaphore(8)
+        async def one(r):
+            symbol = symbol_of(r)
+            if not symbol:
+                return None
+            base = dict(r)
+            base['symbol'] = symbol
+            base['companyName'] = company_of(r) or symbol
+            if technical:
+                async with sem:
+                    try:
+                        h = await get_history(symbol)
+                        rows = h.get('data', []) if isinstance(h, dict) else []
+                        rows = _aggregate_technical_history(rows, tf)
+                        base.update(_technical_snapshot(rows))
+                        base['historySource'] = h.get('source') if isinstance(h, dict) else None
+                    except Exception as exc:
+                        base['historyPoints'] = 0
+                        base['technicalError'] = str(exc)
+            # Never lose the real live snapshot just because history is absent.
+            base['price'] = num(pick(r,['price','ltp','lastPrice','lastTradedPrice','close','closePrice'])) if num(pick(r,['price','ltp','lastPrice','lastTradedPrice','close','closePrice'])) is not None else base.get('price')
+            base['change'] = num(pick(r,['percentageChange','percentChange','changePercent','perChange','pChange','changePercentage']))
+            base['volume'] = num(pick(r,['volume','totalTradedQuantity','quantity','tradedQuantity'])) if num(pick(r,['volume','totalTradedQuantity','quantity','tradedQuantity'])) is not None else base.get('volume')
+            base['turnover'] = num(pick(r,['turnover','totalTurnover','value','totalTradedValue'])) if num(pick(r,['turnover','totalTurnover','value','totalTradedValue'])) is not None else base.get('turnover')
+            base['marketCap'] = num(pick(r,['marketCap','marketCapitalization','totalMarketCapitalization']))
+            base['pe'] = num(pick(r,['pe','peRatio','priceEarningsRatio']))
+            return base
+
+        results = await asyncio.gather(*(one(r) for r in live))
+        results = [r for r in results if r]
+        return {
+            'ok': bool(results),
+            'source': f'NEPSE live market + OHLCV history ({tf})',
+            'timeframe': tf,
+            'updatedAt': now_iso(),
+            'count': len(results),
+            'universeCount': len(live) if q else len(live),
+            'data': results,
+            'errors': errors,
+        }
+    return await cached(key, load)
+
 @app.get("/PriceVolumeHistory")
 async def price_volume_history(symbol: str):
     return await get_history(symbol)

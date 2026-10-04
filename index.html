@@ -1667,7 +1667,7 @@ body{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",san
 <div class="bottom mobile-exact-bottom"><nav class="nav">
   <button class="active" onclick="setNav(this,'Home')"><span class="ni">⌂</span>Home</button>
   <button onclick="setNav(this,'Markets')"><span class="ni">⌁</span>Market</button>
-  <button onclick="openModule('Screener & Quant')"><span class="ni">⌕</span>Screener</button>
+  <button onclick="openTechnicalScreener()"><span class="ni">⌕</span>Screener</button>
   <button onclick="openModule('Portfolio')"><span class="ni">▣</span>Portfolio</button>
   <button onclick="openFeatures()"><span class="ni">⋮</span>More</button>
 </nav></div>
@@ -1693,7 +1693,7 @@ body{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",san
       <button class="feature-item" onclick="openFeatureWorkspace('stock-xray-v7','🩻 Stock X-Ray')"><b>🩻 Stock X-Ray</b><small>Fundamentals, valuation, technicals and activity</small></button>
       <button class="feature-item" onclick="openFeatureWorkspace('professional-charting-v8','📈 Professional Charting')"><b>📈 Professional Charting</b><small>Candles, volume and technical indicators</small></button>
       <div class="feature-group">SCREENER & FLOW</div>
-      <button class="feature-item" onclick="openFeatureWorkspace('advanced-screener-v10','🔎 Advanced Screener')"><b>🔎 Advanced Screener</b><small>Multi-factor filters, technical and liquidity scans</small></button>
+      <button class="feature-item" onclick="openTechnicalScreener()"><b>🔎 Advanced Screener</b><small>Multi-factor filters, technical and liquidity scans</small></button>
       <button class="feature-item" onclick="openFeatureWorkspace('floorsheet-broker-v4','🏦 Floorsheet & Brokers')"><b>🏦 Floorsheet & Brokers</b><small>Transactions, broker flow, bulk and unusual activity</small></button>
       <button class="feature-item" onclick="openFeatureWorkspace('sector-breadth-v5','🗺️ Sector Heatmap')"><b>🗺️ Sector Heatmap</b><small>Sector performance, breadth and constituent drill-down</small></button>
       <button class="feature-item" onclick="openFeatureWorkspace('portfolioZone','💼 Portfolio')"><b>💼 Portfolio</b><small>Holdings, average cost, P/L and dividends</small></button>
@@ -4342,134 +4342,55 @@ document.addEventListener('DOMContentLoaded',()=>{document.querySelectorAll('.mi
 </script>
 
 
-<style>
-/* NEPSE Pulse V10 — Advanced Screener 2.0 */
-.sc10{margin:24px 16px 36px;border:1px solid var(--border,#e5e7eb);border-radius:24px;background:var(--card,#fff);box-shadow:0 10px 35px rgba(15,23,42,.07);overflow:hidden}
-.sc10 *{box-sizing:border-box}.sc10-head{padding:22px;display:flex;justify-content:space-between;gap:15px;align-items:flex-start}.sc10-kicker{font-size:11px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;opacity:.6}.sc10 h2{margin:5px 0;font-size:24px}.sc10-sub{margin:0;font-size:13px;opacity:.62}
-.sc10-status{font-size:11px;font-weight:800;white-space:nowrap}.sc10-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#999;margin-right:6px}
-.sc10-presets{display:flex;gap:7px;padding:0 22px 15px;overflow:auto}.sc10-preset{border:1px solid var(--border,#e5e7eb);background:transparent;color:inherit;border-radius:999px;padding:8px 12px;font-size:10px;font-weight:800;white-space:nowrap;cursor:pointer}.sc10-preset.active{background:#111827;color:#fff;border-color:#111827}
-.sc10-layout{display:grid;grid-template-columns:290px 1fr;gap:14px;padding:0 22px 22px}.sc10-panel{border:1px solid var(--border,#e5e7eb);border-radius:18px;padding:15px}.sc10-panel h3{font-size:14px;margin:0 0 12px}.sc10-field{margin:10px 0}.sc10-field label{display:block;font-size:10px;font-weight:800;opacity:.58;margin-bottom:5px}.sc10-field input,.sc10-field select{width:100%;border:1px solid var(--border,#d9dde5);border-radius:10px;padding:9px;background:var(--bg,#fff);color:inherit;font-size:12px}
-.sc10-row{display:grid;grid-template-columns:1fr 1fr;gap:7px}.sc10-check{display:flex;align-items:center;gap:7px;font-size:11px;margin:7px 0}.sc10-actions{display:flex;gap:7px;margin-top:13px}.sc10-btn{border:0;border-radius:10px;padding:10px 12px;background:#111827;color:#fff;font-weight:800;font-size:11px;cursor:pointer;flex:1}.sc10-btn.alt{background:transparent;color:inherit;border:1px solid var(--border,#d9dde5)}
-.sc10-summary{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:12px}.sc10-stat{border:1px solid var(--border,#e5e7eb);border-radius:13px;padding:10px}.sc10-stat b{display:block;font-size:16px}.sc10-stat span{font-size:9px;opacity:.56}.sc10-scroll{overflow:auto}.sc10-table{width:100%;border-collapse:collapse;font-size:11px}.sc10-table th,.sc10-table td{padding:8px 5px;border-bottom:1px solid var(--border,#e5e7eb);white-space:nowrap;text-align:right}.sc10-table th{font-size:9px;text-transform:uppercase;opacity:.55}.sc10-table th:first-child,.sc10-table td:first-child{text-align:left}.sc10-table tr:hover{background:rgba(127,127,127,.05)}.sc10-up{color:#16864a}.sc10-down{color:#c0392b}.sc10-chip{display:inline-block;border-radius:999px;padding:4px 7px;background:rgba(127,127,127,.1);font-size:9px;font-weight:800;margin:1px}.sc10-empty{padding:25px;text-align:center;border:1px dashed var(--border,#d9dde5);border-radius:14px;opacity:.55;font-size:12px}.sc10-note{font-size:10px;opacity:.55;line-height:1.45;margin-top:9px}
-@media(max-width:850px){.sc10{margin:16px 10px 26px;border-radius:19px}.sc10-head{padding:17px}.sc10-presets{padding-left:17px;padding-right:17px}.sc10-layout{grid-template-columns:1fr;padding:0 17px 17px}.sc10-summary{grid-template-columns:1fr 1fr}.sc10-stat:last-child{grid-column:span 2}}
+<style id="pulse-technical-screener-v11">
+.ts11{margin:24px 10px 36px;border:1px solid var(--line);border-radius:24px;background:var(--panel);box-shadow:0 10px 35px rgba(15,23,42,.07);overflow:hidden}.ts11 *{box-sizing:border-box}.ts11-head{padding:20px 18px 14px;display:flex;justify-content:space-between;gap:14px;align-items:flex-start}.ts11-kicker{font-size:10px;font-weight:900;letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}.ts11 h2{margin:5px 0 4px;font-size:25px;letter-spacing:-.5px}.ts11-sub{margin:0;color:var(--muted);font-size:12px;line-height:1.45}.ts11-status{font-size:10px;font-weight:900;white-space:nowrap;padding-top:5px}.ts11-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#999;margin-right:6px}.ts11-presets{display:flex;gap:7px;padding:0 18px 14px;overflow:auto}.ts11-preset{border:1px solid var(--line);background:var(--panel2);color:inherit;border-radius:999px;padding:8px 12px;font-size:10px;font-weight:850;white-space:nowrap;cursor:pointer}.ts11-preset.active{background:var(--text);color:var(--panel);border-color:var(--text)}.ts11-layout{display:grid;grid-template-columns:305px 1fr;gap:12px;padding:0 18px 20px}.ts11-panel{border:1px solid var(--line);border-radius:18px;padding:14px;background:var(--panel)}.ts11-panel h3{margin:0 0 11px;font-size:14px}.ts11-field{margin:9px 0}.ts11-field label{display:block;font-size:10px;font-weight:850;color:var(--muted);margin-bottom:5px}.ts11-field input,.ts11-field select{width:100%;border:1px solid var(--line);border-radius:10px;padding:9px;background:var(--panel);color:inherit;font-size:12px;outline:none}.ts11-row{display:grid;grid-template-columns:1fr 1fr;gap:7px}.ts11-check{display:flex;align-items:center;gap:7px;font-size:11px;margin:8px 0}.ts11-actions{display:flex;gap:7px;margin-top:12px}.ts11-btn{border:0;border-radius:10px;padding:10px 12px;background:var(--accent);color:#fff;font-weight:850;font-size:11px;cursor:pointer;flex:1}.ts11-btn.alt{background:var(--panel2);color:inherit;border:1px solid var(--line)}.ts11-note{font-size:9px;color:var(--muted);line-height:1.45;margin-top:9px}.ts11-summary{display:grid;grid-template-columns:repeat(5,1fr);gap:7px;margin-bottom:10px}.ts11-stat{border:1px solid var(--line);border-radius:13px;padding:9px;background:var(--panel2)}.ts11-stat b{display:block;font-size:15px}.ts11-stat span{font-size:9px;color:var(--muted)}.ts11-table-wrap{overflow:auto;border:1px solid var(--line);border-radius:17px}.ts11-table{width:100%;border-collapse:collapse;font-size:11px;min-width:1050px}.ts11-table th,.ts11-table td{padding:9px 7px;border-bottom:1px solid var(--line);white-space:nowrap;text-align:right}.ts11-table th{position:sticky;top:0;background:var(--panel2);color:var(--muted);font-size:9px;text-transform:uppercase;z-index:1}.ts11-table th:first-child,.ts11-table td:first-child{text-align:left}.ts11-table tr{cursor:pointer}.ts11-table tr:hover{background:rgba(65,105,225,.05)}.ts11-up{color:var(--accent2)}.ts11-down{color:var(--danger)}.ts11-chip{display:inline-block;border-radius:999px;padding:4px 7px;background:var(--panel2);font-size:9px;font-weight:850;margin:1px}.ts11-chip.buy{background:rgba(22,134,74,.12);color:var(--accent2)}.ts11-chip.sell{background:rgba(192,57,43,.12);color:var(--danger)}.ts11-empty{padding:28px;text-align:center;color:var(--muted);font-size:12px}.ts11-loading{padding:28px;text-align:center;color:var(--muted);font-size:12px}.ts11-divider{height:1px;background:var(--line);margin:13px 0}.ts11-mini{display:flex;gap:6px;flex-wrap:wrap}.ts11-mini span{font-size:9px;padding:5px 7px;border-radius:8px;background:var(--panel2);color:var(--muted)}
+@media(max-width:850px){.ts11-head{padding:17px}.ts11-layout{grid-template-columns:minmax(0,1fr);padding:0 10px 16px}.ts11-layout>*,.ts11-panel,.ts11-table-wrap{min-width:0;width:100%}.ts11-presets{padding-left:10px;padding-right:10px}.ts11-summary{grid-template-columns:1fr 1fr}.ts11-stat:last-child{grid-column:span 2}.ts11-actions{display:grid;grid-template-columns:1fr;gap:8px;width:100%}.ts11-btn{width:100%;min-width:0}.ts11{margin:12px 6px 25px;max-width:calc(100% - 12px)}.ts11-field input,.ts11-field select{max-width:100%}}
 </style>
-
-<section id="advanced-screener-v10" class="sc10 pulse-home-feature-module">
-  <div class="sc10-head">
-    <div>
-      <div class="sc10-kicker">Pulse Quant · V10</div>
-      <h2>Advanced Screener 2.0</h2>
-      <p class="sc10-sub">Multi-factor screening across price action, liquidity and available technical data.</p>
-    </div>
-    <div class="sc10-status"><span id="sc10Dot" class="sc10-dot"></span><span id="sc10Status">WAITING FOR FEED</span></div>
+<section id="advanced-screener-v10" class="ts11 pulse-home-feature-module" aria-label="Technical Screener">
+  <div class="ts11-head"><div><div class="ts11-kicker">NEPSE Pulse · Technical Analysis</div><h2>Technical Screener</h2><p class="ts11-sub">Scan the NEPSE universe using price, trend, momentum, volatility and volume conditions. This module runs independently from Command Center.</p></div><div class="ts11-status"><span id="ts11Dot" class="ts11-dot"></span><span id="ts11Status">READY</span></div></div>
+  <div class="ts11-presets">
+    <button class="ts11-preset active" data-preset="all">All Stocks</button><button class="ts11-preset" data-preset="momentum">Momentum</button><button class="ts11-preset" data-preset="bullish">Bullish Trend</button><button class="ts11-preset" data-preset="breakout">Breakout</button><button class="ts11-preset" data-preset="oversold">RSI Oversold</button><button class="ts11-preset" data-preset="volume">Volume Shock</button><button class="ts11-preset" data-preset="macd">MACD Bullish</button>
   </div>
-
-  <div class="sc10-presets">
-    <button class="sc10-preset active" data-preset="all">All Stocks</button>
-    <button class="sc10-preset" data-preset="momentum">Momentum</button>
-    <button class="sc10-preset" data-preset="value">Value Data</button>
-    <button class="sc10-preset" data-preset="volume">Volume Shock</button>
-    <button class="sc10-preset" data-preset="breakout">Breakout Watch</button>
-    <button class="sc10-preset" data-preset="oversold">RSI Oversold</button>
-    <button class="sc10-preset" data-preset="bullish">Bullish Trend</button>
-  </div>
-
-  <div class="sc10-layout">
-    <aside class="sc10-panel">
-      <h3>Filters</h3>
-      <div class="sc10-field"><label>Search symbol / company</label><input id="sc10Search" placeholder="e.g. NABIL"></div>
-      <div class="sc10-row">
-        <div class="sc10-field"><label>Min change %</label><input id="sc10MinCh" type="number" step=".1" placeholder="Any"></div>
-        <div class="sc10-field"><label>Max change %</label><input id="sc10MaxCh" type="number" step=".1" placeholder="Any"></div>
-      </div>
-      <div class="sc10-row">
-        <div class="sc10-field"><label>Min volume</label><input id="sc10MinVol" type="number" step="1" placeholder="Any"></div>
-        <div class="sc10-field"><label>Min turnover</label><input id="sc10MinTurn" type="number" step="1" placeholder="Any"></div>
-      </div>
-      <div class="sc10-row">
-        <div class="sc10-field"><label>Min market cap</label><input id="sc10MinCap" type="number" step="1" placeholder="Any"></div>
-        <div class="sc10-field"><label>Max P/E</label><input id="sc10MaxPE" type="number" step=".1" placeholder="Any"></div>
-      </div>
-      <div class="sc10-field"><label>RSI condition</label><select id="sc10Rsi"><option value="any">Any</option><option value="lt30">Below 30</option><option value="lt50">Below 50</option><option value="gt50">Above 50</option><option value="gt70">Above 70</option></select></div>
-      <div class="sc10-field"><label>Trend</label><select id="sc10Trend"><option value="any">Any</option><option value="bull">Bullish: price ≥ SMA20 ≥ EMA50</option><option value="bear">Bearish: price ≤ SMA20 ≤ EMA50</option></select></div>
-      <div class="sc10-field"><label>Sort by</label><select id="sc10Sort"><option value="change">Change %</option><option value="turnover">Turnover</option><option value="volume">Volume</option><option value="price">Price</option><option value="rsi">RSI</option><option value="marketCap">Market Cap</option><option value="pe">P/E</option><option value="score">Signal Score</option></select></div>
-      <label class="sc10-check"><input id="sc10OnlyTechnical" type="checkbox"> Require technical history</label>
-      <label class="sc10-check"><input id="sc10OnlyFundamental" type="checkbox"> Require fundamentals</label>
-      <div class="sc10-actions"><button id="sc10Run" class="sc10-btn">Run Screen</button><button id="sc10Clear" class="sc10-btn alt">Clear</button></div>
-      <div class="sc10-note">The screener uses only fields supplied by the Central Feed. Missing fundamentals or history are not invented.</div>
+  <div class="ts11-layout">
+    <aside class="ts11-panel">
+      <h3>Screen Conditions</h3>
+      <div class="ts11-field"><label>Symbol / company</label><div class="ts11-row"><select id="ts11SearchType" aria-label="Search by"><option value="any">Any</option><option value="symbol">Symbol</option><option value="company">Company</option></select><input id="ts11Search" placeholder="Search symbol or company…"></div></div>
+      <div class="ts11-field"><label>Timeframe</label><select id="ts11Tf"><option value="D">Daily</option><option value="1W">Weekly</option><option value="1M">Monthly</option></select></div>
+      <div class="ts11-divider"></div>
+      <div class="ts11-row"><div class="ts11-field"><label>RSI minimum</label><input id="ts11RsiMin" type="number" step="1" placeholder="Any"></div><div class="ts11-field"><label>RSI maximum</label><input id="ts11RsiMax" type="number" step="1" placeholder="Any"></div></div>
+      <div class="ts11-field"><label>Trend</label><select id="ts11Trend"><option value="any">Any</option><option value="bull">Bullish: Price ≥ SMA20 ≥ SMA50</option><option value="bear">Bearish: Price ≤ SMA20 ≤ SMA50</option></select></div>
+      <div class="ts11-field"><label>Moving average condition</label><select id="ts11MA"><option value="any">Any</option><option value="above20">Price above EMA20</option><option value="above50">Price above EMA50</option><option value="golden">SMA20 above SMA50</option><option value="death">SMA20 below SMA50</option></select></div>
+      <div class="ts11-field"><label>MACD</label><select id="ts11Macd"><option value="any">Any</option><option value="bull">MACD above signal</option><option value="bear">MACD below signal</option></select></div>
+      <div class="ts11-row"><div class="ts11-field"><label>Relative volume ≥</label><input id="ts11RelVol" type="number" step=".1" placeholder="1.5"></div><div class="ts11-field"><label>Min change %</label><input id="ts11MinCh" type="number" step=".1" placeholder="Any"></div></div>
+      <div class="ts11-row"><div class="ts11-field"><label>Price above SMA20</label><select id="ts11PriceSma"><option value="any">Any</option><option value="yes">Yes</option><option value="no">No</option></select></div><div class="ts11-field"><label>Near 52W high %</label><input id="ts11NearHigh" type="number" step=".1" placeholder="e.g. 5"></div></div>
+      <div class="ts11-field"><label>Sort by</label><select id="ts11Sort"><option value="score">Signal Score</option><option value="change">Change %</option><option value="rsi">RSI</option><option value="relativeVolume">Relative Volume</option><option value="turnover">Turnover</option><option value="price">Price</option><option value="adx">ADX</option></select></div>
+      <label class="ts11-check"><input id="ts11OnlyHistory" type="checkbox" checked> Require technical history</label>
+      <div class="ts11-actions"><button id="ts11Run" class="ts11-btn">Run Scan</button><button id="ts11Clear" class="ts11-btn alt">Reset</button></div>
+      <div class="ts11-note">Indicators are calculated from the historical OHLCV data returned by the NEPSE Pulse backend. No indicator value is fabricated when history is unavailable.</div>
     </aside>
-
     <main>
-      <div id="sc10Summary" class="sc10-summary"></div>
-      <div class="sc10-panel">
-        <div class="sc10-scroll"><table class="sc10-table">
-          <thead><tr><th>Security</th><th>Price</th><th>Change</th><th>Volume</th><th>Turnover</th><th>RSI</th><th>SMA20</th><th>EMA50</th><th>Market Cap</th><th>P/E</th><th>Signal</th></tr></thead>
-          <tbody id="sc10Results"></tbody>
-        </table></div>
-      </div>
+      <div id="ts11Summary" class="ts11-summary"></div>
+      <div class="ts11-panel" style="padding:10px"><div class="ts11-mini"><span id="ts11Universe">Universe: —</span><span id="ts11Updated">Updated: —</span><span>Tap a row → Professional Charting</span></div></div>
+      <div class="ts11-table-wrap"><table class="ts11-table"><thead><tr><th>Symbol</th><th>LTP</th><th>Change</th><th>RSI</th><th>SMA20</th><th>SMA50</th><th>EMA20</th><th>EMA50</th><th>MACD</th><th>Rel Vol</th><th>ADX</th><th>52W High</th><th>Signal</th></tr></thead><tbody id="ts11Results"><tr><td colspan="13"><div class="ts11-loading">Press Run Scan to load the technical universe…</div></td></tr></tbody></table></div>
     </main>
   </div>
 </section>
-
-<script>
-(function(){
-'use strict';
-const $=id=>document.getElementById(id);
-let feed={securities:[],liveMarket:[],status:'WAITING'}, data=[], preset='all';
-function num(v){const n=Number(v);return Number.isFinite(n)?n:null}
-function fmt(v,d=2){const n=num(v);return n==null?'—':n.toLocaleString(undefined,{maximumFractionDigits:d})}
-function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-function val(r,ks){for(const k of ks){const n=num(r?.[k]);if(n!=null)return n}return null}
-function txt(r,ks){for(const k of ks)if(r?.[k]!=null&&String(r[k]).trim()!=='')return r[k];return null}
-function history(r){const raw=r?.history||r?.priceHistory||r?.prices||r?.data;if(!Array.isArray(raw))return[];return raw.map(x=>val(x,['close','price','ltp','lastPrice'])).filter(x=>x!=null)}
-function sma(a,n){return a.length>=n?a.slice(-n).reduce((x,y)=>x+y,0)/n:null}
-function ema(a,n){if(a.length<n)return null;let e=a.slice(0,n).reduce((x,y)=>x+y,0)/n,k=2/(n+1);for(let i=n;i<a.length;i++)e=a[i]*k+e*(1-k);return e}
-function rsi(a,n=14){if(a.length<n+1)return null;let g=0,l=0;for(let i=1;i<=n;i++){let d=a[i]-a[i-1];g+=Math.max(d,0);l+=Math.max(-d,0)}let ag=g/n,al=l/n;for(let i=n+1;i<a.length;i++){let d=a[i]-a[i-1];ag=(ag*(n-1)+Math.max(d,0))/n;al=(al*(n-1)+Math.max(-d,0))/n}return al===0?100:100-(100/(1+ag/al))}
-function rows(){const all=[...(feed.liveMarket||[]),...(feed.securities||[])],seen=new Set(),o=[];for(const r of all){const symbol=String(r.symbol||r.ticker||r.securitySymbol||r.code||'').trim().toUpperCase();if(!symbol||seen.has(symbol))continue;seen.add(symbol);o.push({...r,symbol})}return o}
-function enrich(r){
- const h=history(r),p=val(r,['price','ltp','lastPrice','close']),ch=val(r,['changePercent','percentageChange','percentChange','changePct','change']),vol=val(r,['volume','totalTradedQuantity','quantity']),turn=val(r,['turnover','totalTurnover','value']);
- const cap=val(r,['marketCap','marketCapitalization','totalMarketCapitalization']),pe=val(r,['pe','peRatio','priceEarningsRatio']),eps=val(r,['eps','earningPerShare']),bv=val(r,['bvps','bookValuePerShare']);
- const s=sma(h,20),e=ema(h,50),rr=rsi(h),high=h.length?Math.max(...h):null;
- let score=0;if(ch!=null){if(ch>0)score+=2;if(ch>=5)score+=1;if(ch<=-5)score-=1}if(rr!=null){if(rr>50)score++;if(rr>70)score++;if(rr<30)score+=2}if(p!=null&&s!=null){if(p>=s)score++;else score--}if(p!=null&&e!=null){if(p>=e)score++;else score--}if(vol!=null&&turn!=null)score++;
- return {...r,price:p,change:ch,volume:vol,turnover:turn,marketCap:cap,pe,eps,bv,sma20:s,ema50:e,rsi:rr,high,historyPoints:h.length,score};
-}
-function technicalTrend(x){if(x.price==null||x.sma20==null||x.ema50==null)return'—';if(x.price>=x.sma20&&x.sma20>=x.ema50)return'Bullish';if(x.price<=x.sma20&&x.sma20<=x.ema50)return'Bearish';return'Mixed'}
-function pass(x){
- const g=id=>$(id).value.trim(),search=g('sc10Search').toUpperCase(),minCh=num(g('sc10MinCh')),maxCh=num(g('sc10MaxCh')),minVol=num(g('sc10MinVol')),minTurn=num(g('sc10MinTurn')),minCap=num(g('sc10MinCap')),maxPE=num(g('sc10MaxPE')),r=g('sc10Rsi'),trend=g('sc10Trend');
- const name=String(txt(x,['name','companyName','securityName'])||'').toUpperCase();
- if(search&&!x.symbol.includes(search)&&!name.includes(search))return false;
- if(minCh!=null&&(x.change==null||x.change<minCh))return false;if(maxCh!=null&&(x.change==null||x.change>maxCh))return false;if(minVol!=null&&(x.volume==null||x.volume<minVol))return false;if(minTurn!=null&&(x.turnover==null||x.turnover<minTurn))return false;if(minCap!=null&&(x.marketCap==null||x.marketCap<minCap))return false;if(maxPE!=null&&(x.pe==null||x.pe>maxPE))return false;
- if(r==='lt30'&&(x.rsi==null||x.rsi>=30))return false;if(r==='lt50'&&(x.rsi==null||x.rsi>=50))return false;if(r==='gt50'&&(x.rsi==null||x.rsi<=50))return false;if(r==='gt70'&&(x.rsi==null||x.rsi<=70))return false;
- if(trend==='bull'&&technicalTrend(x)!=='Bullish')return false;if(trend==='bear'&&technicalTrend(x)!=='Bearish')return false;
- if($('sc10OnlyTechnical').checked&&x.historyPoints<20)return false;if($('sc10OnlyFundamental').checked&&x.marketCap==null&&x.pe==null&&x.eps==null&&x.bv==null)return false;
- if(preset==='momentum'&&(x.change==null||x.change<=0||x.rsi==null||x.rsi<50))return false;
- if(preset==='value'&&x.pe==null)return false;
- if(preset==='volume'&&(x.volume==null||x.turnover==null))return false;
- if(preset==='breakout'&&(x.high==null||x.price==null||x.historyPoints<20||x.price<x.high*.97))return false;
- if(preset==='oversold'&&(x.rsi==null||x.rsi>=30))return false;
- if(preset==='bullish'&&technicalTrend(x)!=='Bullish')return false;
- return true;
-}
-function run(){
- data=rows().map(enrich).filter(pass);const sort=$('sc10Sort').value;
- const key={change:'change',turnover:'turnover',volume:'volume',price:'price',rsi:'rsi',marketCap:'marketCap',pe:'pe',score:'score'}[sort]||'change';
- data.sort((a,b)=>{const av=a[key],bv=b[key];if(av==null&&bv==null)return 0;if(av==null)return 1;if(bv==null)return-1;return (bv-av)});
- const avg=data.filter(x=>x.change!=null).reduce((s,x)=>s+x.change,0)/(data.filter(x=>x.change!=null).length||1);
- const bull=data.filter(x=>technicalTrend(x)==='Bullish').length,tech=data.filter(x=>x.historyPoints>=20).length;
- $('sc10Summary').innerHTML=`<div class="sc10-stat"><b>${data.length}</b><span>Matches</span></div><div class="sc10-stat"><b>${fmt(avg,2)}%</b><span>Average change</span></div><div class="sc10-stat"><b>${bull}</b><span>Bullish trend</span></div><div class="sc10-stat"><b>${tech}</b><span>Technical history</span></div><div class="sc10-stat"><b>${fmt(data.reduce((s,x)=>s+(x.turnover||0),0))}</b><span>Matched turnover</span></div>`;
- if(!data.length){$('sc10Results').innerHTML=`<tr><td colspan="11"><div class="sc10-empty">No securities match the current screen.</div></td></tr>`;return}
- $('sc10Results').innerHTML=data.slice(0,300).map(x=>{const sig=technicalTrend(x);return`<tr><td><b>${esc(x.symbol)}</b><br><span style="font-size:9px;opacity:.55">${esc(txt(x,['name','companyName','securityName'])||'')}</span></td><td>${fmt(x.price)}</td><td class="${x.change>0?'sc10-up':x.change<0?'sc10-down':''}">${x.change==null?'—':(x.change>0?'+':'')+fmt(x.change)+'%'}</td><td>${fmt(x.volume,0)}</td><td>${fmt(x.turnover)}</td><td>${fmt(x.rsi,1)}</td><td>${fmt(x.sma20)}</td><td>${fmt(x.ema50)}</td><td>${fmt(x.marketCap)}</td><td>${fmt(x.pe,2)}</td><td><span class="sc10-chip ${sig==='Bullish'?'sc10-up':sig==='Bearish'?'sc10-down':''}">${sig}</span><span class="sc10-chip">Score ${x.score}</span></td></tr>`}).join('');
-}
-function clearAll(){['sc10Search','sc10MinCh','sc10MaxCh','sc10MinVol','sc10MinTurn','sc10MinCap','sc10MaxPE'].forEach(id=>$(id).value='');$('sc10Rsi').value='any';$('sc10Trend').value='any';$('sc10Sort').value='change';$('sc10OnlyTechnical').checked=false;$('sc10OnlyFundamental').checked=false;preset='all';document.querySelectorAll('.sc10-preset').forEach(x=>x.classList.toggle('active',x.dataset.preset==='all'));run()}
-async function sync(x){if(!x)return;feed={...feed,...x,securities:x.securities||feed.securities||[],liveMarket:x.liveMarket||feed.liveMarket||[]};const st=String(feed.status||'WAITING').toUpperCase();$('sc10Status').textContent=st;$('sc10Dot').style.background=st.includes('LIVE')?'#20a464':st.includes('CACHE')?'#d29b19':'#999';if(!(feed.liveMarket||[]).length){try{const base=(window.NEPSE_PULSE_BACKEND_URL||'').replace(/\/$/,'');const r=await fetch(base+'/api/screener?limit=500',{cache:'no-store',headers:{Accept:'application/json'}});if(r.ok){const d=await r.json();feed.liveMarket=Array.isArray(d.data)?d.data:feed.liveMarket;}}catch(e){}}run()}
-document.addEventListener('DOMContentLoaded',()=>{
- document.querySelectorAll('.sc10-preset').forEach(b=>b.onclick=()=>{document.querySelectorAll('.sc10-preset').forEach(x=>x.classList.remove('active'));b.classList.add('active');preset=b.dataset.preset;run()});
- $('sc10Run').onclick=run;$('sc10Clear').onclick=clearAll;
- ['sc10Search','sc10MinCh','sc10MaxCh','sc10MinVol','sc10MinTurn','sc10MinCap','sc10MaxPE','sc10Rsi','sc10Trend','sc10Sort','sc10OnlyTechnical','sc10OnlyFundamental'].forEach(id=>$(id).addEventListener('change',run));
- window.addEventListener('pulse-central-snapshot',e=>sync(e.detail));
- window.addEventListener('pulse-feed-update',()=>{const st=window.PULSE_FEED_ENGINE?.state?.();if(st)sync(st)});
- const st=window.PULSE_FEED_ENGINE?.state?.();if(st)sync(st);else run();
-});
+<script id="pulse-technical-screener-v11-js">
+(function(){'use strict';
+const $=id=>document.getElementById(id); let all=[]; let preset='all'; let loaded=false;
+const base=()=>String(window.NEPSE_PULSE_BACKEND_URL||'').replace(/\/$/,'');
+const n=v=>{const x=Number(v);return Number.isFinite(x)?x:null};
+const fmt=(v,d=2)=>{const x=n(v);return x==null?'—':x.toLocaleString(undefined,{maximumFractionDigits:d})};
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function score(x){let s=0;if(x.rsi!=null){if(x.rsi>50)s+=1;if(x.rsi>=55&&x.rsi<=70)s+=2;if(x.rsi<30)s+=1}if(x.price!=null&&x.sma20!=null)s+=x.price>=x.sma20?2:-1;if(x.sma20!=null&&x.sma50!=null)s+=x.sma20>=x.sma50?2:-1;if(x.ema20!=null&&x.ema50!=null)s+=x.ema20>=x.ema50?2:-1;if(x.macd!=null&&x.macdSignal!=null)s+=x.macd>=x.macdSignal?2:-1;if(x.relativeVolume!=null&&x.relativeVolume>=1.5)s+=2;if(x.adx!=null&&x.adx>=25)s+=1;return s}
+function trend(x){if(x.price!=null&&x.sma20!=null&&x.sma50!=null){if(x.price>=x.sma20&&x.sma20>=x.sma50)return'Bullish';if(x.price<=x.sma20&&x.sma20<=x.sma50)return'Bearish'}return'Mixed'}
+function passes(x){const q=String($('ts11Search').value||'').trim().toUpperCase();const name=String(x.companyName||x.name||'').toUpperCase();const searchType=$('ts11SearchType').value||'any';if(q&&searchType==='symbol'&&!x.symbol.includes(q))return false;if(q&&searchType==='company'&&!name.includes(q))return false;if(q&&searchType==='any'&&!x.symbol.includes(q)&&!name.includes(q))return false;const rmin=n($('ts11RsiMin').value),rmax=n($('ts11RsiMax').value),rv=n($('ts11RelVol').value),mc=n($('ts11MinCh').value),nh=n($('ts11NearHigh').value);if($('ts11OnlyHistory').checked&&(!x.historyPoints||x.historyPoints<20))return false;if(rmin!=null&&(x.rsi==null||x.rsi<rmin))return false;if(rmax!=null&&(x.rsi==null||x.rsi>rmax))return false;if(rv!=null&&(x.relativeVolume==null||x.relativeVolume<rv))return false;if(mc!=null&&(x.change==null||x.change<mc))return false;const tr=trend(x);if($('ts11Trend').value==='bull'&&tr!=='Bullish')return false;if($('ts11Trend').value==='bear'&&tr!=='Bearish')return false;const ma=$('ts11MA').value;if(ma==='above20'&&(x.price==null||x.ema20==null||x.price<x.ema20))return false;if(ma==='above50'&&(x.price==null||x.ema50==null||x.price<x.ema50))return false;if(ma==='golden'&&(x.sma20==null||x.sma50==null||x.sma20<x.sma50))return false;if(ma==='death'&&(x.sma20==null||x.sma50==null||x.sma20>x.sma50))return false;const md=$('ts11Macd').value;if(md==='bull'&&(x.macd==null||x.macdSignal==null||x.macd<x.macdSignal))return false;if(md==='bear'&&(x.macd==null||x.macdSignal==null||x.macd>x.macdSignal))return false;const ps=$('ts11PriceSma').value;if(ps==='yes'&&(x.price==null||x.sma20==null||x.price<x.sma20))return false;if(ps==='no'&&(x.price==null||x.sma20==null||x.price>=x.sma20))return false;if(nh!=null&&(x.high52==null||x.price==null||((x.high52-x.price)/x.high52*100)>nh))return false;if(preset==='momentum'&&(x.rsi==null||x.rsi<55||x.change==null||x.change<=0))return false;if(preset==='bullish'&&tr!=='Bullish')return false;if(preset==='breakout'&&(x.high52==null||x.price==null||x.price<x.high52*.97||x.relativeVolume==null||x.relativeVolume<1.2))return false;if(preset==='oversold'&&(x.rsi==null||x.rsi>=30))return false;if(preset==='volume'&&(x.relativeVolume==null||x.relativeVolume<1.5))return false;if(preset==='macd'&&(x.macd==null||x.macdSignal==null||x.macd<=x.macdSignal))return false;return true}
+function render(){const key=$('ts11Sort').value;const data=all.map(x=>({...x,_score:score(x)})).filter(passes);data.sort((a,b)=>((b[key]??-Infinity)-(a[key]??-Infinity)));const avg=data.length?data.reduce((s,x)=>s+(x.change||0),0)/data.length:0;const bull=data.filter(x=>trend(x)==='Bullish').length;const tech=data.filter(x=>(x.historyPoints||0)>=20).length;const shocks=data.filter(x=>(x.relativeVolume||0)>=1.5).length;$('ts11Summary').innerHTML=`<div class="ts11-stat"><b>${data.length}</b><span>Matches</span></div><div class="ts11-stat"><b>${fmt(avg,2)}%</b><span>Avg change</span></div><div class="ts11-stat"><b>${bull}</b><span>Bullish</span></div><div class="ts11-stat"><b>${shocks}</b><span>Vol shocks</span></div><div class="ts11-stat"><b>${tech}</b><span>With history</span></div>`;if(!data.length){$('ts11Results').innerHTML='<tr><td colspan="13"><div class="ts11-empty">No stocks match these conditions.</div></td></tr>';return}$('ts11Results').innerHTML=data.slice(0,500).map(x=>{const tr=trend(x),buy=x._score>=6;return`<tr data-symbol="${esc(x.symbol)}"><td><b>${esc(x.symbol)}</b><br><span style="font-size:9px;color:var(--muted)">${esc(x.companyName||x.name||'')}</span></td><td>${fmt(x.price)}</td><td class="${x.change>0?'ts11-up':x.change<0?'ts11-down':''}">${x.change==null?'—':(x.change>0?'+':'')+fmt(x.change)+'%'}</td><td>${fmt(x.rsi,1)}</td><td>${fmt(x.sma20)}</td><td>${fmt(x.sma50)}</td><td>${fmt(x.ema20)}</td><td>${fmt(x.ema50)}</td><td class="${x.macd!=null&&x.macdSignal!=null&&x.macd>x.macdSignal?'ts11-up':'ts11-down'}">${fmt(x.macd,3)}</td><td>${fmt(x.relativeVolume,2)}×</td><td>${fmt(x.adx,1)}</td><td>${fmt(x.high52)}</td><td><span class="ts11-chip ${buy?'buy':tr==='Bearish'?'sell':''}">${buy?'BUY SETUP':tr}</span><span class="ts11-chip">${x._score}</span></td></tr>`}).join('');document.querySelectorAll('#ts11Results tr[data-symbol]').forEach(row=>row.onclick=()=>{if(typeof window.openProfessionalChart==='function')window.openProfessionalChart(row.dataset.symbol);});}
+async function load(){const dot=$('ts11Dot'),status=$('ts11Status');const q=String($('ts11Search').value||'').trim();const st=$('ts11SearchType').value||'any';dot.style.background='#d29b19';status.textContent=q?'SEARCHING NEPSE DATA…':'LOADING NEPSE MARKET DATA…';$('ts11Results').innerHTML='<tr><td colspan="13"><div class="ts11-loading">'+(q?'Searching live NEPSE data for '+esc(q)+'…':'Loading live NEPSE market and technical data…')+'</div></td></tr>';try{const tf=encodeURIComponent($('ts11Tf').value||'D');const search=encodeURIComponent(q);const type=encodeURIComponent(st);const r=await fetch(base()+'/api/technical-screener?limit=60&technical=true&timeframe='+tf+'&search='+search+'&search_type='+type+'&_='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});if(!r.ok)throw new Error('HTTP '+r.status);const d=await r.json();all=Array.isArray(d.data)?d.data:[];loaded=true;dot.style.background=d.ok?'#20a464':'#c0392b';status.textContent=d.ok?'LIVE NEPSE DATA READY':'NEPSE DATA EMPTY';$('ts11Universe').textContent='Universe: '+fmt(d.universeCount,0)+' · loaded '+fmt(d.count,0);$('ts11Updated').textContent='Updated: '+new Date(d.updatedAt||Date.now()).toLocaleTimeString();render();if(!d.ok&&Array.isArray(d.errors)&&d.errors.length)console.warn('Technical screener backend:',d.errors);}catch(e){dot.style.background='#c0392b';status.textContent='DATA UNAVAILABLE';$('ts11Universe').textContent='Universe: —';$('ts11Updated').textContent='Backend error';$('ts11Results').innerHTML='<tr><td colspan="13"><div class="ts11-empty">Could not reach the NEPSE Pulse data service: '+esc(e.message||e)+'</div></td></tr>';console.warn('Technical screener',e);}}
+function reset(){['ts11Search','ts11RsiMin','ts11RsiMax','ts11RelVol','ts11MinCh','ts11NearHigh'].forEach(id=>$(id).value='');$('ts11SearchType').value='any';$('ts11Tf').value='D';$('ts11Trend').value='any';$('ts11MA').value='any';$('ts11Macd').value='any';$('ts11PriceSma').value='any';$('ts11Sort').value='score';$('ts11OnlyHistory').checked=true;preset='all';document.querySelectorAll('.ts11-preset').forEach(x=>x.classList.toggle('active',x.dataset.preset==='all'));if(loaded)render();}
+function open(){const ws=$('pulseFeatureWorkspace'),body=$('pulseWorkspaceBody'),root=$('advanced-screener-v10'),title=$('pulseWorkspaceTitle');if(!ws||!body||!root)return;document.querySelectorAll('.pulse-feature-mounted').forEach(x=>{if(x!==root)x.classList.remove('pulse-feature-mounted')});root.classList.add('pulse-feature-mounted');root.style.removeProperty('display');body.appendChild(root);title.textContent='🔎 Technical Screener';ws.classList.add('open');if(!loaded)load();}
+window.openTechnicalScreener=open;window.PULSE_TECHNICAL_SCREENER={load,open,render};
+document.addEventListener('DOMContentLoaded',()=>{document.querySelectorAll('.ts11-preset').forEach(b=>b.onclick=()=>{document.querySelectorAll('.ts11-preset').forEach(x=>x.classList.remove('active'));b.classList.add('active');preset=b.dataset.preset;render()});$('ts11Run').onclick=load;$('ts11Clear').onclick=reset;['ts11Search','ts11SearchType','ts11Tf','ts11RsiMin','ts11RsiMax','ts11RelVol','ts11MinCh','ts11NearHigh','ts11Trend','ts11MA','ts11Macd','ts11PriceSma','ts11Sort','ts11OnlyHistory'].forEach(id=>$(id).addEventListener('change',()=>loaded&&render()));});
 })();
 </script>
 <script id="pulse-light-only-enforcer">
