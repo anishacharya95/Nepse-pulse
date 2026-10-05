@@ -3330,202 +3330,158 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
      Single-source architecture: Central Feed -> Floorsheet.
      No synthetic trades are generated.
      ========================================================= -->
-<section id="floorsheet-broker-v4" class="pulse-fs-panel pulse-home-feature-module" aria-label="Floorsheet and Broker Intelligence">
+<section id="floorsheet-broker-v4" class="pulse-fs-panel pulse-home-feature-module" aria-label="One Month Floorsheet and Broker Intelligence">
   <div class="pulse-fs-head">
     <div>
-      <div class="pulse-fs-kicker">MARKET FLOW INTELLIGENCE</div>
+      <div class="pulse-fs-kicker">ONE-MONTH MARKET FLOW</div>
       <h2>Floorsheet &amp; Broker Intelligence</h2>
-      <p>Inspect available trades, broker activity, concentration and unusual transactions from the Central Feed.</p>
+      <p>Real NEPSE floorsheet data for the trailing month, covering all listed companies and broker transaction flow.</p>
     </div>
-    <div class="pulse-fs-status"><span id="fsDot"></span><span id="fsStatus">Waiting for feed</span></div>
+    <div class="pulse-fs-status"><span id="fsDot"></span><span id="fsStatus">Ready — press Load 1 Month</span></div>
   </div>
 
-  <div class="pulse-fs-tabs">
-    <button class="fs-tab active" data-fs-tab="trades">Trade Tape</button>
-    <button class="fs-tab" data-fs-tab="brokers">Broker Flow</button>
-    <button class="fs-tab" data-fs-tab="unusual">Unusual Trades</button>
-    <button class="fs-tab" data-fs-tab="bulk">Bulk Activity</button>
+  <div class="fs-period-bar">
+    <span class="fs-period-pill">📅 Trailing 1 month</span>
+    <span id="fsCoverage">No historical data loaded</span>
+    <button id="fsLoad" class="fs-primary">Load 1 Month</button>
   </div>
 
   <div class="pulse-fs-controls">
-    <label>Symbol / broker<input id="fsSearch" type="search" placeholder="NABIL or broker"></label>
-    <label>Min quantity<input id="fsMinQty" type="number" min="0" placeholder="—"></label>
-    <label>Min value<input id="fsMinValue" type="number" min="0" placeholder="—"></label>
-    <label>Side
-      <select id="fsSide"><option value="any">Buy + Sell</option><option value="buy">Buy</option><option value="sell">Sell</option></select>
+    <label>Company / Symbol
+      <input id="fsSearch" type="search" placeholder="Any company — e.g. NABIL">
     </label>
-    <label>Rows<select id="fsLimit"><option>50</option><option>100</option><option>200</option></select></label>
-    <button id="fsApply" class="fs-primary">Apply</button>
-    <button id="fsRefresh">Refresh Feed</button>
+    <label>Broker
+      <input id="fsBroker" type="search" placeholder="Any broker number/name">
+    </label>
+    <label>Minimum quantity<input id="fsMinQty" type="number" min="0" placeholder="Any"></label>
+    <label>Minimum value<input id="fsMinValue" type="number" min="0" placeholder="Any"></label>
+    <button id="fsApply" class="fs-primary">Apply Filters</button>
+    <button id="fsClear">Clear</button>
   </div>
 
   <div class="pulse-fs-metrics">
-    <div><b id="fsTrades">0</b><span>Trades</span></div>
-    <div><b id="fsQuantity">—</b><span>Quantity</span></div>
-    <div><b id="fsValue">—</b><span>Value</span></div>
-    <div><b id="fsSymbols">0</b><span>Symbols</span></div>
-    <div><b id="fsBrokers">0</b><span>Brokers</span></div>
+    <div><b id="fsTrades">—</b><span>Floor trades</span></div>
+    <div><b id="fsQuantity">—</b><span>Shares traded</span></div>
+    <div><b id="fsValue">—</b><span>Turnover</span></div>
+    <div><b id="fsSymbols">—</b><span>Companies traded</span></div>
+    <div><b id="fsBrokers">—</b><span>Active brokers</span></div>
   </div>
 
-  <div id="fsTradesView" class="fs-view">
-    <div class="fs-table-wrap">
-      <table class="fs-table">
-        <thead><tr><th>Time</th><th>Symbol</th><th>Buyer</th><th>Seller</th><th>Price</th><th>Qty</th><th>Value</th><th>Type</th></tr></thead>
-        <tbody id="fsTradeRows"><tr><td colspan="8" class="fs-empty">Connect the Central Feed to populate floorsheet data.</td></tr></tbody>
-      </table>
+  <div class="pulse-fs-tabs">
+    <button class="fs-tab active" data-fs-tab="companies">All Companies</button>
+    <button class="fs-tab" data-fs-tab="brokers">Broker Flow</button>
+    <button class="fs-tab" data-fs-tab="details">Floorsheet Details</button>
+  </div>
+
+  <div id="fsCompaniesView" class="fs-view">
+    <div class="fs-card">
+      <div class="fs-card-title">All NEPSE-listed Companies — 1 Month</div>
+      <div class="fs-hint">Search any symbol/company. Rows include one-month trades, quantity, turnover, broker participation and the largest buyer/seller by transaction value.</div>
+      <div class="fs-table-wrap">
+        <table class="fs-table fs-wide"><thead><tr>
+          <th>Symbol</th><th>Company</th><th>Trades</th><th>Quantity</th><th>Turnover</th><th>Avg Rate</th><th>Buy Brokers</th><th>Sell Brokers</th><th>Top Buyer</th><th>Top Seller</th>
+        </tr></thead><tbody id="fsCompanyRows"><tr><td colspan="10" class="fs-empty">Press Load 1 Month to retrieve real floorsheet data.</td></tr></tbody></table>
+      </div>
     </div>
   </div>
 
   <div id="fsBrokersView" class="fs-view" hidden>
-    <div class="fs-broker-grid">
-      <div class="fs-card">
-        <div class="fs-card-title">Broker Activity</div>
-        <div class="fs-table-wrap"><table class="fs-table"><thead><tr><th>Broker</th><th>Buy Value</th><th>Sell Value</th><th>Net Flow</th><th>Trades</th><th>Share</th></tr></thead><tbody id="fsBrokerRows"><tr><td colspan="6" class="fs-empty">No floorsheet data.</td></tr></tbody></table></div>
-      </div>
-      <div class="fs-card">
-        <div class="fs-card-title">Top Symbols by Flow</div>
-        <div id="fsSymbolFlow" class="fs-rank-list"><div class="fs-empty">No data.</div></div>
-      </div>
+    <div class="fs-card">
+      <div class="fs-card-title">Broker Flow — All Companies</div>
+      <div class="fs-hint">Net flow = broker-side buys minus broker-side sells during the selected month. This is transaction flow, not current client/broker holdings.</div>
+      <div class="fs-table-wrap"><table class="fs-table"><thead><tr><th>Broker</th><th>Buy Value</th><th>Sell Value</th><th>Net Flow</th><th>Buy Qty</th><th>Sell Qty</th><th>Trades</th></tr></thead><tbody id="fsBrokerRows"><tr><td colspan="7" class="fs-empty">No data loaded.</td></tr></tbody></table></div>
     </div>
   </div>
 
-  <div id="fsUnusualView" class="fs-view" hidden>
+  <div id="fsDetailsView" class="fs-view" hidden>
     <div class="fs-card">
-      <div class="fs-card-title">Unusual Trade Detector</div>
-      <p class="fs-hint">Flags unusually large transactions relative to the loaded floorsheet. This is a descriptive screen, not a prediction.</p>
-      <div class="fs-table-wrap"><table class="fs-table"><thead><tr><th>Symbol</th><th>Buyer</th><th>Seller</th><th>Price</th><th>Qty</th><th>Value</th><th>Reason</th></tr></thead><tbody id="fsUnusualRows"><tr><td colspan="7" class="fs-empty">No unusual trades detected.</td></tr></tbody></table></div>
+      <div class="fs-card-title">Floorsheet Transaction Details</div>
+      <div class="fs-hint">For performance, the browser receives up to 3,000 most recent matching transactions. Enter a company such as NABIL to inspect that company's one-month floorsheet.</div>
+      <div class="fs-table-wrap"><table class="fs-table"><thead><tr><th>Date</th><th>Time</th><th>Contract</th><th>Symbol</th><th>Buyer</th><th>Seller</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead><tbody id="fsDetailRows"><tr><td colspan="9" class="fs-empty">No data loaded.</td></tr></tbody></table></div>
     </div>
   </div>
 
-  <div id="fsBulkView" class="fs-view" hidden>
-    <div class="fs-card">
-      <div class="fs-card-title">Bulk / Concentrated Activity</div>
-      <p class="fs-hint">Groups loaded trades by symbol and highlights concentration by transaction count and value.</p>
-      <div class="fs-table-wrap"><table class="fs-table"><thead><tr><th>Symbol</th><th>Trades</th><th>Quantity</th><th>Value</th><th>Avg Price</th><th>Largest Trade</th></tr></thead><tbody id="fsBulkRows"><tr><td colspan="6" class="fs-empty">No floorsheet data.</td></tr></tbody></table></div>
-    </div>
-  </div>
+  <div class="fs-footnote">Data source: NEPSE floorsheet archive via the configured server data layer. Broker numbers/names represent the transaction-side broker published with each trade.</div>
 </section>
 
-<style id="pulse-v4-floorsheet-style">
-#floorsheet-broker-v4{margin:28px 0;font-family:inherit;border:1px solid rgba(127,127,127,.18);border-radius:24px;padding:20px;background:rgba(127,127,127,.045)}
-.pulse-fs-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:16px}.pulse-fs-kicker{font-size:10px;letter-spacing:.14em;font-weight:800;opacity:.62}.pulse-fs-head h2{margin:4px 0;font-size:25px}.pulse-fs-head p{margin:0;font-size:13px;opacity:.68}.pulse-fs-status{font-size:11px;display:flex;gap:7px;align-items:center;padding:8px 10px;border-radius:99px;background:rgba(127,127,127,.09);white-space:nowrap}.pulse-fs-status span:first-child{width:7px;height:7px;border-radius:50%;background:#999}
-.pulse-fs-tabs{display:flex;gap:7px;overflow:auto;padding-bottom:12px}.fs-tab{border:1px solid rgba(127,127,127,.2);background:transparent;color:inherit;border-radius:10px;padding:9px 12px;white-space:nowrap;cursor:pointer}.fs-tab.active{font-weight:800;background:rgba(127,127,127,.13)}
-.pulse-fs-controls{display:grid;grid-template-columns:2fr 1fr 1fr 1fr .7fr auto auto;gap:9px;align-items:end;margin-bottom:14px}.pulse-fs-controls label{font-size:10px;opacity:.75}.pulse-fs-controls input,.pulse-fs-controls select{display:block;width:100%;box-sizing:border-box;margin-top:5px;padding:9px;border-radius:9px;border:1px solid rgba(127,127,127,.22);background:transparent;color:inherit}.pulse-fs-controls button{height:36px;border:1px solid rgba(127,127,127,.2);background:transparent;color:inherit;border-radius:9px;padding:0 11px;cursor:pointer}.pulse-fs-controls .fs-primary{font-weight:800}
-.pulse-fs-metrics{display:grid;grid-template-columns:repeat(5,1fr);gap:9px;margin-bottom:14px}.pulse-fs-metrics div{padding:12px;border-radius:13px;background:rgba(127,127,127,.07)}.pulse-fs-metrics b{display:block;font-size:18px}.pulse-fs-metrics span{font-size:10px;opacity:.6}
-.fs-table-wrap{overflow:auto}.fs-table{width:100%;border-collapse:collapse;min-width:760px;font-size:12px}.fs-table th,.fs-table td{text-align:left;padding:10px;border-bottom:1px solid rgba(127,127,127,.12);white-space:nowrap}.fs-table th{font-size:10px;opacity:.6}.fs-empty{padding:20px!important;text-align:center!important;opacity:.6}.fs-up{font-weight:800}.fs-down{font-weight:800}.fs-type{font-size:10px;padding:4px 7px;border-radius:99px;background:rgba(127,127,127,.1)}
-.fs-broker-grid{display:grid;grid-template-columns:2fr 1fr;gap:14px}.fs-card{border:1px solid rgba(127,127,127,.14);border-radius:16px;padding:14px;background:rgba(127,127,127,.035)}.fs-card-title{font-size:12px;font-weight:800;margin-bottom:10px}.fs-rank-list{display:flex;flex-direction:column;gap:8px}.fs-rank{display:flex;justify-content:space-between;gap:8px;padding:10px;border-radius:10px;background:rgba(127,127,127,.07);font-size:11px}.fs-hint{font-size:11px;opacity:.6;line-height:1.45}
-@media(max-width:900px){.pulse-fs-controls{grid-template-columns:repeat(3,1fr)}.fs-broker-grid{grid-template-columns:1fr}}
-@media(max-width:600px){#floorsheet-broker-v4{padding:14px;border-radius:18px}.pulse-fs-head{display:block}.pulse-fs-status{display:inline-flex;margin-top:10px}.pulse-fs-controls{grid-template-columns:1fr 1fr}.pulse-fs-controls label:first-child{grid-column:1/-1}.pulse-fs-metrics{grid-template-columns:repeat(2,1fr)}}
+<style id="pulse-v5-floorsheet-style">
+#floorsheet-broker-v4{margin:28px 0;font-family:inherit;border:1px solid rgba(127,127,127,.18);border-radius:24px;padding:20px;background:rgba(127,127,127,.045);max-width:100%;box-sizing:border-box;overflow:hidden}
+.pulse-fs-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:14px}.pulse-fs-kicker{font-size:10px;letter-spacing:.14em;font-weight:800;opacity:.62}.pulse-fs-head h2{margin:4px 0;font-size:25px}.pulse-fs-head p{margin:0;font-size:13px;opacity:.68;line-height:1.45}.pulse-fs-status{font-size:11px;display:flex;gap:7px;align-items:center;padding:8px 10px;border-radius:99px;background:rgba(127,127,127,.09);white-space:nowrap}.pulse-fs-status span:first-child{width:7px;height:7px;border-radius:50%;background:#999}
+.fs-period-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:12px 0}.fs-period-pill{padding:8px 11px;border-radius:10px;background:rgba(127,127,127,.1);font-size:11px;font-weight:800}.fs-period-bar #fsCoverage{font-size:11px;opacity:.65;flex:1}.fs-period-bar button{border:0;border-radius:10px;padding:10px 14px;font-weight:800;cursor:pointer;background:#4169e1;color:#fff}
+.pulse-fs-tabs{display:flex;gap:7px;overflow:auto;padding:4px 0 12px}.fs-tab{border:1px solid rgba(127,127,127,.2);background:transparent;color:inherit;border-radius:10px;padding:9px 12px;white-space:nowrap;cursor:pointer}.fs-tab.active{font-weight:800;background:rgba(127,127,127,.13)}
+.pulse-fs-controls{display:grid;grid-template-columns:2fr 1.4fr 1fr 1fr auto auto;gap:9px;align-items:end;margin-bottom:14px}.pulse-fs-controls label{font-size:10px;opacity:.75}.pulse-fs-controls input{display:block;width:100%;box-sizing:border-box;margin-top:5px;padding:10px;border-radius:9px;border:1px solid rgba(127,127,127,.22);background:transparent;color:inherit}.pulse-fs-controls button{height:38px;border:1px solid rgba(127,127,127,.2);background:transparent;color:inherit;border-radius:9px;padding:0 12px;cursor:pointer}.pulse-fs-controls .fs-primary{font-weight:800;background:#4169e1;color:#fff;border-color:#4169e1}
+.pulse-fs-metrics{display:grid;grid-template-columns:repeat(5,1fr);gap:9px;margin-bottom:14px}.pulse-fs-metrics div{padding:12px;border-radius:13px;background:rgba(127,127,127,.07);min-width:0}.pulse-fs-metrics b{display:block;font-size:18px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pulse-fs-metrics span{font-size:10px;opacity:.6}.fs-table-wrap{overflow:auto;-webkit-overflow-scrolling:touch}.fs-table{width:100%;border-collapse:collapse;min-width:760px;font-size:12px}.fs-table.fs-wide{min-width:1180px}.fs-table th,.fs-table td{text-align:left;padding:10px;border-bottom:1px solid rgba(127,127,127,.12);white-space:nowrap}.fs-table th{font-size:10px;opacity:.6;position:sticky;top:0;background:inherit}.fs-empty{padding:24px!important;text-align:center!important;opacity:.6}.fs-up{font-weight:800}.fs-down{font-weight:800}.fs-card{border:1px solid rgba(127,127,127,.14);border-radius:16px;padding:14px;background:rgba(127,127,127,.035)}.fs-card-title{font-size:13px;font-weight:800;margin-bottom:8px}.fs-hint{font-size:11px;opacity:.6;line-height:1.45;margin-bottom:10px}.fs-footnote{font-size:10px;opacity:.5;line-height:1.5;margin-top:12px}
+@media(max-width:900px){.pulse-fs-controls{grid-template-columns:1fr 1fr 1fr}.pulse-fs-controls label:first-child{grid-column:1/-1}.pulse-fs-metrics{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:600px){#floorsheet-broker-v4{padding:13px;border-radius:18px}.pulse-fs-head{display:block}.pulse-fs-status{display:inline-flex;margin-top:10px}.pulse-fs-controls{grid-template-columns:1fr 1fr}.pulse-fs-controls label:first-child{grid-column:1/-1}.pulse-fs-controls button{width:100%}.pulse-fs-metrics{grid-template-columns:repeat(2,1fr)}.fs-period-bar button{width:100%}.fs-table{font-size:11px}}
 </style>
 
-<script id="pulse-v4-floorsheet-engine">
+<script id="pulse-v5-floorsheet-engine">
 (function(){
 'use strict';
 const $=id=>document.getElementById(id);
-const num=v=>{const x=Number(String(v??'').replace(/,/g,''));return Number.isFinite(x)?x:null};
-const str=v=>String(v??'').trim();
-let all=[];
-
-function pick(o,ks){for(const k of ks){if(o&&o[k]!==undefined&&o[k]!==null&&o[k]!=='')return o[k]}return null}
-function normalize(x){
-  const buyer=str(pick(x,['buyerBroker','buyer','BuyerBroker','buyerBrokerCode','buyerMemberId','buyBroker']));
-  const seller=str(pick(x,['sellerBroker','seller','SellerBroker','sellerBrokerCode','sellerMemberId','sellBroker']));
-  const symbol=str(pick(x,['symbol','Symbol','stockSymbol','securitySymbol','script'])).toUpperCase();
-  const price=num(pick(x,['price','Price','tradePrice','rate','Rate']));
-  const qty=num(pick(x,['quantity','Quantity','tradeQuantity','qty','Qty']));
-  const value=num(pick(x,['amount','Amount','value','Value','turnover','Turnover'])) ?? (price!==null&&qty!==null?price*qty:null);
-  const time=str(pick(x,['time','Time','tradeTime','TradeTime','timestamp','Timestamp','date','Date']));
-  const id=str(pick(x,['contractId','ContractId','tradeId','TradeId','id','Id']));
-  const type=str(pick(x,['tradeType','TradeType','type','Type']));
-  return {raw:x,buyer,seller,symbol,price,qty,value,time,id,type};
+const API=(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
+let report=null;
+const num=v=>{const n=Number(String(v??'').replace(/,/g,''));return Number.isFinite(n)?n:null};
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const money=v=>v==null?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:0});
+const money2=v=>v==null?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:2});
+function currentSymbol(){return (($('fsSearch')?.value||'').trim().toUpperCase())||''}
+function filteredCompanies(){
+ const q=($('fsSearch')?.value||'').trim().toUpperCase();
+ return (report?.companies||[]).filter(x=>!q||String(x.symbol).includes(q)||String(x.companyName||'').toUpperCase().includes(q));
 }
-function extract(st){
-  const c=[st?.floorsheet,st?.data?.floorsheet,st?.data?.Floorsheet,st?.floorSheet,st?.data?.floorSheet];
-  let a=c.find(Array.isArray)||[];
-  if(!a.length && st?.data && typeof st.data==='object'){
-    const vals=Object.values(st.data).find(v=>Array.isArray(v)&&v.some(x=>x&&typeof x==='object'&&('buyerBroker' in x||'buyer' in x||'quantity' in x)));
-    if(vals)a=vals;
-  }
-  return a.map(normalize).filter(x=>x.symbol||x.buyer||x.seller);
+function renderMetrics(){
+ const rows=report?.floorsheet||[];
+ $('fsTrades').textContent=report?.totalTradeRows!=null?Number(report.totalTradeRows).toLocaleString():'—';
+ $('fsQuantity').textContent=money(rows.reduce((s,x)=>s+(Number(x.quantity)||0),0));
+ $('fsValue').textContent=money(rows.reduce((s,x)=>s+(Number(x.amount)||0),0));
+ $('fsSymbols').textContent=new Set(rows.map(x=>x.symbol).filter(Boolean)).size||'—';
+ $('fsBrokers').textContent=(report?.brokers||[]).length||'—';
 }
-function fmt(v,d=0){return v===null||v===undefined||!Number.isFinite(v)?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:d})}
-function valSide(x){return x.type.toLowerCase().includes('buy')?'buy':x.type.toLowerCase().includes('sell')?'sell':null}
-
-function filtered(){
- const search=str($('fsSearch').value).toLowerCase(), minQ=num($('fsMinQty').value), minV=num($('fsMinValue').value), side=$('fsSide').value;
- return all.filter(x=>{
-   if(search && !(x.symbol+' '+x.buyer+' '+x.seller).toLowerCase().includes(search))return false;
-   if(minQ!==null && (x.qty===null||x.qty<minQ))return false;
-   if(minV!==null && (x.value===null||x.value<minV))return false;
-   if(side!=='any' && valSide(x)!==side)return false;
-   return true;
- });
+function renderCompanies(){
+ const a=filteredCompanies();
+ $('fsCompanyRows').innerHTML=a.length?a.map(x=>{
+   const tb=x.topBuyer?`${esc(x.topBuyer.broker)} · ${money(x.topBuyer.value)}`:'—';
+   const ts=x.topSeller?`${esc(x.topSeller.broker)} · ${money(x.topSeller.value)}`:'—';
+   return `<tr><td><b>${esc(x.symbol)}</b></td><td>${esc(x.companyName||'—')}</td><td>${money(x.trades)}</td><td>${money(x.quantity)}</td><td>${money(x.turnover)}</td><td>${money2(x.avgRate)}</td><td>${money(x.buyBrokerCount)}</td><td>${money(x.sellBrokerCount)}</td><td>${tb}</td><td>${ts}</td></tr>`
+ }).join(''):'<tr><td colspan="10" class="fs-empty">No matching company data.</td></tr>';
 }
-function setMetrics(a){
- $('fsTrades').textContent=fmt(a.length);
- $('fsQuantity').textContent=fmt(a.reduce((s,x)=>s+(x.qty||0),0));
- $('fsValue').textContent=fmt(a.reduce((s,x)=>s+(x.value||0),0));
- $('fsSymbols').textContent=new Set(a.map(x=>x.symbol).filter(Boolean)).size;
- const bs=new Set(a.flatMap(x=>[x.buyer,x.seller]).filter(Boolean)); $('fsBrokers').textContent=bs.size;
+function renderBrokers(){
+ const q=($('fsBroker')?.value||'').trim().toLowerCase();
+ const a=(report?.brokers||[]).filter(x=>!q||String(x.broker).toLowerCase().includes(q));
+ $('fsBrokerRows').innerHTML=a.length?a.map(x=>`<tr><td><b>${esc(x.broker)}</b></td><td>${money(x.buyValue)}</td><td>${money(x.sellValue)}</td><td class="${x.netValue>=0?'fs-up':'fs-down'}">${x.netValue>=0?'+':''}${money(x.netValue)}</td><td>${money(x.buyQty)}</td><td>${money(x.sellQty)}</td><td>${money(x.tradeCount)}</td></tr>`).join(''):'<tr><td colspan="7" class="fs-empty">No matching broker data.</td></tr>';
 }
-function renderTrades(a){
- $('fsTradeRows').innerHTML=a.length?a.slice(0,Number($('fsLimit').value)).map(x=>`<tr><td>${esc(x.time||'—')}</td><td><b>${esc(x.symbol||'—')}</b></td><td>${esc(x.buyer||'—')}</td><td>${esc(x.seller||'—')}</td><td>${fmt(x.price,2)}</td><td>${fmt(x.qty)}</td><td>${fmt(x.value)}</td><td><span class="fs-type">${esc(x.type||'Trade')}</span></td></tr>`).join(''):'<tr><td colspan="8" class="fs-empty">No trades match the current filters.</td></tr>';
+function renderDetails(){
+ const q=($('fsSearch')?.value||'').trim().toUpperCase();
+ const b=($('fsBroker')?.value||'').trim().toLowerCase();
+ const minQ=num($('fsMinQty')?.value), minV=num($('fsMinValue')?.value);
+ const a=(report?.floorsheet||[]).filter(x=>(!q||String(x.symbol).includes(q)||String(x.companyName||'').toUpperCase().includes(q))&&(!b||(String(x.buyer).toLowerCase().includes(b)||String(x.seller).toLowerCase().includes(b)))&&(minQ==null||Number(x.quantity)>=minQ)&&(minV==null||Number(x.amount)>=minV));
+ $('fsDetailRows').innerHTML=a.length?a.map(x=>`<tr><td>${esc(x.date||'—')}</td><td>${esc(x.time||'—')}</td><td>${esc(x.trade||'—')}</td><td><b>${esc(x.symbol)}</b></td><td>${esc(x.buyer||'—')}</td><td>${esc(x.seller||'—')}</td><td>${money(x.quantity)}</td><td>${money2(x.rate)}</td><td>${money2(x.amount)}</td></tr>`).join(''):'<tr><td colspan="9" class="fs-empty">No matching floorsheet details in the loaded result.</td></tr>';
 }
-function renderBrokers(a){
- const m={};let total=a.reduce((s,x)=>s+(x.value||0),0);
- a.forEach(x=>{
-   for(const side of ['buyer','seller']){const b=x[side];if(!b)continue;m[b]??={buy:0,sell:0,trades:0};m[b][side==='buyer'?'buy':'sell']+=(x.value||0);m[b].trades++}
- });
- const list=Object.entries(m).map(([b,v])=>({b,...v,net:v.buy-v.sell,share:total?v.buy/total:0})).sort((a,b)=>Math.abs(b.net)-Math.abs(a.net));
- $('fsBrokerRows').innerHTML=list.length?list.slice(0,100).map(x=>`<tr><td><b>${esc(x.b)}</b></td><td>${fmt(x.buy)}</td><td>${fmt(x.sell)}</td><td class="${x.net>=0?'fs-up':'fs-down'}">${x.net>=0?'+':''}${fmt(x.net)}</td><td>${x.trades}</td><td>${fmt(x.share*100,1)}%</td></tr>`).join(''):'<tr><td colspan="6" class="fs-empty">No broker data available.</td></tr>';
- const sy={};a.forEach(x=>{if(!x.symbol)return;sy[x.symbol]??={v:0,q:0,n:0};sy[x.symbol].v+=x.value||0;sy[x.symbol].q+=x.qty||0;sy[x.symbol].n++});
- const top=Object.entries(sy).sort((a,b)=>b[1].v-a[1].v).slice(0,10);
- $('fsSymbolFlow').innerHTML=top.length?top.map(([k,v])=>`<div class="fs-rank"><b>${esc(k)}</b><span>${fmt(v.v)} · ${v.n} trades</span></div>`).join(''):'<div class="fs-empty">No data.</div>';
-}
-function renderUnusual(a){
- const vals=a.map(x=>x.value).filter(x=>x!==null).sort((x,y)=>x-y);
- const median=vals.length?vals[Math.floor(vals.length/2)]:null;
- const threshold=median!==null?Math.max(median*5,vals[vals.length-1]||0):null;
- const top=a.filter(x=>x.value!==null&&threshold!==null&&x.value>=threshold).sort((x,y)=>y.value-x.value).slice(0,100);
- $('fsUnusualRows').innerHTML=top.length?top.map(x=>`<tr><td><b>${esc(x.symbol)}</b></td><td>${esc(x.buyer||'—')}</td><td>${esc(x.seller||'—')}</td><td>${fmt(x.price,2)}</td><td>${fmt(x.qty)}</td><td>${fmt(x.value)}</td><td><span class="fs-type">Large vs loaded tape</span></td></tr>`).join(''):'<tr><td colspan="7" class="fs-empty">No unusually large loaded transactions.</td></tr>';
-}
-function renderBulk(a){
- const m={};a.forEach(x=>{if(!x.symbol)return;m[x.symbol]??={n:0,q:0,v:0,pv:0,largest:0};m[x.symbol].n++;m[x.symbol].q+=x.qty||0;m[x.symbol].v+=x.value||0;m[x.symbol].pv+=x.value||0;m[x.symbol].largest=Math.max(m[x.symbol].largest,x.value||0)});
- const top=Object.entries(m).filter(([,v])=>v.n>=2).sort((a,b)=>b[1].v-a[1].v).slice(0,100);
- $('fsBulkRows').innerHTML=top.length?top.map(([k,v])=>`<tr><td><b>${esc(k)}</b></td><td>${v.n}</td><td>${fmt(v.q)}</td><td>${fmt(v.v)}</td><td>${v.q?fmt(v.v/v.q,2):'—'}</td><td>${fmt(v.largest)}</td></tr>`).join(''):'<tr><td colspan="6" class="fs-empty">No concentrated multi-trade activity.</td></tr>';
-}
-function render(){const a=filtered();setMetrics(a);renderTrades(a);renderBrokers(a);renderUnusual(a);renderBulk(a)}
-function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-function sync(st){
- all=extract(st||{});
- const status=String(st?.status||'OFFLINE').toUpperCase();
- $('fsStatus').textContent=status+(st?.updatedAt?' • '+new Date(st.updatedAt).toLocaleTimeString(): '');
- $('fsDot').style.background=status==='LIVE'?'#20a464':status==='CACHED'?'#d29b19':'#999';
- render();
+function render(){renderMetrics();renderCompanies();renderBrokers();renderDetails()}
+async function load(){
+ const sym=currentSymbol();
+ $('fsStatus').textContent='Loading one month of real floorsheet data…';$('fsCoverage').textContent='Fetching historical trading sessions…';
+ try{
+   const url=API+'/api/floorsheet-intelligence?months=1&detail_limit=3000'+(sym?'&symbol='+encodeURIComponent(sym):'');
+   const r=await fetch(url,{cache:'no-store'}); const d=await r.json();
+   if(!r.ok)throw new Error(d.detail||'Backend request failed');
+   report=d;
+   $('fsStatus').textContent=d.ok?'REAL FLOORSHEET DATA':'NO HISTORICAL ROWS';
+   $('fsCoverage').textContent=`${d.startDate} → ${d.endDate} · ${Number(d.listedCompanies||0).toLocaleString()} listed companies · ${Number(d.totalTradeRows||0).toLocaleString()} floor trades`;
+   render();
+ }catch(e){console.error('Floorsheet intelligence:',e);$('fsStatus').textContent='DATA ERROR';$('fsCoverage').textContent=e.message||'Could not load historical floorsheet';$('fsCompanyRows').innerHTML=`<tr><td colspan="10" class="fs-empty">${esc(e.message||'Historical floorsheet request failed')}</td></tr>`;}
 }
 document.addEventListener('DOMContentLoaded',()=>{
- document.querySelectorAll('.fs-tab').forEach(b=>b.addEventListener('click',()=>{
-   document.querySelectorAll('.fs-tab').forEach(x=>x.classList.remove('active'));b.classList.add('active');
-   document.querySelectorAll('#floorsheet-broker-v4 .fs-view').forEach(v=>v.hidden=true);
-   const target='fs'+b.dataset.fsTab[0].toUpperCase()+b.dataset.fsTab.slice(1)+'View';
-   $(target).hidden=false;
- }));
- $('fsApply').addEventListener('click',render);
- $('fsRefresh').addEventListener('click',()=>window.PULSE_FEED?.refresh?.());
- ['fsSearch','fsMinQty','fsMinValue','fsSide','fsLimit'].forEach(id=>$(id).addEventListener('change',render));
- window.addEventListener('pulse-central-snapshot',e=>sync(e.detail));
- window.addEventListener('pulse-feed-update',()=>{const st=window.PULSE_FEED_ENGINE?.state?.();if(st)sync(st)});
- const st=window.PULSE_FEED_ENGINE?.state?.();if(st)sync(st);
+ document.querySelectorAll('#floorsheet-broker-v4 .fs-tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('#floorsheet-broker-v4 .fs-tab').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.querySelectorAll('#floorsheet-broker-v4 .fs-view').forEach(v=>v.hidden=true);$('fs'+b.dataset.fsTab[0].toUpperCase()+b.dataset.fsTab.slice(1)+'View').hidden=false}));
+ $('fsLoad').addEventListener('click',load);$('fsApply').addEventListener('click',()=>{ if(report && currentSymbol() && currentSymbol()!==String(report.symbol||'').toUpperCase()) load(); else render(); });$('fsClear').addEventListener('click',()=>{$('fsSearch').value='';$('fsBroker').value='';$('fsMinQty').value='';$('fsMinValue').value='';render()});
+ ['fsBroker','fsMinQty','fsMinValue'].forEach(id=>$(id).addEventListener('input',()=>{if(report)render()}));
 });
+window.loadFloorsheetIntelligence=load;
 })();
 </script>
 
 
-<!-- =========================================================
-     NEPSE PULSE — SECTOR HEATMAP + MARKET BREADTH V5
-     Uses Central Feed snapshot. Missing sector fields remain
-     unavailable rather than being fabricated.
-     ========================================================= -->
 <section id="sector-breadth-v5" class="pulse-sector-v5 pulse-home-feature-module" aria-label="Sector Heatmap and Market Breadth">
   <div class="sv5-head">
     <div>

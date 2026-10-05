@@ -2684,3 +2684,158 @@ async def api_brokers_history(months: int = Query(3, ge=1, le=3), symbol: Option
                 "holdingNote": "Net buy/sell is transaction flow over this period, not a broker's current demat holding.",
                 "updatedAt": now_iso()}
     return await cached(cache_key, load)
+
+
+def _broker_label(row: dict, side: str) -> str:
+    if side == "buy":
+        return str(row.get("buyerBrokerName") or row.get("buyerBroker") or row.get("buyerBrokerId") or "").strip()
+    return str(row.get("sellerBrokerName") or row.get("sellerBroker") or row.get("sellerBrokerId") or "").strip()
+
+
+def _build_month_flow_report(rows: list[dict], companies: list[dict], detail_limit: int = 3000):
+    """Build a one-month all-company floorsheet/broker intelligence snapshot.
+
+    This intentionally calls the result broker *flow* rather than current
+    broker holdings. Floorsheet buyer/seller data identifies the broker used
+    for the transaction; it does not reveal the broker's clients' demat
+    holdings.
+    """
+    company = {}
+    broker = {}
+    broker_company = {}
+    detail = []
+
+    # Seed the company table with the complete listed-security master so
+    # inactive/no-trade companies are visible too.
+    for c in companies:
+        sym = str(pick(c, ["symbol", "ticker", "code", "stockSymbol"], "") or "").upper().strip()
+        if not sym:
+            continue
+        name = str(pick(c, ["companyName", "company", "securityName", "name"], "") or sym).strip()
+        company[sym] = {
+            "symbol": sym, "companyName": name, "trades": 0, "quantity": 0,
+            "turnover": 0, "avgRate": None, "buyBrokerCount": 0,
+            "sellBrokerCount": 0, "topBuyer": None, "topSeller": None,
+            "netBrokerFlow": 0,
+        }
+
+    def ensure_broker(label):
+        if not label:
+            return None
+        return broker.setdefault(label, {
+            "broker": label, "buyValue": 0, "sellValue": 0,
+            "buyQty": 0, "sellQty": 0, "buyTrades": 0, "sellTrades": 0,
+            "netValue": 0, "netQty": 0,
+        })
+
+    for r in rows:
+        sym = str(r.get("symbol") or "").upper().strip()
+        if not sym:
+            continue
+        q = float(r.get("quantity") or 0)
+        rate = float(r.get("rate") or 0)
+        value = float(r.get("amount") or (q * rate))
+        c = company.setdefault(sym, {
+            "symbol": sym, "companyName": str(r.get("securityName") or sym),
+            "trades": 0, "quantity": 0, "turnover": 0, "avgRate": None,
+            "buyBrokerCount": 0, "sellBrokerCount": 0,
+            "topBuyer": None, "topSeller": None, "netBrokerFlow": 0,
+        })
+        c["trades"] += 1; c["quantity"] += q; c["turnover"] += value
+        buyer = _broker_label(r, "buy")
+        seller = _broker_label(r, "sell")
+        bb = ensure_broker(buyer); sb = ensure_broker(seller)
+        if bb:
+            bb["buyValue"] += value; bb["buyQty"] += q; bb["buyTrades"] += 1
+        if sb:
+            sb["sellValue"] += value; sb["sellQty"] += q; sb["sellTrades"] += 1
+        if buyer:
+            bc = broker_company.setdefault((sym, buyer), {"symbol": sym, "broker": buyer, "buyValue": 0, "sellValue": 0, "buyQty": 0, "sellQty": 0, "trades": 0})
+            bc["buyValue"] += value; bc["buyQty"] += q; bc["trades"] += 1
+        if seller:
+            bc = broker_company.setdefault((sym, seller), {"symbol": sym, "broker": seller, "buyValue": 0, "sellValue": 0, "buyQty": 0, "sellQty": 0, "trades": 0})
+            bc["sellValue"] += value; bc["sellQty"] += q; bc["trades"] += 1
+        detail.append({
+            "date": _row_date(r) or r.get("businessDate") or "",
+            "time": r.get("tradeTime") or "",
+            "trade": r.get("trade") or "",
+            "symbol": sym, "companyName": c.get("companyName") or sym,
+            "buyer": buyer, "seller": seller, "quantity": q,
+            "rate": rate, "amount": value,
+        })
+
+    for b in broker.values():
+        b["netValue"] = b["buyValue"] - b["sellValue"]
+        b["netQty"] = b["buyQty"] - b["sellQty"]
+        b["tradeCount"] = b["buyTrades"] + b["sellTrades"]
+    broker_rows = sorted(broker.values(), key=lambda x: abs(x["netValue"]), reverse=True)
+
+    company_brokers = {}
+    for x in broker_company.values():
+        x["netValue"] = x["buyValue"] - x["sellValue"]
+        x["netQty"] = x["buyQty"] - x["sellQty"]
+        company_brokers.setdefault(x["symbol"], []).append(x)
+    for sym, entries in company_brokers.items():
+        entries.sort(key=lambda x: x["netValue"], reverse=True)
+        c = company.get(sym)
+        if not c: continue
+        c["buyBrokerCount"] = sum(1 for x in entries if x["buyValue"] > 0)
+        c["sellBrokerCount"] = sum(1 for x in entries if x["sellValue"] > 0)
+        top_buy = max(entries, key=lambda x: x["buyValue"], default=None)
+        top_sell = max(entries, key=lambda x: x["sellValue"], default=None)
+        c["topBuyer"] = {"broker": top_buy["broker"], "value": top_buy["buyValue"], "qty": top_buy["buyQty"]} if top_buy and top_buy["buyValue"] else None
+        c["topSeller"] = {"broker": top_sell["broker"], "value": top_sell["sellValue"], "qty": top_sell["sellQty"]} if top_sell and top_sell["sellValue"] else None
+        c["netBrokerFlow"] = sum(x["netValue"] for x in entries)
+    for c in company.values():
+        c["avgRate"] = (c["turnover"] / c["quantity"]) if c["quantity"] else None
+
+    detail.sort(key=lambda x: (x["date"], x["time"], x["trade"]), reverse=True)
+    return {
+        "companies": sorted(company.values(), key=lambda x: x["turnover"], reverse=True),
+        "brokers": broker_rows,
+        "brokerCompany": list(broker_company.values()),
+        "floorsheet": detail[:detail_limit],
+        "totalTradeRows": len(rows),
+    }
+
+
+@app.get("/api/floorsheet-intelligence")
+async def api_floorsheet_intelligence(
+    months: int = Query(1, ge=1, le=1),
+    symbol: Optional[str] = None,
+    broker: Optional[str] = None,
+    detail_limit: int = Query(3000, ge=100, le=10000),
+):
+    """All-company one-month floorsheet + broker-flow intelligence.
+
+    `symbol` is optional. Without it, the response contains every listed
+    company's one-month aggregate plus broker totals. With a symbol, the
+    broker table is restricted to that company and the returned floorsheet
+    rows are that company's one-month trade details.
+    """
+    today = datetime.now(NPT).date()
+    start_day = _subtract_months(datetime.combine(today, datetime.min.time()), months).date()
+    wanted = symbol.upper().strip() if symbol else None
+    wanted_broker = broker.strip() if broker else None
+    key = f"fs-intel:{start_day}:{today}:{wanted or 'ALL'}:{wanted_broker or 'ALL'}:{detail_limit}"
+
+    async def load():
+        raw_companies = await company_list()
+        companies = arr(raw_companies)
+        rows = await _historical_floor_rows(start_day, today, wanted)
+        report = _build_month_flow_report(rows, companies, detail_limit=detail_limit)
+        if wanted_broker:
+            needle = wanted_broker.lower()
+            report["brokers"] = [x for x in report["brokers"] if needle in str(x["broker"]).lower()]
+            report["floorsheet"] = [x for x in report["floorsheet"] if needle in (str(x["buyer"]).lower() + " " + str(x["seller"]).lower())]
+        if wanted:
+            report["companies"] = [x for x in report["companies"] if x["symbol"] == wanted]
+        report.update({
+            "ok": bool(rows), "source": "NEPSE Open Data / YONEPSE daily floorsheet archive",
+            "startDate": start_day.isoformat(), "endDate": today.isoformat(),
+            "months": 1, "symbol": wanted, "broker": wanted_broker,
+            "listedCompanies": len(report["companies"]), "updatedAt": now_iso(),
+            "holdingNote": "Broker flow is derived from buyer/seller transactions. It is not the broker's own or clients' current demat holding.",
+        })
+        return report
+    return await cached(key, load)
