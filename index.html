@@ -6248,7 +6248,8 @@ input,select{background:#fff!important;color:var(--text)!important}
 (function(){
  const root=document.getElementById('npCompanyPage'), content=document.getElementById('npcoContent');let symbol='',cache={};
  const esc=v=>String(v??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
- const arr=x=>{if(Array.isArray(x))return x;if(!x||typeof x!=='object')return [];for(const k of ['data','content','rows','result','results','items','records','live','liveMarket','market']){const v=x[k];if(Array.isArray(v))return v;if(v&&typeof v==='object'){const a=arr(v);if(a.length)return a}}return []};
+ const arr=x=>{if(Array.isArray(x))return x;if(!x||typeof x!=='object')return [];const seen=new Set();const walk=v=>{if(Array.isArray(v))return v;if(!v||typeof v!=='object'||seen.has(v))return [];seen.add(v);for(const k of ['data','content','rows','result','results','items','records','live','liveMarket','market','history','priceVolumeHistory','payload']){const q=v[k];if(Array.isArray(q))return q;if(q&&typeof q==='object'){const a=walk(q);if(a.length)return a}}return []};return walk(x)};
+ const unwrapObject=x=>{if(!x||typeof x!=='object'||Array.isArray(x))return x;let cur=x;const seen=new Set();for(let i=0;i<8;i++){if(!cur||typeof cur!=='object'||seen.has(cur))break;seen.add(cur);if(cur.market||cur.performance||cur.history||cur.companyName)return cur;const q=cur.data??cur.payload??cur.result??cur.response;if(q&&typeof q==='object'&&!Array.isArray(q)){cur=q;continue}break}return cur};
  const num=x=>x==null||x===''?'—':(Number.isFinite(Number(x))?Number(x).toLocaleString(undefined,{maximumFractionDigits:2}):esc(x));
  const get=async path=>{if(cache[path])return cache[path];const raw=await (window.PulseFeedEngine?.fetchJSON?PulseFeedEngine.fetchJSON(path):fetch(path).then(r=>{if(!r.ok)throw Error(r.status);return r.json()}));const v=(raw&&raw.ok===true&&Object.prototype.hasOwnProperty.call(raw,'data'))?raw.data:raw;cache[path]=v;return v};
  function liveRow(sym){try{const st=window.PulseFeedEngine?.state?.()||{};const raw=st.live||st.market?.data||st.market||[];return arr(raw).map(x=>typeof normRow==='function'?normRow(x):x).find(x=>String(x.symbol||x.symbolName||x.securitySymbol||'').toUpperCase()===sym)}catch(e){return null}}
@@ -6263,7 +6264,8 @@ input,select{background:#fff!important;color:var(--text)!important}
     // verified company/fundamentals/history endpoints.
     let d=null;
     try{d=await get('/api/stock-overview/'+encodeURIComponent(symbol));}catch(e){d=null;}
-    if(!d?.ok){
+    if(d&&typeof d==='object'){const inner=unwrapObject(d);if(inner&&inner!==d)d={...inner,ok:true};}
+    if(!d?.ok || !(d.market||d.performance||d.history)){
       const [marketRaw,liveRaw,companyRaw,fundRaw,publicRaw,histRaw]=await Promise.all([
         get('/api/market').catch(()=>null),
         get('/LiveMarket').catch(()=>[]),
@@ -6276,9 +6278,10 @@ input,select{background:#fff!important;color:var(--text)!important}
       const marketRows=arr(marketRaw?.live||marketRaw?.data?.live||marketRaw);
       const candidates=liveRows.concat(marketRows);
       const live=candidates.map(x=>typeof normRow==='function'?normRow(x):x).find(x=>String(x?.symbol||x?.ticker||x?.securitySymbol||x?.symbolName||'').toUpperCase()===symbol)||candidates.find(x=>String(x?.symbol||x?.ticker||x?.securitySymbol||x?.symbolName||'').toUpperCase()===symbol)||{};
-      const company=companyRaw?.details||companyRaw?.company||companyRaw?.profile||companyRaw||{};
-      const pub=publicRaw||{};
-      const fund=fundRaw||{};
+      const companyObj=unwrapObject(companyRaw)||{};
+      const company=companyObj?.details||companyObj?.company||companyObj?.profile||companyObj||{};
+      const pub=unwrapObject(publicRaw)||{};
+      const fund=unwrapObject(fundRaw)||{};
       const prof=company||pub.profile||{};
       const fin=Array.isArray(fund.financials)?fund.financials[0]:(Array.isArray(pub.financials)?pub.financials[0]:(fund.financials||pub.financials||{}));
       const hist=arr(histRaw);
@@ -6406,7 +6409,8 @@ input,select{background:#fff!important;color:var(--text)!important}
    function unwrap(v,depth){if(depth>6||v==null)return [];if(Array.isArray(v))return v;if(typeof v!=='object')return [];for(const k of ['data','content','rows','result','results','items','records','history']){const x=v[k];if(Array.isArray(x))return x;const a=unwrap(x,depth+1);if(a.length)return a}return []}
    const pts=unwrap(rows,0).map(r=>({v:Number(r.close??r.ltp??r.price??r.lastTradedPrice),d:r.date??r.businessDate??r.timestamp??r.time})).filter(x=>Number.isFinite(x.v));
    function draw(range){
-     const lim={'1D':120,'1W':5,'1M':22,'3M':66,'6M':132,'1Y':252,'ALL':Infinity}[range]??22, p=pts.slice(-lim);
+     let p=pts.slice(-({'1D':2,'1W':5,'1M':22,'3M':66,'6M':132,'1Y':252,'ALL':Infinity}[range]??5));
+     if(range==='1D'&&p.length<2)p=pts.slice(-2);
      card.querySelectorAll('[data-range]').forEach(b=>b.classList.toggle('active',b.dataset.range===range));
      if(p.length<2){area.innerHTML='<div class="npco-note">Verified historical price data is not available for this range.</div>';if(badge)badge.textContent='';return;}
      const vals=p.map(x=>x.v), first=vals[0], last=vals.at(-1), delta=last-first, pct=first?(delta/first*100):0, min=Math.min(...vals), max=Math.max(...vals), span=max-min||1, color=delta>=0?'#159b68':'#e34c56';

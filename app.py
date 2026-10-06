@@ -445,35 +445,6 @@ async def get_market():
         if not deep_rows(live_raw):
             live_raw, live_method = await one("today_price", ["today_price"], page=1, size=500)
 
-        # If the production SDK is unavailable/empty, use the documented
-        # hosted NEPSE-compatible REST routes before falling back to static data.
-        # This is still live/session data; we only use static data if this fails.
-        hosted_used = False
-        if not deep_rows(live_raw):
-            try:
-                hosted_live = await public_get("/LiveMarket")
-                if deep_rows(hosted_live):
-                    live_raw, live_method = hosted_live, "hosted_nepseapi:/LiveMarket"
-                    hosted_used = True
-            except Exception as exc:
-                errors.append(f"hosted /LiveMarket: {type(exc).__name__}: {exc}")
-        if index_raw is None or not normalize_index(index_raw):
-            try:
-                hosted_index = await public_get("/NepseIndex")
-                if normalize_index(hosted_index):
-                    index_raw, index_method = hosted_index, "hosted_nepseapi:/NepseIndex"
-                    hosted_used = True
-            except Exception as exc:
-                errors.append(f"hosted /NepseIndex: {type(exc).__name__}: {exc}")
-        if summary_raw is None:
-            try:
-                hosted_summary = await public_get("/Summary")
-                if hosted_summary is not None:
-                    summary_raw, summary_method = hosted_summary, "hosted_nepseapi:/Summary"
-                    hosted_used = True
-            except Exception as exc:
-                errors.append(f"hosted /Summary: {type(exc).__name__}: {exc}")
-
         # If the primary session is empty (for example after a token/rate-limit
         # failure), load a single static snapshot from YONEPSE in parallel.
         # This is a fallback only; primary NEPSE data remains authoritative.
@@ -541,7 +512,7 @@ async def get_market():
             "transaction": transaction_method,
         }
         failed = [k for k,v in source_methods.items() if k not in ("companies",) and v is None]
-        source = "YONEPSE static fallback" if fallback_used else ("hosted NEPSE-compatible REST feed" if hosted_used else "nepsepy public NEPSE session")
+        source = "YONEPSE static fallback" if fallback_used else "nepsepy public NEPSE session"
         stale = bool(fallback_used)
 
         explicit_breadth = _find_breadth_values(summary_raw)
@@ -1361,9 +1332,6 @@ async def static_daily_history(symbol: str) -> list[dict]:
     urls = [
         f"https://binayabaral.github.io/nepal-market-data/data/nepse/{symbol}.csv",
         f"https://raw.githubusercontent.com/binayabaral/nepal-market-data/main/data/nepse/{symbol}.csv",
-        # Secondary public historical archive. Keep this as a real-data fallback
-        # only; it is never used to manufacture missing sessions.
-        f"https://raw.githubusercontent.com/Aabishkar2/nepse-data/main/data/company-wise/{symbol}.csv",
     ]
     for url in urls:
         try:
@@ -1547,23 +1515,16 @@ async def get_broker_analysis():
         return await legacy_get_broker_analysis()
 
 async def get_history(symbol: str):
-    symbol = symbol.upper().strip()
-    errors = []
     try:
-        raw = await production_call("history_ohlcv", symbol)
-        rows = normalize_history_rows(raw)
+        rows = await production_call("history_ohlcv", symbol)
         if rows:
-            return {"ok": True, "symbol": symbol,
+            return {"ok": True, "symbol": symbol.upper(),
                     "source": "nepse.py production history", "data": rows,
-                    "updatedAt": now_iso(), "errors": errors}
+                    "updatedAt": now_iso(), "errors": []}
     except Exception as e:
-        errors.append(f"production history: {e}")
+        production_history_error = str(e)
     # Keep existing multi-source chart fallback.
-    result = await legacy_get_history(symbol)
-    if isinstance(result, dict):
-        result.setdefault("errors", [])
-        result["errors"] = errors + list(result.get("errors") or [])
-    return result
+    return await legacy_get_history(symbol)
 
 async def get_fundamentals(symbol: str):
     try:
@@ -1636,122 +1597,10 @@ async def production_market():
 async def production_company(symbol: str):
     return await production_call("company_snapshot", symbol)
 
-def _depth_rows(value: Any) -> list[dict]:
-    """Flatten NEPSE order-book payloads into candidate depth rows."""
-    out=[]
-    def walk(v, side_hint=None, depth=0):
-        if depth>8 or v is None: return
-        if isinstance(v, list):
-            for x in v: walk(x, side_hint, depth+1)
-            return
-        if not isinstance(v, dict): return
-        side = str(pick(v, ["side","orderSide","transactionType","type","direction"], side_hint) or "").lower()
-        if side in ("b","bid","buy","buyorder","buyorders","demand"):
-            side="buy"
-        elif side in ("s","ask","sell","sellorder","sellorders","supply"):
-            side="sell"
-        price=num(pick(v,["price","orderPrice","orderBookOrderPrice","order_book_order_price","rate","buyPrice","sellPrice","bidPrice","askPrice"]))
-        qty=num(pick(v,["quantity","qty","orderQuantity","tradedQuantity","totalQuantity","buyQuantity","sellQuantity","bidQuantity","askQuantity"]))
-        orders=num(pick(v,["orders","orderCount","order_count","noOfOrders","numberOfOrders","buyOrders","sellOrders","bidOrders","askOrders"]))
-        if price is not None and (qty is not None or orders is not None):
-            out.append({"side":side,"price":price,"quantity":qty or 0,"orders":orders or 0})
-        for k,vv in v.items():
-            kl=str(k).lower()
-            child_side=side_hint
-            if any(x in kl for x in ("buy","bid","demand")): child_side="buy"
-            elif any(x in kl for x in ("sell","ask","supply")): child_side="sell"
-            if isinstance(vv,(dict,list)):
-                walk(vv,child_side,depth+1)
-    walk(value)
-    # Remove duplicate rows produced by nested wrappers.
-    seen=set(); clean=[]
-    for r in out:
-        key=(r["side"],r["price"],r["quantity"],r["orders"])
-        if key in seen: continue
-        seen.add(key); clean.append(r)
-    return clean
-
-
-def _first_nested_number(value: Any, keys: list[str]) -> Optional[float]:
-    target={str(k).lower() for k in keys}
-    def walk(v, depth=0):
-        if depth>8 or v is None:
-            return None
-        if isinstance(v, dict):
-            for k,val in v.items():
-                if str(k).lower() in target:
-                    n=num(val)
-                    if n is not None:
-                        return n
-            for val in v.values():
-                n=walk(val, depth+1)
-                if n is not None:
-                    return n
-        elif isinstance(v, list):
-            for val in v:
-                n=walk(val, depth+1)
-                if n is not None:
-                    return n
-        return None
-    return walk(value)
-
-
-def _normalize_depth_payload(raw: Any, symbol: str) -> dict:
-    rows=_depth_rows(raw)
-    buys=sorted([r for r in rows if r["side"]=="buy"], key=lambda r:r["price"], reverse=True)[:5]
-    sells=sorted([r for r in rows if r["side"]=="sell"], key=lambda r:r["price"])[:5]
-    # Prefer exchange/feed totals when supplied. Falling back to the visible
-    # top-5 sum is mathematically derived from real rows, never fabricated.
-    buy_qty=_first_nested_number(raw,["totalBuyQuantity","total_buy_quantity","totalBuyQty","totalBuyQty","buyQuantityTotal"])
-    sell_qty=_first_nested_number(raw,["totalSellQuantity","total_sell_quantity","totalSellQty","totalSellQty","sellQuantityTotal"])
-    buy_orders=_first_nested_number(raw,["totalBuyOrders","total_buy_orders","buyOrdersTotal"])
-    sell_orders=_first_nested_number(raw,["totalSellOrders","total_sell_orders","sellOrdersTotal"])
-    return {
-        "ok": bool(buys or sells),
-        "symbol": symbol.upper(),
-        "buy": buys, "sell": sells,
-        "totalBuyQuantity": buy_qty if buy_qty is not None else sum(float(r["quantity"] or 0) for r in buys),
-        "totalSellQuantity": sell_qty if sell_qty is not None else sum(float(r["quantity"] or 0) for r in sells),
-        "totalBuyOrders": buy_orders if buy_orders is not None else sum(float(r["orders"] or 0) for r in buys),
-        "totalSellOrders": sell_orders if sell_orders is not None else sum(float(r["orders"] or 0) for r in sells),
-        "updatedAt": now_iso(),
-    }
-
 @app.get("/api/production/depth/{symbol}")
 async def production_depth(symbol: str):
-    symbol=symbol.upper().strip()
-    errors=[]
-    # Primary: nepse.py production SDK.
-    # Different NEPSE Python clients expose this same endpoint under different
-    # method names. Try the known market-depth names before using the HTTP
-    # compatibility endpoint. All of them return the exchange order book.
-    for method in ("getSymbolMarketDepth", "get_market_depth", "market_depth", "depth"):
-        try:
-            raw=await production_call(method, symbol)
-            normalized=_normalize_depth_payload(raw, symbol)
-            normalized["source"]="NEPSE production market-depth feed"
-            normalized["rawAvailable"]=raw is not None
-            if normalized["ok"]:
-                return normalized
-            errors.append(f"production SDK {method}: no usable levels")
-        except Exception as exc:
-            errors.append(f"production SDK {method}: {exc}")
-
-    # Fallback: the public NEPSE-compatible marketDepth endpoint. This is
-    # still live order-book data; do not substitute historical/derived prices.
-    for path in ("/marketDepth", "/MarketDepth"):
-        try:
-            raw=await public_get(path, {"symbol":symbol})
-            normalized=_normalize_depth_payload(raw, symbol)
-            normalized["source"]="NEPSE market-depth public feed"
-            normalized["rawAvailable"]=raw is not None
-            if normalized["ok"]:
-                return normalized
-            errors.append(f"{path}: no usable levels")
-        except Exception as exc:
-            errors.append(f"{path}: {exc}")
-
-    return {"ok":False,"symbol":symbol,"buy":[],"sell":[],"totalBuyQuantity":None,"totalSellQuantity":None,"totalBuyOrders":None,"totalSellOrders":None,"updatedAt":now_iso(),"source":"NEPSE live market-depth feeds","error":"; ".join(errors[-4:])}
+    depth, supply = await asyncio.gather(production_call("depth", symbol), production_call("supply_demand", symbol))
+    return {"ok": True, "symbol": symbol.upper(), "depth": depth, "supplyDemand": supply, "updatedAt": now_iso()}
 
 @app.get("/api/production/technical/{symbol}")
 async def production_technical(symbol: str):
@@ -2199,48 +2048,19 @@ async def api_public_fundamentals(symbol: str):
 
 @app.get("/api/stock-overview/{symbol}")
 async def api_stock_overview(symbol: str):
-    """Reliable normalized Stock Info payload.
+    """Single normalized payload for the Stock Info terminal.
 
-    The endpoint is deliberately fail-soft: one broken provider must never
-    erase all of Stock Info. Live NEPSE data is preferred, then verified
-    historical OHLCV is used for the fields that are inherently session based.
-    No values are invented.
+    Every value is sourced from an actual market/company/history dataset or is
+    mathematically derived from those values. Missing source values remain null
+    so the frontend can render an explicit em dash instead of inventing data.
     """
     symbol = symbol.upper().strip()
-    errors = []
-
-    async def safe(label, fn, default):
-        try:
-            value = await fn()
-            return value if value is not None else default
-        except Exception as exc:
-            errors.append(f"{label}: {type(exc).__name__}: {exc}")
-            return default
-
-    # Do not let a fundamentals failure prevent price/history from loading.
-    base, public, history = await asyncio.gather(
-        safe("fundamentals", lambda: get_fundamentals(symbol), {}),
-        safe("public fundamentals", lambda: get_public_fundamentals(symbol), {}),
-        safe("history", lambda: get_history(symbol), {"ok": False, "data": [], "errors": []}),
-    )
-
-    def rows(obj):
-        if isinstance(obj, list):
-            return [x for x in obj if isinstance(x, dict)]
-        if isinstance(obj, dict):
-            # History/public endpoints sometimes wrap rows several levels deep.
-            found = deep_rows(obj)
-            if found:
-                return found
-            for k in ("data", "content", "rows", "result", "results", "items", "records"):
-                v = obj.get(k)
-                if isinstance(v, list):
-                    return [x for x in v if isinstance(x, dict)]
-        return []
+    base = await get_fundamentals(symbol)
+    public = await get_public_fundamentals(symbol)
+    history = await get_history(symbol)
 
     def first_obj(*objs):
-        return next((o for o in objs if isinstance(o, dict) and o), {})
-
+        return next((o for o in objs if isinstance(o, dict)), {})
     def first_val(*objs, keys=()):
         for o in objs:
             if not isinstance(o, dict):
@@ -2249,156 +2069,174 @@ async def api_stock_overview(symbol: str):
             if v not in (None, "", "-"):
                 return v
         return None
+    def rows(obj):
+        return deep_rows(obj) or arr(obj)
+
+    def recursive_num(obj, keys, depth=0, seen=None):
+        """Find a real numeric fundamental anywhere inside NEPSE wrappers."""
+        if depth > 8 or obj is None:
+            return None
+        if seen is None:
+            seen=set()
+        if isinstance(obj, dict):
+            oid=id(obj)
+            if oid in seen:
+                return None
+            seen.add(oid)
+            # Prefer exact aliases at the current object before descending.
+            for k in keys:
+                if k in obj:
+                    v=num(obj.get(k))
+                    if v is not None:
+                        return v
+            for v in obj.values():
+                found=recursive_num(v, keys, depth+1, seen)
+                if found is not None:
+                    return found
+        elif isinstance(obj, list):
+            for v in obj:
+                found=recursive_num(v, keys, depth+1, seen)
+                if found is not None:
+                    return found
+        return None
 
     profile = first_obj(base.get("profile"), base.get("detail"), public.get("profile"))
-    market = first_obj(base.get("market"), base.get("valuation"))
+    market = first_obj(base.get("market"))
+    valuation = first_obj(base.get("valuation"), base.get("fundamentals"))
     price_rows = rows(public.get("price"))
     security_rows = rows(public.get("security"))
     financial_rows = rows(public.get("financials"))
     dividend_rows = rows(public.get("dividends"))
-    history_rows = rows(history.get("data") if isinstance(history, dict) else history)
+    history_rows = history.get("data", []) if isinstance(history, dict) else []
 
-    # Primary live row. Try the production SDK and then the actual hosted API
-    # route names documented by NepseAPI-Unofficial.
+    # Merge the live row from the authoritative market feed when available.
     live = {}
     try:
         raw_live = await production_call("live_market")
-        for r in deep_rows(raw_live, ("content", "data", "results", "rows")):
+        live_rows = deep_rows(raw_live, ("content", "data", "results", "rows"))
+        for r in live_rows:
             rs = str(pick(r, ["symbol", "ticker", "securitySymbol", "code", "stockSymbol"], "")).upper()
             if rs == symbol:
                 live = r
                 break
-    except Exception as exc:
-        errors.append(f"production live market: {exc}")
-
+    except Exception:
+        pass
     if not live:
-        try:
-            market_data = await get_market()
-            for r in deep_rows(market_data.get("live", []) if isinstance(market_data, dict) else []):
-                rs = str(pick(r, ["symbol", "ticker", "securitySymbol", "code", "stockSymbol"], "")).upper()
-                if rs == symbol:
-                    live = r
-                    break
-        except Exception as exc:
-            errors.append(f"central live market: {exc}")
+        for r in rows((await get_market()).get("live", [])):
+            rs = str(pick(r, ["symbol", "ticker", "securitySymbol", "code", "stockSymbol"], "")).upper()
+            if rs == symbol:
+                live = r
+                break
 
-    # Direct hosted API aliases. The service documents /LiveMarket and
-    # /companyPriceVolumeHistory; older builds used different casing.
-    if not live:
-        for path in ("/LiveMarket", "/liveMarket", "/live-market"):
-            try:
-                raw = await public_get(path)
-                for r in deep_rows(raw):
-                    rs = str(pick(r, ["symbol", "ticker", "securitySymbol", "code", "stockSymbol"], "")).upper()
-                    if rs == symbol:
-                        live = r
-                        break
-                if live:
-                    break
-            except Exception as exc:
-                errors.append(f"{path}: {exc}")
-
-    # If the live feed is unavailable, load the documented company history
-    # route directly before falling back to the generic history archive.
-    if len(history_rows) < 2:
-        for path in ("/companyPriceVolumeHistory", "/CompanyPriceVolumeHistory", "/PriceVolumeHistory"):
-            try:
-                raw = await public_get(path, {"symbol": symbol})
-                candidate = rows(raw)
-                if len(candidate) >= 2:
-                    history_rows = candidate
-                    history = {"ok": True, "symbol": symbol, "source": f"NEPSE public {path}", "data": candidate, "updatedAt": now_iso(), "errors": history.get("errors", []) if isinstance(history, dict) else []}
-                    break
-            except Exception as exc:
-                errors.append(f"history {path}: {exc}")
-
-    # Last verified fallback is the public daily CSV archive. It is real data,
-    # but it is labelled historical rather than pretending to be live.
-    if len(history_rows) < 2:
-        try:
-            backup = await static_daily_history(symbol)
-            if len(backup) >= 2:
-                history_rows = backup
-                history = {"ok": True, "symbol": symbol, "source": "Daily OHLCV archive fallback", "data": backup, "updatedAt": now_iso(), "errors": history.get("errors", []) if isinstance(history, dict) else []}
-        except Exception as exc:
-            errors.append(f"static history: {exc}")
-
-    # Latest history row is an honest session snapshot fallback for price fields.
-    # It is NOT called live; source label tells the UI exactly what it is.
-    latest = history_rows[-1] if history_rows else {}
-    previous = history_rows[-2] if len(history_rows) >= 2 else {}
-
-    ltp = num(first_val(live, market, profile, latest, *price_rows, keys=("ltp","lastTradedPrice","lastPrice","close","closingPrice","price")))
-    previous_close = num(first_val(live, market, profile, latest, previous, *price_rows, keys=("previousClose","previousClosingPrice","prevClose","previousPrice","preClose")))
-    if previous_close is None and previous:
-        previous_close = num(pick(previous, ["close","closingPrice","ltp","lastPrice","price"]))
-    open_price = num(first_val(live, market, latest, *price_rows, keys=("open","openPrice","openingPrice")))
-    high = num(first_val(live, market, latest, *price_rows, keys=("high","highPrice","dayHigh")))
-    low = num(first_val(live, market, latest, *price_rows, keys=("low","lowPrice","dayLow")))
-    absolute_change = num(first_val(live, market, latest, *price_rows, keys=("change","pointChange","difference","changeValue")))
-    change_pct = num(first_val(live, market, latest, *price_rows, keys=("percentageChange","perChange","percentChange","changePercent","pChange","pct")))
-    if absolute_change is None and ltp is not None and previous_close is not None:
-        absolute_change = ltp - previous_close
+    ltp = num(first_val(live, market, valuation, profile, *price_rows, keys=("ltp","lastTradedPrice","lastPrice","close","closingPrice","price")))
+    previous_close = num(first_val(live, market, profile, *price_rows, keys=("previousClose","previousClosingPrice","prevClose","previousPrice","preClose")))
+    open_price = num(first_val(live, market, profile, *price_rows, keys=("open","openPrice","openingPrice")))
+    high = num(first_val(live, market, profile, *price_rows, keys=("high","highPrice","dayHigh")))
+    low = num(first_val(live, market, profile, *price_rows, keys=("low","lowPrice","dayLow")))
+    absolute_change = num(first_val(live, market, profile, *price_rows, keys=("change","pointChange","difference","changeValue")))
+    change_pct = num(first_val(live, market, profile, *price_rows, keys=("percentageChange","perChange","percentChange","changePercent","pChange","pct")))
     if change_pct is None and absolute_change is not None and previous_close not in (None, 0):
         change_pct = absolute_change / previous_close * 100
+    if absolute_change is None and ltp is not None and previous_close is not None:
+        absolute_change = ltp - previous_close
 
-    volume = num(first_val(live, market, latest, *price_rows, keys=("volume","totalTradedQuantity","tradedQuantity","quantity","tradedShares","sharesTraded")))
-    turnover = num(first_val(live, market, latest, *price_rows, keys=("turnover","totalTurnover","totalTradedValue","tradedAmount","value")))
-    transactions = num(first_val(live, market, latest, *price_rows, keys=("transactions","totalTransactions","totalTrades","noOfTransactions","numberOfTransactions")))
-    average_price = num(first_val(live, market, latest, *price_rows, keys=("averagePrice","avgPrice","weightedAveragePrice")))
-    if average_price is None and latest.get("tradedAmount") is not None and latest.get("tradedQuantity") not in (None, 0):
-        average_price = num(latest.get("tradedAmount")) / num(latest.get("tradedQuantity"))
-
-    listed_shares = num(first_val(base.get("valuation"), profile, *security_rows, keys=("listedShares","totalListedShares","numberOfListedShares","totalShares","shareOutstanding","sharesOutstanding")))
-    market_cap = num(first_val(base.get("valuation"), market, profile, *security_rows, keys=("marketCap","marketCapitalization","marketCapitalizationValue","marCap")))
+    volume = num(first_val(live, market, *price_rows, keys=("volume","totalTradedQuantity","tradedQuantity","quantity","tradedShares","sharesTraded")))
+    turnover = num(first_val(live, market, *price_rows, keys=("turnover","totalTurnover","totalTradedValue","tradedAmount","value")))
+    transactions = num(first_val(live, market, *price_rows, keys=("transactions","totalTransactions","totalTrades","noOfTransactions","numberOfTransactions")))
+    average_price = num(first_val(live, market, *price_rows, keys=("averagePrice","avgPrice","weightedAveragePrice")))
+    listed_shares = num(first_val(valuation, profile, *security_rows, keys=("listedShares","totalListedShares","numberOfListedShares","totalShares","shareOutstanding")))
+    market_cap = num(first_val(valuation, market, profile, *security_rows, keys=("marketCap","marketCapitalization","marketCapitalizationValue","marCap")))
     if market_cap is None and ltp is not None and listed_shares is not None:
         market_cap = ltp * listed_shares
 
     latest_fin = first_obj(*(base.get("financials") or []), *financial_rows)
-    eps = num(first_val(base.get("valuation"), latest_fin, profile, *financial_rows, keys=("eps","earningPerShare","earningsPerShare")))
-    book_value = num(first_val(base.get("valuation"), latest_fin, profile, *financial_rows, keys=("bookValue","book_value","netWorthPerShare")))
-    pe = num(first_val(base.get("valuation"), latest_fin, profile, *financial_rows, keys=("pe","peRatio","priceEarningRatio")))
-    pbv = num(first_val(base.get("valuation"), latest_fin, profile, *financial_rows, keys=("pb","pbv","pbRatio","priceBookRatio","priceToBook")))
-    roe = num(first_val(base.get("valuation"), latest_fin, profile, *financial_rows, keys=("roe","returnOnEquity")))
+
+    # NEPSE/company providers do not use one universal field name. Accept the
+    # actual aliases used by financial-report, profile and public-data payloads.
+    fundamental_sources = [valuation, latest_fin, profile, base.get("financials"),
+                           public.get("financials"), financial_rows]
+    eps_keys=("eps","basicEps","basicEPS","dilutedEps","dilutedEPS",
+              "earningPerShare","earningsPerShare","earningsPerShareValue",
+              "epsValue","earningPerShareValue")
+    book_keys=("bookValue","book_value","bookValuePerShare","bookvaluepershare",
+               "netWorthPerShare","networthpershare","netAssetValuePerShare",
+               "navPerShare","netAssetValue")
+    pe_keys=("pe","peRatio","priceEarningRatio","priceEarningsRatio",
+             "priceToEarnings","priceToEarning","priceEarning")
+    pb_keys=("pbv","pb","pbRatio","priceBookRatio","priceToBookRatio",
+             "priceBookValue","priceToBookValue","priceToBook")
+    roe_keys=("roe","ROE","returnOnEquity","returnOnEquityPercent","roePercent")
+
+    eps = next((recursive_num(x, eps_keys) for x in fundamental_sources
+                if recursive_num(x, eps_keys) is not None), None)
+    book_value = next((recursive_num(x, book_keys) for x in fundamental_sources
+                       if recursive_num(x, book_keys) is not None), None)
+    pe = next((recursive_num(x, pe_keys) for x in fundamental_sources
+               if recursive_num(x, pe_keys) is not None), None)
+    pbv = next((recursive_num(x, pb_keys) for x in fundamental_sources
+                if recursive_num(x, pb_keys) is not None), None)
+    roe = next((recursive_num(x, roe_keys) for x in fundamental_sources
+                if recursive_num(x, roe_keys) is not None), None)
     if pe is None and ltp is not None and eps not in (None, 0): pe = ltp / eps
     if pbv is None and ltp is not None and book_value not in (None, 0): pbv = ltp / book_value
 
-    cash_div = num(first_val(base.get("valuation"), *dividend_rows, keys=("cashDividend","cash","cashPercentage","cashDividendPercent")))
-    bonus_div = num(first_val(base.get("valuation"), *dividend_rows, keys=("bonusDividend","bonus","bonusPercentage","bonusDividendPercent")))
-    dividend_yield = num(first_val(base.get("valuation"), *dividend_rows, keys=("dividendYield","yield","dividendYieldPercent")))
+    cash_div = next((recursive_num(x, ("cashDividend","cashDividendPercent","cashPercentage","cashDividendValue","cash"))
+                     for x in [valuation, dividend_rows] if recursive_num(x, ("cashDividend","cashDividendPercent","cashPercentage","cashDividendValue","cash")) is not None), None)
+    bonus_div = next((recursive_num(x, ("bonusDividend","bonusDividendPercent","bonusPercentage","bonusDividendValue","bonus"))
+                      for x in [valuation, dividend_rows] if recursive_num(x, ("bonusDividend","bonusDividendPercent","bonusPercentage","bonusDividendValue","bonus")) is not None), None)
+    dividend_yield = next((recursive_num(x, ("dividendYield","dividendYieldPercent","yield"))
+                           for x in [valuation, dividend_rows] if recursive_num(x, ("dividendYield","dividendYieldPercent","yield")) is not None), None)
     if dividend_yield is None and cash_div is not None and ltp not in (None, 0):
         dividend_yield = cash_div / ltp * 100
 
     closes = [num(r.get("close")) for r in history_rows if isinstance(r, dict) and num(r.get("close")) is not None]
     def trailing_return(n):
-        if len(closes) <= n or closes[-(n+1)] in (None, 0): return None
-        return (closes[-1] / closes[-(n+1)] - 1) * 100
+        if ltp is None or len(closes) <= n or closes[-(n+1)] in (None, 0): return None
+        return (ltp / closes[-(n+1)] - 1) * 100
     high52 = num(first_val(*price_rows, *security_rows, profile, keys=("fiftyTwoWeekHigh","high52","yearHigh","week52High")))
     low52 = num(first_val(*price_rows, *security_rows, profile, keys=("fiftyTwoWeekLow","low52","yearLow","week52Low")))
     if closes:
         last252 = closes[-252:]
-        if high52 is None: high52 = max(last252)
-        if low52 is None: low52 = min(last252)
+        if high52 is None and last252: high52 = max(last252)
+        if low52 is None and last252: low52 = min(last252)
 
-    company_name = first_val(base.get("company"), profile, *rows(public.get("profile")), keys=("companyName","securityName","name","company_name")) or symbol
+    company_name = first_val(base.get("company"), profile, *public.get("profile", []), keys=("companyName","securityName","name","company_name")) or symbol
     sector = first_val(profile, *security_rows, keys=("sectorName","sector","sectorDescription"))
-    live_available = bool(live)
-    source_market = "NEPSE live market feed" if live_available else ("Verified latest session OHLCV" if latest else "Unavailable")
 
     return {
-        "ok": bool(live_available or history_rows or base.get("ok") or public.get("ok")),
+        "ok": bool(base.get("ok") or public.get("ok") or history.get("ok") or live),
         "symbol": symbol,
         "companyName": company_name,
         "sector": sector,
         "updatedAt": now_iso(),
-        "source": {"market": source_market, "history": history.get("source") if isinstance(history, dict) else "Unavailable", "fundamentals": "NEPSE company/fundamental data + YONEPSE public fallback"},
-        "market": {"ltp": ltp, "change": absolute_change, "changePercent": change_pct, "open": open_price, "high": high, "low": low, "previousClose": previous_close, "turnover": turnover, "volume": volume, "transactions": transactions, "averagePrice": average_price, "listedShares": listed_shares, "marketCap": market_cap},
-        "performance": {"eps": eps, "pe": pe, "bookValue": book_value, "pbv": pbv, "roe": roe, "cashDividend": cash_div, "bonusDividend": bonus_div, "dividendYield": dividend_yield, "high52": high52, "low52": low52, "return1W": trailing_return(5), "return1M": trailing_return(22), "return3M": trailing_return(66), "return6M": trailing_return(132), "return1Y": trailing_return(252), "historySessions": len(closes)},
+        "source": {
+            "market": "NEPSE live market feed" if live else (base.get("sources", {}).get("market") or "Unavailable"),
+            "history": history.get("source") if isinstance(history, dict) else "Unavailable",
+            "fundamentals": "NEPSE company/fundamental data + YONEPSE public fallback",
+        },
+        "market": {
+            "ltp": ltp, "change": absolute_change, "changePercent": change_pct,
+            "open": open_price, "high": high, "low": low, "previousClose": previous_close,
+            "turnover": turnover, "volume": volume, "transactions": transactions,
+            "averagePrice": average_price, "listedShares": listed_shares, "marketCap": market_cap,
+        },
+        "performance": {
+            "eps": eps, "pe": pe, "bookValue": book_value, "pbv": pbv, "roe": roe,
+            "cashDividend": cash_div, "bonusDividend": bonus_div, "dividendYield": dividend_yield,
+            "high52": high52, "low52": low52, "return1W": trailing_return(5),
+            "return1M": trailing_return(22), "return3M": trailing_return(66),
+            "return6M": trailing_return(132), "return1Y": trailing_return(252),
+            "historySessions": len(closes),
+        },
         "history": history_rows,
         "financials": base.get("financials") or financial_rows,
         "dividends": dividend_rows,
-        "corporateActions": base.get("corporateActions") or [], "board": base.get("board") or [], "agm": base.get("agm") or [], "companyNews": base.get("companyNews") or [], "profile": profile,
-        "errors": errors + (base.get("errors") or []) + (public.get("errors") or []) + (history.get("errors") or [] if isinstance(history, dict) else []),
+        "corporateActions": base.get("corporateActions") or [],
+        "board": base.get("board") or [],
+        "agm": base.get("agm") or [],
+        "companyNews": base.get("companyNews") or [],
+        "profile": profile,
+        "errors": (base.get("errors") or []) + (public.get("errors") or []) + (history.get("errors") or [] if isinstance(history, dict) else []),
     }
 
 @app.get("/api/fundamentals/{symbol}")
