@@ -1434,7 +1434,7 @@ body{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",san
 </style>
 <style id="npco-company-logo-style">.npco-company-logo{width:42px;height:42px;flex:0 0 42px;object-fit:contain;border-radius:50%;background:#fff;border:1px solid #dce5e9;padding:4px}.npco-company-logo-fallback{width:42px;height:42px;flex:0 0 42px;align-items:center;justify-content:center;border-radius:50%;background:#e8f3f6;color:#176b78;font-weight:800}#npCompanyPage .npco-header{gap:10px}</style><!-- TradingView Advanced Charts: official hosted runtime (latest) -->
 <script id="pulse-tradingview-hosted-runtime" type="text/javascript" src="https://charting-library.tradingview-widget.com/charting_library/charting_library.standalone.js"></script>
-</head>
+<style id="npco-stock-info-final-fix">#npcoContent{display:block!important;visibility:visible!important}#npcoContent .npco-live-chart-card,#npcoContent .npco-fund-card,#npcoContent .npco-card{display:block!important;visibility:visible!important}#npcoContent .npco-fund-grid{display:grid!important}#npcoContent .npco-metric b,#npcoContent .npco-fund-item b{display:block!important;visibility:visible!important}.npco-company-chart{display:block!important;width:100%!important;height:220px!important}</style><style id="npco-premium-data-style">#npcoContent{display:block!important}.npco-section-title{font-size:15px;font-weight:850;margin-bottom:10px}.npco-live-chart-card{order:-1!important}.npco-source-note{margin-bottom:18px}.npco-metric{background:#f7fafc;border-radius:11px;padding:11px}.npco-metric b{display:block;margin-top:4px}</style></head>
 <body>
 <div id="nepse-pulse-splash" aria-label="NEPSE Pulse loading">
   <img src="splash.png" alt="NEPSE Pulse — Real Time Nepal Share Market">
@@ -3330,158 +3330,202 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
      Single-source architecture: Central Feed -> Floorsheet.
      No synthetic trades are generated.
      ========================================================= -->
-<section id="floorsheet-broker-v4" class="pulse-fs-panel pulse-home-feature-module" aria-label="One Month Floorsheet and Broker Intelligence">
+<section id="floorsheet-broker-v4" class="pulse-fs-panel pulse-home-feature-module" aria-label="Floorsheet and Broker Intelligence">
   <div class="pulse-fs-head">
     <div>
-      <div class="pulse-fs-kicker">ONE-MONTH MARKET FLOW</div>
+      <div class="pulse-fs-kicker">MARKET FLOW INTELLIGENCE</div>
       <h2>Floorsheet &amp; Broker Intelligence</h2>
-      <p>Real NEPSE floorsheet data for the trailing month, covering all listed companies and broker transaction flow.</p>
+      <p>Inspect available trades, broker activity, concentration and unusual transactions from the Central Feed.</p>
     </div>
-    <div class="pulse-fs-status"><span id="fsDot"></span><span id="fsStatus">Ready — press Load 1 Month</span></div>
-  </div>
-
-  <div class="fs-period-bar">
-    <span class="fs-period-pill">📅 Trailing 1 month</span>
-    <span id="fsCoverage">No historical data loaded</span>
-    <button id="fsLoad" class="fs-primary">Load 1 Month</button>
-  </div>
-
-  <div class="pulse-fs-controls">
-    <label>Company / Symbol
-      <input id="fsSearch" type="search" placeholder="Any company — e.g. NABIL">
-    </label>
-    <label>Broker
-      <input id="fsBroker" type="search" placeholder="Any broker number/name">
-    </label>
-    <label>Minimum quantity<input id="fsMinQty" type="number" min="0" placeholder="Any"></label>
-    <label>Minimum value<input id="fsMinValue" type="number" min="0" placeholder="Any"></label>
-    <button id="fsApply" class="fs-primary">Apply Filters</button>
-    <button id="fsClear">Clear</button>
-  </div>
-
-  <div class="pulse-fs-metrics">
-    <div><b id="fsTrades">—</b><span>Floor trades</span></div>
-    <div><b id="fsQuantity">—</b><span>Shares traded</span></div>
-    <div><b id="fsValue">—</b><span>Turnover</span></div>
-    <div><b id="fsSymbols">—</b><span>Companies traded</span></div>
-    <div><b id="fsBrokers">—</b><span>Active brokers</span></div>
+    <div class="pulse-fs-status"><span id="fsDot"></span><span id="fsStatus">Waiting for feed</span></div>
   </div>
 
   <div class="pulse-fs-tabs">
-    <button class="fs-tab active" data-fs-tab="companies">All Companies</button>
+    <button class="fs-tab active" data-fs-tab="trades">Trade Tape</button>
     <button class="fs-tab" data-fs-tab="brokers">Broker Flow</button>
-    <button class="fs-tab" data-fs-tab="details">Floorsheet Details</button>
+    <button class="fs-tab" data-fs-tab="unusual">Unusual Trades</button>
+    <button class="fs-tab" data-fs-tab="bulk">Bulk Activity</button>
   </div>
 
-  <div id="fsCompaniesView" class="fs-view">
-    <div class="fs-card">
-      <div class="fs-card-title">All NEPSE-listed Companies — 1 Month</div>
-      <div class="fs-hint">Search any symbol/company. Rows include one-month trades, quantity, turnover, broker participation and the largest buyer/seller by transaction value.</div>
-      <div class="fs-table-wrap">
-        <table class="fs-table fs-wide"><thead><tr>
-          <th>Symbol</th><th>Company</th><th>Trades</th><th>Quantity</th><th>Turnover</th><th>Avg Rate</th><th>Buy Brokers</th><th>Sell Brokers</th><th>Top Buyer</th><th>Top Seller</th>
-        </tr></thead><tbody id="fsCompanyRows"><tr><td colspan="10" class="fs-empty">Press Load 1 Month to retrieve real floorsheet data.</td></tr></tbody></table>
-      </div>
+  <div class="pulse-fs-controls">
+    <label>Symbol / broker<input id="fsSearch" type="search" placeholder="NABIL or broker"></label>
+    <label>Min quantity<input id="fsMinQty" type="number" min="0" placeholder="—"></label>
+    <label>Min value<input id="fsMinValue" type="number" min="0" placeholder="—"></label>
+    <label>Side
+      <select id="fsSide"><option value="any">Buy + Sell</option><option value="buy">Buy</option><option value="sell">Sell</option></select>
+    </label>
+    <label>Rows<select id="fsLimit"><option>50</option><option>100</option><option>200</option></select></label>
+    <button id="fsApply" class="fs-primary">Apply</button>
+    <button id="fsRefresh">Refresh Feed</button>
+  </div>
+
+  <div class="pulse-fs-metrics">
+    <div><b id="fsTrades">0</b><span>Trades</span></div>
+    <div><b id="fsQuantity">—</b><span>Quantity</span></div>
+    <div><b id="fsValue">—</b><span>Value</span></div>
+    <div><b id="fsSymbols">0</b><span>Symbols</span></div>
+    <div><b id="fsBrokers">0</b><span>Brokers</span></div>
+  </div>
+
+  <div id="fsTradesView" class="fs-view">
+    <div class="fs-table-wrap">
+      <table class="fs-table">
+        <thead><tr><th>Time</th><th>Symbol</th><th>Buyer</th><th>Seller</th><th>Price</th><th>Qty</th><th>Value</th><th>Type</th></tr></thead>
+        <tbody id="fsTradeRows"><tr><td colspan="8" class="fs-empty">Connect the Central Feed to populate floorsheet data.</td></tr></tbody>
+      </table>
     </div>
   </div>
 
   <div id="fsBrokersView" class="fs-view" hidden>
-    <div class="fs-card">
-      <div class="fs-card-title">Broker Flow — All Companies</div>
-      <div class="fs-hint">Net flow = broker-side buys minus broker-side sells during the selected month. This is transaction flow, not current client/broker holdings.</div>
-      <div class="fs-table-wrap"><table class="fs-table"><thead><tr><th>Broker</th><th>Buy Value</th><th>Sell Value</th><th>Net Flow</th><th>Buy Qty</th><th>Sell Qty</th><th>Trades</th></tr></thead><tbody id="fsBrokerRows"><tr><td colspan="7" class="fs-empty">No data loaded.</td></tr></tbody></table></div>
+    <div class="fs-broker-grid">
+      <div class="fs-card">
+        <div class="fs-card-title">Broker Activity</div>
+        <div class="fs-table-wrap"><table class="fs-table"><thead><tr><th>Broker</th><th>Buy Value</th><th>Sell Value</th><th>Net Flow</th><th>Trades</th><th>Share</th></tr></thead><tbody id="fsBrokerRows"><tr><td colspan="6" class="fs-empty">No floorsheet data.</td></tr></tbody></table></div>
+      </div>
+      <div class="fs-card">
+        <div class="fs-card-title">Top Symbols by Flow</div>
+        <div id="fsSymbolFlow" class="fs-rank-list"><div class="fs-empty">No data.</div></div>
+      </div>
     </div>
   </div>
 
-  <div id="fsDetailsView" class="fs-view" hidden>
+  <div id="fsUnusualView" class="fs-view" hidden>
     <div class="fs-card">
-      <div class="fs-card-title">Floorsheet Transaction Details</div>
-      <div class="fs-hint">For performance, the browser receives up to 3,000 most recent matching transactions. Enter a company such as NABIL to inspect that company's one-month floorsheet.</div>
-      <div class="fs-table-wrap"><table class="fs-table"><thead><tr><th>Date</th><th>Time</th><th>Contract</th><th>Symbol</th><th>Buyer</th><th>Seller</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead><tbody id="fsDetailRows"><tr><td colspan="9" class="fs-empty">No data loaded.</td></tr></tbody></table></div>
+      <div class="fs-card-title">Unusual Trade Detector</div>
+      <p class="fs-hint">Flags unusually large transactions relative to the loaded floorsheet. This is a descriptive screen, not a prediction.</p>
+      <div class="fs-table-wrap"><table class="fs-table"><thead><tr><th>Symbol</th><th>Buyer</th><th>Seller</th><th>Price</th><th>Qty</th><th>Value</th><th>Reason</th></tr></thead><tbody id="fsUnusualRows"><tr><td colspan="7" class="fs-empty">No unusual trades detected.</td></tr></tbody></table></div>
     </div>
   </div>
 
-  <div class="fs-footnote">Data source: NEPSE floorsheet archive via the configured server data layer. Broker numbers/names represent the transaction-side broker published with each trade.</div>
+  <div id="fsBulkView" class="fs-view" hidden>
+    <div class="fs-card">
+      <div class="fs-card-title">Bulk / Concentrated Activity</div>
+      <p class="fs-hint">Groups loaded trades by symbol and highlights concentration by transaction count and value.</p>
+      <div class="fs-table-wrap"><table class="fs-table"><thead><tr><th>Symbol</th><th>Trades</th><th>Quantity</th><th>Value</th><th>Avg Price</th><th>Largest Trade</th></tr></thead><tbody id="fsBulkRows"><tr><td colspan="6" class="fs-empty">No floorsheet data.</td></tr></tbody></table></div>
+    </div>
+  </div>
 </section>
 
-<style id="pulse-v5-floorsheet-style">
-#floorsheet-broker-v4{margin:28px 0;font-family:inherit;border:1px solid rgba(127,127,127,.18);border-radius:24px;padding:20px;background:rgba(127,127,127,.045);max-width:100%;box-sizing:border-box;overflow:hidden}
-.pulse-fs-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:14px}.pulse-fs-kicker{font-size:10px;letter-spacing:.14em;font-weight:800;opacity:.62}.pulse-fs-head h2{margin:4px 0;font-size:25px}.pulse-fs-head p{margin:0;font-size:13px;opacity:.68;line-height:1.45}.pulse-fs-status{font-size:11px;display:flex;gap:7px;align-items:center;padding:8px 10px;border-radius:99px;background:rgba(127,127,127,.09);white-space:nowrap}.pulse-fs-status span:first-child{width:7px;height:7px;border-radius:50%;background:#999}
-.fs-period-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:12px 0}.fs-period-pill{padding:8px 11px;border-radius:10px;background:rgba(127,127,127,.1);font-size:11px;font-weight:800}.fs-period-bar #fsCoverage{font-size:11px;opacity:.65;flex:1}.fs-period-bar button{border:0;border-radius:10px;padding:10px 14px;font-weight:800;cursor:pointer;background:#4169e1;color:#fff}
-.pulse-fs-tabs{display:flex;gap:7px;overflow:auto;padding:4px 0 12px}.fs-tab{border:1px solid rgba(127,127,127,.2);background:transparent;color:inherit;border-radius:10px;padding:9px 12px;white-space:nowrap;cursor:pointer}.fs-tab.active{font-weight:800;background:rgba(127,127,127,.13)}
-.pulse-fs-controls{display:grid;grid-template-columns:2fr 1.4fr 1fr 1fr auto auto;gap:9px;align-items:end;margin-bottom:14px}.pulse-fs-controls label{font-size:10px;opacity:.75}.pulse-fs-controls input{display:block;width:100%;box-sizing:border-box;margin-top:5px;padding:10px;border-radius:9px;border:1px solid rgba(127,127,127,.22);background:transparent;color:inherit}.pulse-fs-controls button{height:38px;border:1px solid rgba(127,127,127,.2);background:transparent;color:inherit;border-radius:9px;padding:0 12px;cursor:pointer}.pulse-fs-controls .fs-primary{font-weight:800;background:#4169e1;color:#fff;border-color:#4169e1}
-.pulse-fs-metrics{display:grid;grid-template-columns:repeat(5,1fr);gap:9px;margin-bottom:14px}.pulse-fs-metrics div{padding:12px;border-radius:13px;background:rgba(127,127,127,.07);min-width:0}.pulse-fs-metrics b{display:block;font-size:18px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pulse-fs-metrics span{font-size:10px;opacity:.6}.fs-table-wrap{overflow:auto;-webkit-overflow-scrolling:touch}.fs-table{width:100%;border-collapse:collapse;min-width:760px;font-size:12px}.fs-table.fs-wide{min-width:1180px}.fs-table th,.fs-table td{text-align:left;padding:10px;border-bottom:1px solid rgba(127,127,127,.12);white-space:nowrap}.fs-table th{font-size:10px;opacity:.6;position:sticky;top:0;background:inherit}.fs-empty{padding:24px!important;text-align:center!important;opacity:.6}.fs-up{font-weight:800}.fs-down{font-weight:800}.fs-card{border:1px solid rgba(127,127,127,.14);border-radius:16px;padding:14px;background:rgba(127,127,127,.035)}.fs-card-title{font-size:13px;font-weight:800;margin-bottom:8px}.fs-hint{font-size:11px;opacity:.6;line-height:1.45;margin-bottom:10px}.fs-footnote{font-size:10px;opacity:.5;line-height:1.5;margin-top:12px}
-@media(max-width:900px){.pulse-fs-controls{grid-template-columns:1fr 1fr 1fr}.pulse-fs-controls label:first-child{grid-column:1/-1}.pulse-fs-metrics{grid-template-columns:repeat(3,1fr)}}
-@media(max-width:600px){#floorsheet-broker-v4{padding:13px;border-radius:18px}.pulse-fs-head{display:block}.pulse-fs-status{display:inline-flex;margin-top:10px}.pulse-fs-controls{grid-template-columns:1fr 1fr}.pulse-fs-controls label:first-child{grid-column:1/-1}.pulse-fs-controls button{width:100%}.pulse-fs-metrics{grid-template-columns:repeat(2,1fr)}.fs-period-bar button{width:100%}.fs-table{font-size:11px}}
+<style id="pulse-v4-floorsheet-style">
+#floorsheet-broker-v4{margin:28px 0;font-family:inherit;border:1px solid rgba(127,127,127,.18);border-radius:24px;padding:20px;background:rgba(127,127,127,.045)}
+.pulse-fs-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:16px}.pulse-fs-kicker{font-size:10px;letter-spacing:.14em;font-weight:800;opacity:.62}.pulse-fs-head h2{margin:4px 0;font-size:25px}.pulse-fs-head p{margin:0;font-size:13px;opacity:.68}.pulse-fs-status{font-size:11px;display:flex;gap:7px;align-items:center;padding:8px 10px;border-radius:99px;background:rgba(127,127,127,.09);white-space:nowrap}.pulse-fs-status span:first-child{width:7px;height:7px;border-radius:50%;background:#999}
+.pulse-fs-tabs{display:flex;gap:7px;overflow:auto;padding-bottom:12px}.fs-tab{border:1px solid rgba(127,127,127,.2);background:transparent;color:inherit;border-radius:10px;padding:9px 12px;white-space:nowrap;cursor:pointer}.fs-tab.active{font-weight:800;background:rgba(127,127,127,.13)}
+.pulse-fs-controls{display:grid;grid-template-columns:2fr 1fr 1fr 1fr .7fr auto auto;gap:9px;align-items:end;margin-bottom:14px}.pulse-fs-controls label{font-size:10px;opacity:.75}.pulse-fs-controls input,.pulse-fs-controls select{display:block;width:100%;box-sizing:border-box;margin-top:5px;padding:9px;border-radius:9px;border:1px solid rgba(127,127,127,.22);background:transparent;color:inherit}.pulse-fs-controls button{height:36px;border:1px solid rgba(127,127,127,.2);background:transparent;color:inherit;border-radius:9px;padding:0 11px;cursor:pointer}.pulse-fs-controls .fs-primary{font-weight:800}
+.pulse-fs-metrics{display:grid;grid-template-columns:repeat(5,1fr);gap:9px;margin-bottom:14px}.pulse-fs-metrics div{padding:12px;border-radius:13px;background:rgba(127,127,127,.07)}.pulse-fs-metrics b{display:block;font-size:18px}.pulse-fs-metrics span{font-size:10px;opacity:.6}
+.fs-table-wrap{overflow:auto}.fs-table{width:100%;border-collapse:collapse;min-width:760px;font-size:12px}.fs-table th,.fs-table td{text-align:left;padding:10px;border-bottom:1px solid rgba(127,127,127,.12);white-space:nowrap}.fs-table th{font-size:10px;opacity:.6}.fs-empty{padding:20px!important;text-align:center!important;opacity:.6}.fs-up{font-weight:800}.fs-down{font-weight:800}.fs-type{font-size:10px;padding:4px 7px;border-radius:99px;background:rgba(127,127,127,.1)}
+.fs-broker-grid{display:grid;grid-template-columns:2fr 1fr;gap:14px}.fs-card{border:1px solid rgba(127,127,127,.14);border-radius:16px;padding:14px;background:rgba(127,127,127,.035)}.fs-card-title{font-size:12px;font-weight:800;margin-bottom:10px}.fs-rank-list{display:flex;flex-direction:column;gap:8px}.fs-rank{display:flex;justify-content:space-between;gap:8px;padding:10px;border-radius:10px;background:rgba(127,127,127,.07);font-size:11px}.fs-hint{font-size:11px;opacity:.6;line-height:1.45}
+@media(max-width:900px){.pulse-fs-controls{grid-template-columns:repeat(3,1fr)}.fs-broker-grid{grid-template-columns:1fr}}
+@media(max-width:600px){#floorsheet-broker-v4{padding:14px;border-radius:18px}.pulse-fs-head{display:block}.pulse-fs-status{display:inline-flex;margin-top:10px}.pulse-fs-controls{grid-template-columns:1fr 1fr}.pulse-fs-controls label:first-child{grid-column:1/-1}.pulse-fs-metrics{grid-template-columns:repeat(2,1fr)}}
 </style>
 
-<script id="pulse-v5-floorsheet-engine">
+<script id="pulse-v4-floorsheet-engine">
 (function(){
 'use strict';
 const $=id=>document.getElementById(id);
-const API=(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
-let report=null;
-const num=v=>{const n=Number(String(v??'').replace(/,/g,''));return Number.isFinite(n)?n:null};
-const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const money=v=>v==null?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:0});
-const money2=v=>v==null?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:2});
-function currentSymbol(){return (($('fsSearch')?.value||'').trim().toUpperCase())||''}
-function filteredCompanies(){
- const q=($('fsSearch')?.value||'').trim().toUpperCase();
- return (report?.companies||[]).filter(x=>!q||String(x.symbol).includes(q)||String(x.companyName||'').toUpperCase().includes(q));
+const num=v=>{const x=Number(String(v??'').replace(/,/g,''));return Number.isFinite(x)?x:null};
+const str=v=>String(v??'').trim();
+let all=[];
+
+function pick(o,ks){for(const k of ks){if(o&&o[k]!==undefined&&o[k]!==null&&o[k]!=='')return o[k]}return null}
+function normalize(x){
+  const buyer=str(pick(x,['buyerBroker','buyer','BuyerBroker','buyerBrokerCode','buyerMemberId','buyBroker']));
+  const seller=str(pick(x,['sellerBroker','seller','SellerBroker','sellerBrokerCode','sellerMemberId','sellBroker']));
+  const symbol=str(pick(x,['symbol','Symbol','stockSymbol','securitySymbol','script'])).toUpperCase();
+  const price=num(pick(x,['price','Price','tradePrice','rate','Rate']));
+  const qty=num(pick(x,['quantity','Quantity','tradeQuantity','qty','Qty']));
+  const value=num(pick(x,['amount','Amount','value','Value','turnover','Turnover'])) ?? (price!==null&&qty!==null?price*qty:null);
+  const time=str(pick(x,['time','Time','tradeTime','TradeTime','timestamp','Timestamp','date','Date']));
+  const id=str(pick(x,['contractId','ContractId','tradeId','TradeId','id','Id']));
+  const type=str(pick(x,['tradeType','TradeType','type','Type']));
+  return {raw:x,buyer,seller,symbol,price,qty,value,time,id,type};
 }
-function renderMetrics(){
- const rows=report?.floorsheet||[];
- $('fsTrades').textContent=report?.totalTradeRows!=null?Number(report.totalTradeRows).toLocaleString():'—';
- $('fsQuantity').textContent=money(rows.reduce((s,x)=>s+(Number(x.quantity)||0),0));
- $('fsValue').textContent=money(rows.reduce((s,x)=>s+(Number(x.amount)||0),0));
- $('fsSymbols').textContent=new Set(rows.map(x=>x.symbol).filter(Boolean)).size||'—';
- $('fsBrokers').textContent=(report?.brokers||[]).length||'—';
+function extract(st){
+  const c=[st?.floorsheet,st?.data?.floorsheet,st?.data?.Floorsheet,st?.floorSheet,st?.data?.floorSheet];
+  let a=c.find(Array.isArray)||[];
+  if(!a.length && st?.data && typeof st.data==='object'){
+    const vals=Object.values(st.data).find(v=>Array.isArray(v)&&v.some(x=>x&&typeof x==='object'&&('buyerBroker' in x||'buyer' in x||'quantity' in x)));
+    if(vals)a=vals;
+  }
+  return a.map(normalize).filter(x=>x.symbol||x.buyer||x.seller);
 }
-function renderCompanies(){
- const a=filteredCompanies();
- $('fsCompanyRows').innerHTML=a.length?a.map(x=>{
-   const tb=x.topBuyer?`${esc(x.topBuyer.broker)} · ${money(x.topBuyer.value)}`:'—';
-   const ts=x.topSeller?`${esc(x.topSeller.broker)} · ${money(x.topSeller.value)}`:'—';
-   return `<tr><td><b>${esc(x.symbol)}</b></td><td>${esc(x.companyName||'—')}</td><td>${money(x.trades)}</td><td>${money(x.quantity)}</td><td>${money(x.turnover)}</td><td>${money2(x.avgRate)}</td><td>${money(x.buyBrokerCount)}</td><td>${money(x.sellBrokerCount)}</td><td>${tb}</td><td>${ts}</td></tr>`
- }).join(''):'<tr><td colspan="10" class="fs-empty">No matching company data.</td></tr>';
+function fmt(v,d=0){return v===null||v===undefined||!Number.isFinite(v)?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:d})}
+function valSide(x){return x.type.toLowerCase().includes('buy')?'buy':x.type.toLowerCase().includes('sell')?'sell':null}
+
+function filtered(){
+ const search=str($('fsSearch').value).toLowerCase(), minQ=num($('fsMinQty').value), minV=num($('fsMinValue').value), side=$('fsSide').value;
+ return all.filter(x=>{
+   if(search && !(x.symbol+' '+x.buyer+' '+x.seller).toLowerCase().includes(search))return false;
+   if(minQ!==null && (x.qty===null||x.qty<minQ))return false;
+   if(minV!==null && (x.value===null||x.value<minV))return false;
+   if(side!=='any' && valSide(x)!==side)return false;
+   return true;
+ });
 }
-function renderBrokers(){
- const q=($('fsBroker')?.value||'').trim().toLowerCase();
- const a=(report?.brokers||[]).filter(x=>!q||String(x.broker).toLowerCase().includes(q));
- $('fsBrokerRows').innerHTML=a.length?a.map(x=>`<tr><td><b>${esc(x.broker)}</b></td><td>${money(x.buyValue)}</td><td>${money(x.sellValue)}</td><td class="${x.netValue>=0?'fs-up':'fs-down'}">${x.netValue>=0?'+':''}${money(x.netValue)}</td><td>${money(x.buyQty)}</td><td>${money(x.sellQty)}</td><td>${money(x.tradeCount)}</td></tr>`).join(''):'<tr><td colspan="7" class="fs-empty">No matching broker data.</td></tr>';
+function setMetrics(a){
+ $('fsTrades').textContent=fmt(a.length);
+ $('fsQuantity').textContent=fmt(a.reduce((s,x)=>s+(x.qty||0),0));
+ $('fsValue').textContent=fmt(a.reduce((s,x)=>s+(x.value||0),0));
+ $('fsSymbols').textContent=new Set(a.map(x=>x.symbol).filter(Boolean)).size;
+ const bs=new Set(a.flatMap(x=>[x.buyer,x.seller]).filter(Boolean)); $('fsBrokers').textContent=bs.size;
 }
-function renderDetails(){
- const q=($('fsSearch')?.value||'').trim().toUpperCase();
- const b=($('fsBroker')?.value||'').trim().toLowerCase();
- const minQ=num($('fsMinQty')?.value), minV=num($('fsMinValue')?.value);
- const a=(report?.floorsheet||[]).filter(x=>(!q||String(x.symbol).includes(q)||String(x.companyName||'').toUpperCase().includes(q))&&(!b||(String(x.buyer).toLowerCase().includes(b)||String(x.seller).toLowerCase().includes(b)))&&(minQ==null||Number(x.quantity)>=minQ)&&(minV==null||Number(x.amount)>=minV));
- $('fsDetailRows').innerHTML=a.length?a.map(x=>`<tr><td>${esc(x.date||'—')}</td><td>${esc(x.time||'—')}</td><td>${esc(x.trade||'—')}</td><td><b>${esc(x.symbol)}</b></td><td>${esc(x.buyer||'—')}</td><td>${esc(x.seller||'—')}</td><td>${money(x.quantity)}</td><td>${money2(x.rate)}</td><td>${money2(x.amount)}</td></tr>`).join(''):'<tr><td colspan="9" class="fs-empty">No matching floorsheet details in the loaded result.</td></tr>';
+function renderTrades(a){
+ $('fsTradeRows').innerHTML=a.length?a.slice(0,Number($('fsLimit').value)).map(x=>`<tr><td>${esc(x.time||'—')}</td><td><b>${esc(x.symbol||'—')}</b></td><td>${esc(x.buyer||'—')}</td><td>${esc(x.seller||'—')}</td><td>${fmt(x.price,2)}</td><td>${fmt(x.qty)}</td><td>${fmt(x.value)}</td><td><span class="fs-type">${esc(x.type||'Trade')}</span></td></tr>`).join(''):'<tr><td colspan="8" class="fs-empty">No trades match the current filters.</td></tr>';
 }
-function render(){renderMetrics();renderCompanies();renderBrokers();renderDetails()}
-async function load(){
- const sym=currentSymbol();
- $('fsStatus').textContent='Loading one month of real floorsheet data…';$('fsCoverage').textContent='Fetching historical trading sessions…';
- try{
-   const url=API+'/api/floorsheet-intelligence?months=1&detail_limit=3000'+(sym?'&symbol='+encodeURIComponent(sym):'');
-   const r=await fetch(url,{cache:'no-store'}); const d=await r.json();
-   if(!r.ok)throw new Error(d.detail||'Backend request failed');
-   report=d;
-   $('fsStatus').textContent=d.ok?'REAL FLOORSHEET DATA':'NO HISTORICAL ROWS';
-   $('fsCoverage').textContent=`${d.startDate} → ${d.endDate} · ${Number(d.listedCompanies||0).toLocaleString()} listed companies · ${Number(d.totalTradeRows||0).toLocaleString()} floor trades`;
-   render();
- }catch(e){console.error('Floorsheet intelligence:',e);$('fsStatus').textContent='DATA ERROR';$('fsCoverage').textContent=e.message||'Could not load historical floorsheet';$('fsCompanyRows').innerHTML=`<tr><td colspan="10" class="fs-empty">${esc(e.message||'Historical floorsheet request failed')}</td></tr>`;}
+function renderBrokers(a){
+ const m={};let total=a.reduce((s,x)=>s+(x.value||0),0);
+ a.forEach(x=>{
+   for(const side of ['buyer','seller']){const b=x[side];if(!b)continue;m[b]??={buy:0,sell:0,trades:0};m[b][side==='buyer'?'buy':'sell']+=(x.value||0);m[b].trades++}
+ });
+ const list=Object.entries(m).map(([b,v])=>({b,...v,net:v.buy-v.sell,share:total?v.buy/total:0})).sort((a,b)=>Math.abs(b.net)-Math.abs(a.net));
+ $('fsBrokerRows').innerHTML=list.length?list.slice(0,100).map(x=>`<tr><td><b>${esc(x.b)}</b></td><td>${fmt(x.buy)}</td><td>${fmt(x.sell)}</td><td class="${x.net>=0?'fs-up':'fs-down'}">${x.net>=0?'+':''}${fmt(x.net)}</td><td>${x.trades}</td><td>${fmt(x.share*100,1)}%</td></tr>`).join(''):'<tr><td colspan="6" class="fs-empty">No broker data available.</td></tr>';
+ const sy={};a.forEach(x=>{if(!x.symbol)return;sy[x.symbol]??={v:0,q:0,n:0};sy[x.symbol].v+=x.value||0;sy[x.symbol].q+=x.qty||0;sy[x.symbol].n++});
+ const top=Object.entries(sy).sort((a,b)=>b[1].v-a[1].v).slice(0,10);
+ $('fsSymbolFlow').innerHTML=top.length?top.map(([k,v])=>`<div class="fs-rank"><b>${esc(k)}</b><span>${fmt(v.v)} · ${v.n} trades</span></div>`).join(''):'<div class="fs-empty">No data.</div>';
+}
+function renderUnusual(a){
+ const vals=a.map(x=>x.value).filter(x=>x!==null).sort((x,y)=>x-y);
+ const median=vals.length?vals[Math.floor(vals.length/2)]:null;
+ const threshold=median!==null?Math.max(median*5,vals[vals.length-1]||0):null;
+ const top=a.filter(x=>x.value!==null&&threshold!==null&&x.value>=threshold).sort((x,y)=>y.value-x.value).slice(0,100);
+ $('fsUnusualRows').innerHTML=top.length?top.map(x=>`<tr><td><b>${esc(x.symbol)}</b></td><td>${esc(x.buyer||'—')}</td><td>${esc(x.seller||'—')}</td><td>${fmt(x.price,2)}</td><td>${fmt(x.qty)}</td><td>${fmt(x.value)}</td><td><span class="fs-type">Large vs loaded tape</span></td></tr>`).join(''):'<tr><td colspan="7" class="fs-empty">No unusually large loaded transactions.</td></tr>';
+}
+function renderBulk(a){
+ const m={};a.forEach(x=>{if(!x.symbol)return;m[x.symbol]??={n:0,q:0,v:0,pv:0,largest:0};m[x.symbol].n++;m[x.symbol].q+=x.qty||0;m[x.symbol].v+=x.value||0;m[x.symbol].pv+=x.value||0;m[x.symbol].largest=Math.max(m[x.symbol].largest,x.value||0)});
+ const top=Object.entries(m).filter(([,v])=>v.n>=2).sort((a,b)=>b[1].v-a[1].v).slice(0,100);
+ $('fsBulkRows').innerHTML=top.length?top.map(([k,v])=>`<tr><td><b>${esc(k)}</b></td><td>${v.n}</td><td>${fmt(v.q)}</td><td>${fmt(v.v)}</td><td>${v.q?fmt(v.v/v.q,2):'—'}</td><td>${fmt(v.largest)}</td></tr>`).join(''):'<tr><td colspan="6" class="fs-empty">No concentrated multi-trade activity.</td></tr>';
+}
+function render(){const a=filtered();setMetrics(a);renderTrades(a);renderBrokers(a);renderUnusual(a);renderBulk(a)}
+function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function sync(st){
+ all=extract(st||{});
+ const status=String(st?.status||'OFFLINE').toUpperCase();
+ $('fsStatus').textContent=status+(st?.updatedAt?' • '+new Date(st.updatedAt).toLocaleTimeString(): '');
+ $('fsDot').style.background=status==='LIVE'?'#20a464':status==='CACHED'?'#d29b19':'#999';
+ render();
 }
 document.addEventListener('DOMContentLoaded',()=>{
- document.querySelectorAll('#floorsheet-broker-v4 .fs-tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('#floorsheet-broker-v4 .fs-tab').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.querySelectorAll('#floorsheet-broker-v4 .fs-view').forEach(v=>v.hidden=true);$('fs'+b.dataset.fsTab[0].toUpperCase()+b.dataset.fsTab.slice(1)+'View').hidden=false}));
- $('fsLoad').addEventListener('click',load);$('fsApply').addEventListener('click',()=>{ if(report && currentSymbol() && currentSymbol()!==String(report.symbol||'').toUpperCase()) load(); else render(); });$('fsClear').addEventListener('click',()=>{$('fsSearch').value='';$('fsBroker').value='';$('fsMinQty').value='';$('fsMinValue').value='';render()});
- ['fsBroker','fsMinQty','fsMinValue'].forEach(id=>$(id).addEventListener('input',()=>{if(report)render()}));
+ document.querySelectorAll('.fs-tab').forEach(b=>b.addEventListener('click',()=>{
+   document.querySelectorAll('.fs-tab').forEach(x=>x.classList.remove('active'));b.classList.add('active');
+   document.querySelectorAll('#floorsheet-broker-v4 .fs-view').forEach(v=>v.hidden=true);
+   const target='fs'+b.dataset.fsTab[0].toUpperCase()+b.dataset.fsTab.slice(1)+'View';
+   $(target).hidden=false;
+ }));
+ $('fsApply').addEventListener('click',render);
+ $('fsRefresh').addEventListener('click',()=>window.PULSE_FEED?.refresh?.());
+ ['fsSearch','fsMinQty','fsMinValue','fsSide','fsLimit'].forEach(id=>$(id).addEventListener('change',render));
+ window.addEventListener('pulse-central-snapshot',e=>sync(e.detail));
+ window.addEventListener('pulse-feed-update',()=>{const st=window.PULSE_FEED_ENGINE?.state?.();if(st)sync(st)});
+ const st=window.PULSE_FEED_ENGINE?.state?.();if(st)sync(st);
 });
-window.loadFloorsheetIntelligence=load;
 })();
 </script>
 
 
+<!-- =========================================================
+     NEPSE PULSE — SECTOR HEATMAP + MARKET BREADTH V5
+     Uses Central Feed snapshot. Missing sector fields remain
+     unavailable rather than being fabricated.
+     ========================================================= -->
 <section id="sector-breadth-v5" class="pulse-sector-v5 pulse-home-feature-module" aria-label="Sector Heatmap and Market Breadth">
   <div class="sv5-head">
     <div>
@@ -4299,7 +4343,7 @@ document.addEventListener('DOMContentLoaded',()=>{document.querySelectorAll('.mi
 
 
 <style id="pulse-technical-screener-v11">
-.ts11{margin:24px 10px 36px;border:1px solid var(--line);border-radius:24px;background:var(--panel);box-shadow:0 10px 35px rgba(15,23,42,.07);overflow:hidden}.ts11 *{box-sizing:border-box}.ts11-head{padding:20px 18px 14px;display:flex;justify-content:space-between;gap:14px;align-items:flex-start}.ts11-kicker{font-size:10px;font-weight:900;letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}.ts11 h2{margin:5px 0 4px;font-size:25px;letter-spacing:-.5px}.ts11-sub{margin:0;color:var(--muted);font-size:12px;line-height:1.45}.ts11-status{font-size:10px;font-weight:900;white-space:nowrap;padding-top:5px}.ts11-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#999;margin-right:6px}.ts11-presets{display:flex;gap:7px;padding:0 18px 14px;overflow:auto}.ts11-preset{border:1px solid var(--line);background:var(--panel2);color:inherit;border-radius:999px;padding:8px 12px;font-size:10px;font-weight:850;white-space:nowrap;cursor:pointer}.ts11-preset.active{background:var(--text);color:var(--panel);border-color:var(--text)}.ts11-layout{display:grid;grid-template-columns:305px 1fr;gap:12px;padding:0 18px 20px}.ts11-panel{border:1px solid var(--line);border-radius:18px;padding:14px;background:var(--panel)}.ts11-panel h3{margin:0 0 11px;font-size:14px}.ts11-field{margin:9px 0}.ts11-field label{display:block;font-size:10px;font-weight:850;color:var(--muted);margin-bottom:5px}.ts11-field input,.ts11-field select{width:100%;border:1px solid var(--line);border-radius:10px;padding:9px;background:var(--panel);color:inherit;font-size:12px;outline:none}.ts11-row{display:grid;grid-template-columns:1fr 1fr;gap:7px}.ts11-check{display:flex;align-items:center;gap:7px;font-size:11px;margin:8px 0}.ts11-actions{display:flex;gap:7px;margin-top:12px}.ts11-btn{border:0;border-radius:10px;padding:10px 12px;background:var(--accent);color:#fff;font-weight:850;font-size:11px;cursor:pointer;flex:1}.ts11-btn.alt{background:var(--panel2);color:inherit;border:1px solid var(--line)}.ts11-note{font-size:9px;color:var(--muted);line-height:1.45;margin-top:9px}.ts11-summary{display:grid;grid-template-columns:repeat(5,1fr);gap:7px;margin-bottom:10px}.ts11-stat{border:1px solid var(--line);border-radius:13px;padding:9px;background:var(--panel2)}.ts11-stat b{display:block;font-size:15px}.ts11-stat span{font-size:9px;color:var(--muted)}.ts11-table-wrap{overflow:auto;border:1px solid var(--line);border-radius:17px}.ts11-table{width:100%;border-collapse:collapse;font-size:11px;min-width:1050px}.ts11-table th,.ts11-table td{padding:9px 7px;border-bottom:1px solid var(--line);white-space:nowrap;text-align:right}.ts11-table th{position:sticky;top:0;background:var(--panel2);color:var(--muted);font-size:9px;text-transform:uppercase;z-index:1}.ts11-table th:first-child,.ts11-table td:first-child{text-align:left}.ts11-table tr{cursor:pointer}.ts11-table tr:hover{background:rgba(65,105,225,.05)}.ts11-up{color:var(--accent2)}.ts11-down{color:var(--danger)}.ts11-chip{display:inline-block;border-radius:999px;padding:4px 7px;background:var(--panel2);font-size:9px;font-weight:850;margin:1px}.ts11-chip.buy{background:rgba(22,134,74,.12);color:var(--accent2)}.ts11-chip.sell{background:rgba(192,57,43,.12);color:var(--danger)}.ts11-empty{padding:28px;text-align:center;color:var(--muted);font-size:12px}.ts11-loading{padding:28px;text-align:center;color:var(--muted);font-size:12px}.ts11-scan-spinner{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border:3px solid rgba(65,105,225,.18);border-top-color:var(--accent);border-radius:50%;animation:ts11spin .75s linear infinite;vertical-align:-4px;margin-right:8px}.ts11-btn.is-scanning{opacity:.82;cursor:wait;position:relative}.ts11-btn.is-scanning::after{content:"";display:inline-block;width:12px;height:12px;border:2px solid rgba(255,255,255,.45);border-top-color:#fff;border-radius:50%;animation:ts11spin .7s linear infinite;margin-left:8px;vertical-align:-2px}@keyframes ts11spin{to{transform:rotate(360deg)}}.ts11-truth{margin-top:8px;padding:8px 10px;border-radius:10px;background:rgba(22,134,74,.08);color:var(--accent2);font-size:10px;line-height:1.4;border:1px solid rgba(22,134,74,.16)}.ts11-divider{height:1px;background:var(--line);margin:13px 0}.ts11-mini{display:flex;gap:6px;flex-wrap:wrap}.ts11-mini span{font-size:9px;padding:5px 7px;border-radius:8px;background:var(--panel2);color:var(--muted)}
+.ts11{margin:24px 10px 36px;border:1px solid var(--line);border-radius:24px;background:var(--panel);box-shadow:0 10px 35px rgba(15,23,42,.07);overflow:hidden}.ts11 *{box-sizing:border-box}.ts11-head{padding:20px 18px 14px;display:flex;justify-content:space-between;gap:14px;align-items:flex-start}.ts11-kicker{font-size:10px;font-weight:900;letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}.ts11 h2{margin:5px 0 4px;font-size:25px;letter-spacing:-.5px}.ts11-sub{margin:0;color:var(--muted);font-size:12px;line-height:1.45}.ts11-status{font-size:10px;font-weight:900;white-space:nowrap;padding-top:5px}.ts11-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#999;margin-right:6px}.ts11-presets{display:flex;gap:7px;padding:0 18px 14px;overflow:auto}.ts11-preset{border:1px solid var(--line);background:var(--panel2);color:inherit;border-radius:999px;padding:8px 12px;font-size:10px;font-weight:850;white-space:nowrap;cursor:pointer}.ts11-preset.active{background:var(--text);color:var(--panel);border-color:var(--text)}.ts11-layout{display:grid;grid-template-columns:305px 1fr;gap:12px;padding:0 18px 20px}.ts11-panel{border:1px solid var(--line);border-radius:18px;padding:14px;background:var(--panel)}.ts11-panel h3{margin:0 0 11px;font-size:14px}.ts11-field{margin:9px 0}.ts11-field label{display:block;font-size:10px;font-weight:850;color:var(--muted);margin-bottom:5px}.ts11-field input,.ts11-field select{width:100%;border:1px solid var(--line);border-radius:10px;padding:9px;background:var(--panel);color:inherit;font-size:12px;outline:none}.ts11-row{display:grid;grid-template-columns:1fr 1fr;gap:7px}.ts11-check{display:flex;align-items:center;gap:7px;font-size:11px;margin:8px 0}.ts11-actions{display:flex;gap:7px;margin-top:12px}.ts11-btn{border:0;border-radius:10px;padding:10px 12px;background:var(--accent);color:#fff;font-weight:850;font-size:11px;cursor:pointer;flex:1}.ts11-btn.alt{background:var(--panel2);color:inherit;border:1px solid var(--line)}.ts11-note{font-size:9px;color:var(--muted);line-height:1.45;margin-top:9px}.ts11-summary{display:grid;grid-template-columns:repeat(5,1fr);gap:7px;margin-bottom:10px}.ts11-stat{border:1px solid var(--line);border-radius:13px;padding:9px;background:var(--panel2)}.ts11-stat b{display:block;font-size:15px}.ts11-stat span{font-size:9px;color:var(--muted)}.ts11-table-wrap{overflow:auto;border:1px solid var(--line);border-radius:17px}.ts11-table{width:100%;border-collapse:collapse;font-size:11px;min-width:1050px}.ts11-table th,.ts11-table td{padding:9px 7px;border-bottom:1px solid var(--line);white-space:nowrap;text-align:right}.ts11-table th{position:sticky;top:0;background:var(--panel2);color:var(--muted);font-size:9px;text-transform:uppercase;z-index:1}.ts11-table th:first-child,.ts11-table td:first-child{text-align:left}.ts11-table tr{cursor:pointer}.ts11-table tr:hover{background:rgba(65,105,225,.05)}.ts11-up{color:var(--accent2)}.ts11-down{color:var(--danger)}.ts11-chip{display:inline-block;border-radius:999px;padding:4px 7px;background:var(--panel2);font-size:9px;font-weight:850;margin:1px}.ts11-chip.buy{background:rgba(22,134,74,.12);color:var(--accent2)}.ts11-chip.sell{background:rgba(192,57,43,.12);color:var(--danger)}.ts11-empty{padding:28px;text-align:center;color:var(--muted);font-size:12px}.ts11-loading{padding:28px;text-align:center;color:var(--muted);font-size:12px}.ts11-divider{height:1px;background:var(--line);margin:13px 0}.ts11-mini{display:flex;gap:6px;flex-wrap:wrap}.ts11-mini span{font-size:9px;padding:5px 7px;border-radius:8px;background:var(--panel2);color:var(--muted)}
 @media(max-width:850px){.ts11-head{padding:17px}.ts11-layout{grid-template-columns:minmax(0,1fr);padding:0 10px 16px}.ts11-layout>*,.ts11-panel,.ts11-table-wrap{min-width:0;width:100%}.ts11-presets{padding-left:10px;padding-right:10px}.ts11-summary{grid-template-columns:1fr 1fr}.ts11-stat:last-child{grid-column:span 2}.ts11-actions{display:grid;grid-template-columns:1fr;gap:8px;width:100%}.ts11-btn{width:100%;min-width:0}.ts11{margin:12px 6px 25px;max-width:calc(100% - 12px)}.ts11-field input,.ts11-field select{max-width:100%}}
 </style>
 <section id="advanced-screener-v10" class="ts11 pulse-home-feature-module" aria-label="Technical Screener">
@@ -4320,13 +4364,13 @@ document.addEventListener('DOMContentLoaded',()=>{document.querySelectorAll('.mi
       <div class="ts11-row"><div class="ts11-field"><label>Relative volume ≥</label><input id="ts11RelVol" type="number" step=".1" placeholder="1.5"></div><div class="ts11-field"><label>Min change %</label><input id="ts11MinCh" type="number" step=".1" placeholder="Any"></div></div>
       <div class="ts11-row"><div class="ts11-field"><label>Price above SMA20</label><select id="ts11PriceSma"><option value="any">Any</option><option value="yes">Yes</option><option value="no">No</option></select></div><div class="ts11-field"><label>Near 52W high %</label><input id="ts11NearHigh" type="number" step=".1" placeholder="e.g. 5"></div></div>
       <div class="ts11-field"><label>Sort by</label><select id="ts11Sort"><option value="score">Signal Score</option><option value="change">Change %</option><option value="rsi">RSI</option><option value="relativeVolume">Relative Volume</option><option value="turnover">Turnover</option><option value="price">Price</option><option value="adx">ADX</option></select></div>
-      <label class="ts11-check"><input id="ts11OnlyHistory" type="checkbox"> Require technical history</label>
+      <label class="ts11-check"><input id="ts11OnlyHistory" type="checkbox" checked> Require technical history</label>
       <div class="ts11-actions"><button id="ts11Run" class="ts11-btn">Run Scan</button><button id="ts11Clear" class="ts11-btn alt">Reset</button></div>
-      <div class="ts11-note">Indicators are calculated only from historical OHLCV returned by the backend. If history is unavailable, the screener shows the real live price/change and leaves unavailable indicators as —.</div><div class="ts11-truth">✓ REAL DATA ONLY — no random, demo, placeholder, or fabricated market values are inserted.</div>
+      <div class="ts11-note">Indicators are calculated from the historical OHLCV data returned by the NEPSE Pulse backend. No indicator value is fabricated when history is unavailable.</div>
     </aside>
     <main>
       <div id="ts11Summary" class="ts11-summary"></div>
-      <div class="ts11-panel" style="padding:10px"><div class="ts11-mini"><span id="ts11Universe">Universe: —</span><span id="ts11Updated">Updated: —</span><span id="ts11Source">Source: —</span><span>Tap a row → Professional Charting</span></div></div>
+      <div class="ts11-panel" style="padding:10px"><div class="ts11-mini"><span id="ts11Universe">Universe: —</span><span id="ts11Updated">Updated: —</span><span>Tap a row → Professional Charting</span></div></div>
       <div class="ts11-table-wrap"><table class="ts11-table"><thead><tr><th>Symbol</th><th>LTP</th><th>Change</th><th>RSI</th><th>SMA20</th><th>SMA50</th><th>EMA20</th><th>EMA50</th><th>MACD</th><th>Rel Vol</th><th>ADX</th><th>52W High</th><th>Signal</th></tr></thead><tbody id="ts11Results"><tr><td colspan="13"><div class="ts11-loading">Press Run Scan to load the technical universe…</div></td></tr></tbody></table></div>
     </main>
   </div>
@@ -4336,16 +4380,15 @@ document.addEventListener('DOMContentLoaded',()=>{document.querySelectorAll('.mi
 const $=id=>document.getElementById(id); let all=[]; let preset='all'; let loaded=false;
 const base=()=>String(window.NEPSE_PULSE_BACKEND_URL||'').replace(/\/$/,'');
 const n=v=>{const x=Number(v);return Number.isFinite(x)?x:null};
-function scanButton(active){const b=$('ts11Run');if(!b)return;b.classList.toggle('is-scanning',!!active);b.disabled=!!active;b.textContent=active?'Scanning NEPSE…':'Run Scan';}
 const fmt=(v,d=2)=>{const x=n(v);return x==null?'—':x.toLocaleString(undefined,{maximumFractionDigits:d})};
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function score(x){let s=0;if(x.rsi!=null){if(x.rsi>50)s+=1;if(x.rsi>=55&&x.rsi<=70)s+=2;if(x.rsi<30)s+=1}if(x.price!=null&&x.sma20!=null)s+=x.price>=x.sma20?2:-1;if(x.sma20!=null&&x.sma50!=null)s+=x.sma20>=x.sma50?2:-1;if(x.ema20!=null&&x.ema50!=null)s+=x.ema20>=x.ema50?2:-1;if(x.macd!=null&&x.macdSignal!=null)s+=x.macd>=x.macdSignal?2:-1;if(x.relativeVolume!=null&&x.relativeVolume>=1.5)s+=2;if(x.adx!=null&&x.adx>=25)s+=1;return s}
 function trend(x){if(x.price!=null&&x.sma20!=null&&x.sma50!=null){if(x.price>=x.sma20&&x.sma20>=x.sma50)return'Bullish';if(x.price<=x.sma20&&x.sma20<=x.sma50)return'Bearish'}return'Mixed'}
 function passes(x){const q=String($('ts11Search').value||'').trim().toUpperCase();const name=String(x.companyName||x.name||'').toUpperCase();const searchType=$('ts11SearchType').value||'any';if(q&&searchType==='symbol'&&!x.symbol.includes(q))return false;if(q&&searchType==='company'&&!name.includes(q))return false;if(q&&searchType==='any'&&!x.symbol.includes(q)&&!name.includes(q))return false;const rmin=n($('ts11RsiMin').value),rmax=n($('ts11RsiMax').value),rv=n($('ts11RelVol').value),mc=n($('ts11MinCh').value),nh=n($('ts11NearHigh').value);if($('ts11OnlyHistory').checked&&(!x.historyPoints||x.historyPoints<20))return false;if(rmin!=null&&(x.rsi==null||x.rsi<rmin))return false;if(rmax!=null&&(x.rsi==null||x.rsi>rmax))return false;if(rv!=null&&(x.relativeVolume==null||x.relativeVolume<rv))return false;if(mc!=null&&(x.change==null||x.change<mc))return false;const tr=trend(x);if($('ts11Trend').value==='bull'&&tr!=='Bullish')return false;if($('ts11Trend').value==='bear'&&tr!=='Bearish')return false;const ma=$('ts11MA').value;if(ma==='above20'&&(x.price==null||x.ema20==null||x.price<x.ema20))return false;if(ma==='above50'&&(x.price==null||x.ema50==null||x.price<x.ema50))return false;if(ma==='golden'&&(x.sma20==null||x.sma50==null||x.sma20<x.sma50))return false;if(ma==='death'&&(x.sma20==null||x.sma50==null||x.sma20>x.sma50))return false;const md=$('ts11Macd').value;if(md==='bull'&&(x.macd==null||x.macdSignal==null||x.macd<x.macdSignal))return false;if(md==='bear'&&(x.macd==null||x.macdSignal==null||x.macd>x.macdSignal))return false;const ps=$('ts11PriceSma').value;if(ps==='yes'&&(x.price==null||x.sma20==null||x.price<x.sma20))return false;if(ps==='no'&&(x.price==null||x.sma20==null||x.price>=x.sma20))return false;if(nh!=null&&(x.high52==null||x.price==null||((x.high52-x.price)/x.high52*100)>nh))return false;if(preset==='momentum'&&(x.rsi==null||x.rsi<55||x.change==null||x.change<=0))return false;if(preset==='bullish'&&tr!=='Bullish')return false;if(preset==='breakout'&&(x.high52==null||x.price==null||x.price<x.high52*.97||x.relativeVolume==null||x.relativeVolume<1.2))return false;if(preset==='oversold'&&(x.rsi==null||x.rsi>=30))return false;if(preset==='volume'&&(x.relativeVolume==null||x.relativeVolume<1.5))return false;if(preset==='macd'&&(x.macd==null||x.macdSignal==null||x.macd<=x.macdSignal))return false;return true}
 function render(){const key=$('ts11Sort').value;const data=all.map(x=>({...x,_score:score(x)})).filter(passes);data.sort((a,b)=>((b[key]??-Infinity)-(a[key]??-Infinity)));const avg=data.length?data.reduce((s,x)=>s+(x.change||0),0)/data.length:0;const bull=data.filter(x=>trend(x)==='Bullish').length;const tech=data.filter(x=>(x.historyPoints||0)>=20).length;const shocks=data.filter(x=>(x.relativeVolume||0)>=1.5).length;$('ts11Summary').innerHTML=`<div class="ts11-stat"><b>${data.length}</b><span>Matches</span></div><div class="ts11-stat"><b>${fmt(avg,2)}%</b><span>Avg change</span></div><div class="ts11-stat"><b>${bull}</b><span>Bullish</span></div><div class="ts11-stat"><b>${shocks}</b><span>Vol shocks</span></div><div class="ts11-stat"><b>${tech}</b><span>With history</span></div>`;if(!data.length){$('ts11Results').innerHTML='<tr><td colspan="13"><div class="ts11-empty">No stocks match these conditions.</div></td></tr>';return}$('ts11Results').innerHTML=data.slice(0,500).map(x=>{const tr=trend(x),buy=x._score>=6;return`<tr data-symbol="${esc(x.symbol)}"><td><b>${esc(x.symbol)}</b><br><span style="font-size:9px;color:var(--muted)">${esc(x.companyName||x.name||'')}</span></td><td>${fmt(x.price)}</td><td class="${x.change>0?'ts11-up':x.change<0?'ts11-down':''}">${x.change==null?'—':(x.change>0?'+':'')+fmt(x.change)+'%'}</td><td>${fmt(x.rsi,1)}</td><td>${fmt(x.sma20)}</td><td>${fmt(x.sma50)}</td><td>${fmt(x.ema20)}</td><td>${fmt(x.ema50)}</td><td class="${x.macd!=null&&x.macdSignal!=null&&x.macd>x.macdSignal?'ts11-up':'ts11-down'}">${fmt(x.macd,3)}</td><td>${fmt(x.relativeVolume,2)}×</td><td>${fmt(x.adx,1)}</td><td>${fmt(x.high52)}</td><td><span class="ts11-chip ${buy?'buy':tr==='Bearish'?'sell':''}">${buy?'BUY SETUP':tr}</span><span class="ts11-chip">${x._score}</span></td></tr>`}).join('');document.querySelectorAll('#ts11Results tr[data-symbol]').forEach(row=>row.onclick=()=>{if(typeof window.openProfessionalChart==='function')window.openProfessionalChart(row.dataset.symbol);});}
-async function load(){const dot=$('ts11Dot'),status=$('ts11Status');const q=String($('ts11Search').value||'').trim();const st=$('ts11SearchType').value||'any';scanButton(true);dot.style.background='#d29b19';status.textContent=q?'SEARCHING NEPSE DATA…':'LOADING NEPSE MARKET DATA…';$('ts11Results').innerHTML='<tr><td colspan="13"><div class="ts11-loading"><span class="ts11-scan-spinner"></span>'+(q?'Reading real NEPSE data for '+esc(q)+'…':'Reading real NEPSE market + OHLCV data…')+'</div></td></tr>';try{const tf=encodeURIComponent($('ts11Tf').value||'D');const search=encodeURIComponent(q);const type=encodeURIComponent(st);const r=await fetch(base()+'/api/technical-screener?limit=60&technical=true&timeframe='+tf+'&search='+search+'&search_type='+type+'&_='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});if(!r.ok)throw new Error('HTTP '+r.status);const d=await r.json();all=Array.isArray(d.data)?d.data:[];loaded=true;dot.style.background=d.ok?'#20a464':'#c0392b';status.textContent=d.ok?'REAL NEPSE DATA READY':'NEPSE DATA EMPTY';$('ts11Universe').textContent='Universe: '+fmt(d.universeCount,0)+' · loaded '+fmt(d.count,0);$('ts11Updated').textContent='Updated: '+new Date(d.updatedAt||Date.now()).toLocaleTimeString();$('ts11Source').textContent='Source: '+esc(d.source||'NEPSE Pulse backend');render();if(!d.ok&&Array.isArray(d.errors)&&d.errors.length)console.warn('Technical screener backend:',d.errors);}catch(e){dot.style.background='#c0392b';status.textContent='DATA UNAVAILABLE';$('ts11Universe').textContent='Universe: —';$('ts11Updated').textContent='Backend error';$('ts11Source').textContent='Source: unavailable';$('ts11Results').innerHTML='<tr><td colspan="13"><div class="ts11-empty">Could not reach the NEPSE Pulse data service. No market values were generated locally. '+esc(e.message||e)+'</div></td></tr>';console.warn('Technical screener',e);}finally{scanButton(false);}}
-function reset(){['ts11Search','ts11RsiMin','ts11RsiMax','ts11RelVol','ts11MinCh','ts11NearHigh'].forEach(id=>$(id).value='');$('ts11SearchType').value='any';$('ts11Tf').value='D';$('ts11Trend').value='any';$('ts11MA').value='any';$('ts11Macd').value='any';$('ts11PriceSma').value='any';$('ts11Sort').value='score';$('ts11OnlyHistory').checked=false;preset='all';document.querySelectorAll('.ts11-preset').forEach(x=>x.classList.toggle('active',x.dataset.preset==='all'));if(loaded)render();}
-function open(){const ws=$('pulseFeatureWorkspace'),body=$('pulseWorkspaceBody'),root=$('advanced-screener-v10'),title=$('pulseWorkspaceTitle');if(!ws||!body||!root)return;document.querySelectorAll('.pulse-feature-mounted').forEach(x=>{if(x!==root)x.classList.remove('pulse-feature-mounted')});root.classList.add('pulse-feature-mounted');root.style.removeProperty('display');body.appendChild(root);title.textContent='🔎 Technical Screener';ws.classList.add('open');if(!loaded){const dot=$('ts11Dot'),status=$('ts11Status');if(dot)dot.style.background='#7b8794';if(status)status.textContent='READY — PRESS RUN SCAN';if($('ts11Universe'))$('ts11Universe').textContent='Universe: —';if($('ts11Updated'))$('ts11Updated').textContent='Updated: —';if($('ts11Source'))$('ts11Source').textContent='Source: —';if($('ts11Results'))$('ts11Results').innerHTML='<tr><td colspan="13"><div class="ts11-loading">Press <b>Run Scan</b> to load real NEPSE data.</div></td></tr>';scanButton(false);}}
+async function load(){const dot=$('ts11Dot'),status=$('ts11Status');dot.style.background='#d29b19';status.textContent='LOADING TECHNICAL DATA';$('ts11Results').innerHTML='<tr><td colspan="13"><div class="ts11-loading">Loading NEPSE universe and calculating indicators…</div></td></tr>';try{const tf=encodeURIComponent($('ts11Tf').value||'D');const r=await fetch(base()+'/api/technical-screener?limit=150&technical=true&timeframe='+tf,{cache:'no-store',headers:{Accept:'application/json'}});if(!r.ok)throw new Error('HTTP '+r.status);const d=await r.json();all=Array.isArray(d.data)?d.data:[];loaded=true;dot.style.background='#20a464';status.textContent='TECHNICAL DATA READY';$('ts11Universe').textContent='Universe: '+fmt(d.universeCount,0)+' · loaded '+fmt(d.count,0);$('ts11Updated').textContent='Updated: '+new Date(d.updatedAt||Date.now()).toLocaleTimeString();render();}catch(e){dot.style.background='#c0392b';status.textContent='DATA UNAVAILABLE';$('ts11Results').innerHTML='<tr><td colspan="13"><div class="ts11-empty">Technical data could not be loaded. Check the NEPSE Pulse backend.</div></td></tr>';console.warn('Technical screener',e);}}
+function reset(){['ts11Search','ts11RsiMin','ts11RsiMax','ts11RelVol','ts11MinCh','ts11NearHigh'].forEach(id=>$(id).value='');$('ts11SearchType').value='any';$('ts11Tf').value='D';$('ts11Trend').value='any';$('ts11MA').value='any';$('ts11Macd').value='any';$('ts11PriceSma').value='any';$('ts11Sort').value='score';$('ts11OnlyHistory').checked=true;preset='all';document.querySelectorAll('.ts11-preset').forEach(x=>x.classList.toggle('active',x.dataset.preset==='all'));if(loaded)render();}
+function open(){const ws=$('pulseFeatureWorkspace'),body=$('pulseWorkspaceBody'),root=$('advanced-screener-v10'),title=$('pulseWorkspaceTitle');if(!ws||!body||!root)return;document.querySelectorAll('.pulse-feature-mounted').forEach(x=>{if(x!==root)x.classList.remove('pulse-feature-mounted')});root.classList.add('pulse-feature-mounted');root.style.removeProperty('display');body.appendChild(root);title.textContent='🔎 Technical Screener';ws.classList.add('open');if(!loaded)load();}
 window.openTechnicalScreener=open;window.PULSE_TECHNICAL_SCREENER={load,open,render};
 document.addEventListener('DOMContentLoaded',()=>{document.querySelectorAll('.ts11-preset').forEach(b=>b.onclick=()=>{document.querySelectorAll('.ts11-preset').forEach(x=>x.classList.remove('active'));b.classList.add('active');preset=b.dataset.preset;render()});$('ts11Run').onclick=load;$('ts11Clear').onclick=reset;['ts11Search','ts11SearchType','ts11Tf','ts11RsiMin','ts11RsiMax','ts11RelVol','ts11MinCh','ts11NearHigh','ts11Trend','ts11MA','ts11Macd','ts11PriceSma','ts11Sort','ts11OnlyHistory'].forEach(id=>$(id).addEventListener('change',()=>loaded&&render()));});
 })();
@@ -5700,7 +5743,6 @@ header.topbar, header.topbar .toprow, .mobile-exact-topbar {
   let snapshot={gainers:[],losers:[]};
   const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const n=v=>{const x=Number(v);return Number.isFinite(x)?x:null};
-
   const pick=(o,keys)=>{for(const k of keys){if(o&&o[k]!==undefined&&o[k]!==null&&o[k]!=='')return o[k]}return null};
   const norm=(x)=>({
     symbol:String(pick(x,['symbol','ticker','securityName','stockSymbol'])??'').trim(),
@@ -6215,8 +6257,47 @@ input,select{background:#fff!important;color:var(--text)!important}
  window.npOpenCompany=async function(sym){symbol=String(sym||'').trim().toUpperCase();if(!symbol)return;cache={};root.classList.add('open');document.getElementById('npcoSymbol').textContent=symbol;document.getElementById('npcoName').textContent='Loading company data…';await show('info')};
  async function show(tab){document.querySelectorAll('#npcoTabs button').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));content.innerHTML='<div class="npco-card">Loading '+esc(tab)+'…</div>';try{
   const live=liveRow(symbol);let html='';
-  if(tab==='info') {const [api,d,h]=await Promise.all([get('/api/company/'+encodeURIComponent(symbol)).catch(()=>null),get('/CompanyDetails?symbol='+encodeURIComponent(symbol)).catch(()=>null),get('/PriceVolumeHistory?symbol='+encodeURIComponent(symbol)).catch(()=>null)]);const profile=(api?.details||api?.company||api?.profile|| (Array.isArray(d)?d[0]:d?.company||d?.profile||d?.data||d))||{};const hist=arr(h);const ltp=live?.ltp??profile.ltp??profile.lastTradedPrice;document.getElementById('npcoName').textContent=profile.companyName||profile.securityName||live?.company||'Company information';const logoEl=document.getElementById('npcoCompanyLogo'),logoFallback=document.getElementById('npcoLogoFallback');const site=profile.website||profile.companyWebsite||profile.webSite||profile.url||'';let logoSrc='';try{if(site){const u=new URL(/^https?:\/\//i.test(site)?site:'https://'+site);logoSrc='https://www.google.com/s2/favicons?domain='+encodeURIComponent(u.hostname)+'&sz=128'}}catch(e){}logoEl.style.display=logoSrc?'block':'none';logoEl.src=logoSrc;logoFallback.textContent=(symbol||'?').slice(0,1);logoFallback.style.display=logoSrc?'none':'flex';const fields=[['LTP',ltp],['Change',live?.change??profile.change],['Change %',live?.pct??profile.percentageChange],['Open',live?.open??profile.openPrice],['High',live?.high??profile.highPrice],['Low',live?.low??profile.lowPrice],['Previous Close',live?.prevClose??profile.previousClose],['Turnover',live?.turnover??profile.turnover],['Volume',live?.volume??profile.totalTradedShares],['History sessions',hist.length]];html='<div class="npco-card npco-grid">'+fields.map(([k,v])=>'<div class="npco-metric"><small>'+esc(k)+'</small><b class="'+(k.includes('Change')&&Number(v)>0?'npco-up':k.includes('Change')&&Number(v)<0?'npco-down':'')+'">'+(k==='Change %'&&v!=null?num(v)+'%':num(v))+'</b></div>').join('')+'</div><div class="npco-card"><b>Company information</b><p class="npco-note">'+esc(profile.sectorName||profile.sector||'Sector unavailable')+' · Values appear only when supplied by the connected source.</p></div>';
-  } else if(tab==='depth'){const d=await get('/api/production/depth/'+encodeURIComponent(symbol)).catch(()=>null);const rows=arr(d?.depth??d?.supplyDemand??d);html=rows.length?table(rows):'<div class="npco-card npco-note">Market-depth data is not available from the connected feed for '+esc(symbol)+'.</div>';
+  if(tab==='info') {
+    const d=await get('/api/stock-overview/'+encodeURIComponent(symbol));
+    if(!d?.ok) throw new Error('Stock data is unavailable from the backend');
+    const m=d.market||{}, p=d.performance||{};
+    document.getElementById('npcoName').textContent=d.companyName||symbol;
+    const f=(label,v,unit='')=>'<div class="npco-metric"><small>'+esc(label)+'</small><b>'+((v==null||v==='')?'—':num(v)+unit)+'</b></div>';
+    const marketCard='<section class="npco-card"><div class="npco-section-title">Live Market</div><div class="npco-grid">'+[
+      f('LTP',m.ltp),f('Change',m.change),f('Change %',m.changePercent,'%'),f('Open',m.open),f('High',m.high),f('Low',m.low),
+      f('Previous Close',m.previousClose),f('Turnover',m.turnover),f('Volume',m.volume),f('Transactions',m.transactions),f('Average Price',m.averagePrice),f('Listed Shares',m.listedShares)
+    ].join('')+'</div></section>';
+    const chartCard='<section class="npco-fund-card npco-live-chart-card" data-chart-symbol="'+esc(symbol)+'"><div class="npco-chart-head"><b>'+esc(symbol)+' Price Chart</b><span class="npco-chart-change"></span></div><div class="npco-range-buttons">'+['1D','1W','1M','3M','6M','1Y','ALL'].map((r,i)=>'<button type="button" data-range="'+r+'" class="'+(i===0?'active':'')+'">'+r+'</button>').join('')+'</div><div class="npco-chart-area"><div class="npco-note">Loading verified price history…</div></div></section>';
+    const performanceCard='<section class="npco-fund-card"><div class="npco-fund-title">Performance & Fundamentals</div><div class="npco-fund-grid">'+[
+      ['EPS',p.eps],['P/E Ratio',p.pe],['Book Value',p.bookValue],['PBV',p.pbv],['ROE',p.roe],['Dividend Yield',p.dividendYield],
+      ['Cash Dividend',p.cashDividend],['Bonus Dividend',p.bonusDividend],['52 Week High',p.high52],['52 Week Low',p.low52],
+      ['1 Week Return',p.return1W],['1 Month Return',p.return1M],['3 Month Return',p.return3M],['6 Month Return',p.return6M],['1 Year Return',p.return1Y],
+      ['Market Cap',m.marketCap],['History Sessions',p.historySessions]
+    ].map(([k,v])=>'<div class="npco-fund-item"><small>'+esc(k)+'</small><b>'+((v==null||v==='')?'—':num(v)+(k.includes('Return')||k==='Dividend Yield'||k==='ROE'?'%':''))+'</b></div>').join('')+'</div></section>';
+    const sourceNote='<div class="npco-note npco-source-note">Data source: '+esc(d.source?.market||'NEPSE')+' · History: '+esc(d.source?.history||'Unavailable')+' · Missing source fields are shown as —. No synthetic values are generated.</div>';
+    html=chartCard+marketCard+performanceCard+sourceNote;
+    setTimeout(()=>renderCompanyChart(d.history||[],symbol),0);
+  } else if(tab==='depth'){
+    const d=await get('/api/production/depth/'+encodeURIComponent(symbol)+'?_t='+Date.now()).catch(()=>null);
+    const fmtDepth=v=>v==null||v===''?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:2});
+    const side=(rows,kind)=>{
+      const a=Array.isArray(rows)?rows:[];
+      const isBuy=kind==='buy';
+      return '<div class="npco-depth-side '+kind+'"><div class="npco-depth-title">'+(isBuy?'BUY ORDERS':'SELL ORDERS')+'</div><div class="npco-depth-head"><span>Orders</span><span>Quantity</span><span>Price</span></div>'+[0,1,2,3,4].map(i=>{const r=a[i];return '<div class="npco-depth-row"><span>'+fmtDepth(r?.orders)+'</span><span>'+fmtDepth(r?.quantity)+'</span><span>'+fmtDepth(r?.price)+'</span></div>'}).join('')+'</div>';
+    };
+    if(d?.ok){
+      const b=Number.isFinite(Number(d.totalBuyQuantity))?Number(d.totalBuyQuantity):null;
+      const s=Number.isFinite(Number(d.totalSellQuantity))?Number(d.totalSellQuantity):null;
+      const diff=(b!==null&&s!==null)?s-b:null;
+      const supply=diff===null?'Supply / demand total unavailable':diff>0?'Supply High by '+fmtDepth(Math.abs(diff))+' units':diff<0?'Demand High by '+fmtDepth(Math.abs(diff))+' units':'Balanced Order Book';
+      const lr=liveRow(symbol)||{};
+      const pct=lr.pct;
+      const pctText=pct==null?'—':(pct>=0?'+':'')+Number(pct).toFixed(2)+'%';
+      const change=(lr.ltp!=null&&lr.prev!=null)?lr.ltp-lr.prev:null;
+      const marketHead='<div class="npco-depth-market"><div><small>Change</small><b>'+(change==null?'—':fmtDepth(change))+' ('+esc(pctText)+')</b></div><div><small>LTP</small><b>'+fmtDepth(lr.ltp)+'</b></div><div><small>Pr. Close</small><b>'+fmtDepth(lr.prev)+'</b></div></div>';
+      html='<section class="npco-depth-wrap"><div class="npco-depth-summary"><div><b>('+esc(symbol)+') '+esc(document.getElementById('npcoName')?.textContent||symbol)+'</b><small>Live Market Depth · Top 5 Buy / Top 5 Sell</small></div><div class="npco-depth-updated">Updated '+new Date(d.updatedAt||Date.now()).toLocaleTimeString()+'</div></div>'+marketHead+'<div class="npco-depth-grid">'+side(d.buy,'buy')+side(d.sell,'sell')+'</div><div class="npco-depth-totals"><span>Total Buy Quantity : <b>'+fmtDepth(b)+'</b></span><span>Total Sell Quantity : <b>'+fmtDepth(s)+'</b></span></div><div class="npco-depth-supply '+(diff>0?'sell':'buy')+'">'+supply+'</div><div class="npco-note npco-depth-source">'+esc(d.source||'NEPSE live market-depth feed')+' · Exact exchange order-book levels when supplied · No synthetic values.</div></section>';
+    } else html='<div class="npco-card npco-note">Live market-depth data is unavailable for '+esc(symbol)+' right now. The application will not substitute historical or fabricated orders.</div>'
+;
   } else if(tab==='floorsheet'){const d=await get('/FloorsheetOf?symbol='+encodeURIComponent(symbol)).catch(()=>null);html=table(arr(d));
   } else if(tab==='brokers'){const d=await get('/api/brokers/history?symbol='+encodeURIComponent(symbol)+'&months=3').catch(()=>null);const rows=arr(d?.data??d?.rows??d);html=rows.length?table(rows):'<div class="npco-card npco-note">Broker analysis is unavailable for this company from the current endpoint.</div>';
   } else {const d=await get('/PriceVolumeHistory?symbol='+encodeURIComponent(symbol)).catch(()=>null);const rows=arr(d);html=rows.length?table(rows):'<div class="npco-card npco-note">Price history is unavailable for this company.</div>';}
@@ -6224,12 +6305,24 @@ input,select{background:#fff!important;color:var(--text)!important}
  }catch(e){content.innerHTML='<div class="npco-card npco-note">Could not load this section: '+esc(e.message)+'</div>'}}
  function table(rows){if(!rows.length)return '<div class="npco-card npco-note">No rows returned by the data source.</div>';const keys=Object.keys(rows[0]).slice(0,8);return '<div class="npco-card npco-scroll"><table class="npco-table"><thead><tr>'+keys.map(k=>'<th>'+esc(k)+'</th>').join('')+'</tr></thead><tbody>'+rows.slice(0,250).map(r=>'<tr>'+keys.map(k=>'<td>'+esc(typeof r[k]==='object'?JSON.stringify(r[k]):r[k])+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>'}
  document.getElementById('npcoTabs').addEventListener('click',e=>{const b=e.target.closest('button[data-tab]');if(b)show(b.dataset.tab)});
+ let depthTimer=null;
+ document.getElementById('npcoTabs').addEventListener('click',e=>{
+   const b=e.target.closest('button[data-tab]');
+   if(!b)return;
+   if(depthTimer){clearInterval(depthTimer);depthTimer=null;}
+   if(b.dataset.tab==='depth') depthTimer=setInterval(()=>{if(document.querySelector('#npcoTabs button.active')?.dataset.tab==='depth')show('depth');},5000);
+ });
  // Route existing company rows and search selections to the company page instead of Stock X-Ray.
  document.addEventListener('click',e=>{const row=e.target.closest('#pulseMoversRows .pulse-row,#pulseMoversRows .pulse-table-row,[data-symbol].pulse-table-row');if(row){const sym=row.dataset.symbol||row.querySelector('b')?.textContent?.trim()||row.querySelector('span')?.textContent?.trim();if(sym&&/^[A-Z0-9&.-]{2,12}$/.test(sym)){e.preventDefault();e.stopImmediatePropagation();npOpenCompany(sym)}}},true);
  const oldSearch=window.searchPulse;window.searchPulse=function(){const q=document.getElementById('searchBox')?.value.trim()||document.getElementById('mobileSearchBox')?.value.trim();if(q){resolveSymbol(q).then(sym=>npOpenCompany(sym));return}if(oldSearch)oldSearch()};
 })();
 </script>
 
+<style id="npco-market-depth-style">
+
+.npco-depth-market{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:#d7e3e8;border-bottom:1px solid #d7e3e8}.npco-depth-market>div{background:#3f9f45;color:#fff;text-align:center;padding:12px 7px}.npco-depth-market small{display:block;font-size:11px;opacity:.9}.npco-depth-market b{display:block;font-size:17px;margin-top:3px;font-variant-numeric:tabular-nums}.npco-depth-market>div:first-child b{font-size:15px}@media(max-width:650px){.npco-depth-market b{font-size:15px}.npco-depth-market>div:first-child b{font-size:13px}}
+.npco-depth-wrap{background:#fff;border:1px solid #dce7ec;border-radius:16px;overflow:hidden;margin:0 0 12px}.npco-depth-summary{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;background:#0b3434;color:#fff}.npco-depth-summary b{font-size:20px}.npco-depth-summary small{display:block;opacity:.75;margin-top:2px}.npco-depth-updated{font-size:11px;opacity:.8}.npco-depth-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:8px;background:#f5f7f8}.npco-depth-side{overflow:hidden;border-radius:10px;background:#dcecf8}.npco-depth-side.sell{background:#f9dede}.npco-depth-title{font-weight:850;font-size:16px;padding:12px;text-align:center;color:#fff;background:#087bd1}.npco-depth-side.sell .npco-depth-title{background:#d8464b}.npco-depth-head,.npco-depth-row{display:grid;grid-template-columns:.8fr 1.2fr 1.2fr;text-align:right}.npco-depth-head{font-weight:800;padding:10px 8px;background:rgba(0,0,0,.06);font-size:12px}.npco-depth-head span:first-child,.npco-depth-row span:first-child{text-align:left}.npco-depth-row{padding:11px 8px;border-top:1px solid rgba(20,50,70,.08);font-variant-numeric:tabular-nums}.npco-depth-row:nth-child(even){background:rgba(255,255,255,.24)}.npco-depth-totals{display:grid;grid-template-columns:1fr 1fr;text-align:center;padding:14px 8px;gap:8px;font-size:14px}.npco-depth-supply{text-align:center;padding:12px;font-weight:800;color:#fff;background:#d8464b}.npco-depth-supply.buy{background:#168a4a}.npco-depth-source{text-align:center;padding:10px}.npco-depth-side.sell .npco-depth-row span:last-child{color:#c7353c;font-weight:800}.npco-depth-side.buy .npco-depth-row span:last-child{color:#0875c8;font-weight:800}@media(max-width:650px){.npco-depth-grid{grid-template-columns:1fr}.npco-depth-summary{padding:12px}.npco-depth-summary b{font-size:18px}}
+</style>
 <style id="npco-fundamentals-chart-style">
 /* Market Movers stay neutral; color only the change figures. */
 #pulseMoversRows .pulse-row{background:transparent!important;color:#18252a!important}
@@ -6248,29 +6341,23 @@ input,select{background:#fff!important;color:var(--text)!important}
 </style>
 <script id="npco-fundamentals-chart-controller">
 (function(){
- const root=document.getElementById('npCompanyPage'),content=document.getElementById('npcoContent');if(!root||!content)return;
- const esc=v=>String(v??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
- const num=v=>{if(v==null||v==='')return '—';const n=Number(String(v).replace(/,/g,''));return Number.isFinite(n)?n.toLocaleString(undefined,{maximumFractionDigits:2}):esc(v)};
- const find=(obj,keys,depth=0)=>{if(!obj||typeof obj!=='object'||depth>5)return null;for(const k of keys)if(obj[k]!==undefined&&obj[k]!==null&&obj[k]!=='')return obj[k];for(const v of Object.values(obj)){const x=find(v,keys,depth+1);if(x!==null)return x}return null};
- let loaded='';
- async function enrich(){const symbol=document.getElementById('npcoSymbol')?.textContent?.trim();if(!symbol||!root.classList.contains('open')||document.querySelector('#npcoTabs button.active')?.dataset.tab!=='info'||loaded===symbol)return;loaded=symbol;
-  const base=(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
-  try{const enc=encodeURIComponent(symbol);const [xr,histRes,companyRes,fundRes,pubRes,marketRes]=await Promise.all([fetch(base+'/api/stock-xray/'+enc,{cache:'no-store'}).then(r=>r.ok?r.json():null).catch(()=>null),fetch(base+'/PriceVolumeHistory?symbol='+enc,{cache:'no-store'}).then(r=>r.ok?r.json():null).catch(()=>null),fetch(base+'/api/company/'+enc,{cache:'no-store'}).then(r=>r.ok?r.json():null).catch(()=>null),fetch(base+'/api/fundamentals/'+enc,{cache:'no-store'}).then(r=>r.ok?r.json():null).catch(()=>null),fetch(base+'/api/public/fundamentals/'+enc,{cache:'no-store'}).then(r=>r.ok?r.json():null).catch(()=>null),fetch(base+'/api/market',{cache:'no-store'}).then(r=>r.ok?r.json():null).catch(()=>null)]);
-   const f=xr?.fundamentals||{},val=f.valuation||f.fundamentals||{},prof=f.profile||{},company=companyRes?.details||companyRes?.company||companyRes?.profile||companyRes||{};const pub=pubRes||fundRes?.publicData||{};const firstRow=x=>Array.isArray(x)?(x[0]||{}):(x&&typeof x==='object'?x:{});const priceRow=firstRow(pub.price),financialRow=firstRow(pub.financials),hlRow=firstRow(pub.highLow),marketRows=marketRes?.data||marketRes?.stocks||marketRes?.liveMarket||[];const marketRow=Array.isArray(marketRows)?marketRows.find(r=>String(r.symbol||r.ticker||'').toUpperCase()===symbol):{};const fundVal=fundRes?.valuation||{};const source={...company,...prof,...priceRow,...financialRow,...hlRow,...marketRow,...val,...fundVal,...f,...(fundRes||{}),...(xr||{})};const data={ltp:find(source,['ltp','lastTradedPrice','lastTradedPrice','lastPrice','closingPrice','price']),prev:find(source,['previousClose','previousClosingPrice','prevClose','previousPrice']),eps:find(source,['eps','earningPerShare','earningsPerShare']),pe:find(source,['peRatio','priceEarningRatio','pe']),book:find(source,['bookValue','book_value','netWorthPerShare']),pbv:find(source,['pricePerBookValue','pbv','priceBookValue','pb']),yield:find(source,['dividendYield','oneYearYield']),cap:find(source,['marketCap','marketCapitalization']),high52:find(source,['fiftyTwoWeekHigh','fiftyTwoWeekHighAdj','52WeekHigh','yearHigh','high52']),low52:find(source,['fiftyTwoWeekLow','fiftyTwoWeekLowAdj','52WeekLow','yearLow','low52']),dividend:find(source,['totalDividend','cashDividend','bonusDividend','dividend','cash','bonusShare','lastDividend'])};
-   data.eps=val.eps??fundVal.eps??data.eps;data.pe=val.peRatio??val.pe??fundVal.pe??fundVal.peRatio??data.pe;data.book=val.bookValue??fundVal.bookValue??data.book;data.pbv=val.pricePerBookValue??val.pbv??val.pb??fundVal.pb??fundVal.pricePerBookValue??data.pbv;data.yield=val.dividendYield??val.oneYearYield??fundVal.oneYearYield??data.yield;data.cap=val.marketCap??fundVal.marketCap??data.cap;
-   const rows=Array.isArray(histRes)?histRes:(histRes?.data||histRes?.content||histRes?.rows||[]);const allPoints=rows.map(r=>({v:Number(r.close??r.ltp??r.price??r.lastTradedPrice),t:r.date??r.businessDate??r.timestamp??r.time})).filter(p=>Number.isFinite(p.v));
-   const chartCard=`<section class="npco-fund-card npco-live-chart-card" data-chart-symbol="${esc(symbol)}"><div class="npco-chart-head"><b>${esc(symbol)} Price Chart</b><span class="npco-chart-change"></span></div><div class="npco-chart-area"></div><div class="npco-range-buttons">${['1D','1W','1M','3M','6M','1Y','ALL'].map((r,i)=>`<button type="button" data-range="${r}" class="${i===0?'active':''}">${r}</button>`).join('')}</div></section>`;
-   const fundCard=`<section class="npco-fund-card" data-fund-symbol="${esc(symbol)}"><div class="npco-fund-title">Performance Values</div><div class="npco-fund-grid">${[['LTP',data.ltp],['Previous Close',data.prev],['EPS',data.eps],['P/E Ratio',data.pe],['Book Value',data.book],['PBV',data.pbv],['Dividend Yield',data.yield==null?null:num(data.yield)+'%'],['52 Week High',data.high52],['52 Week Low',data.low52],['Dividend',data.dividend],['Market Cap',data.cap==null?null:'Rs '+num(data.cap)]].map(([k,v])=>`<div class="npco-fund-item"><small>${k}</small><b>${v==null?'—':num(v)}</b></div>`).join('')}</div></section>`;
-   const scalarRows=obj=>Object.entries(obj||{}).filter(([k,v])=>v!==null&&v!==undefined&&['string','number','boolean'].includes(typeof v)&&String(v).trim()!=='').map(([k,v])=>`<div class="npco-fund-item"><small>${esc(k.replace(/([A-Z])/g,' $1').replace(/[_-]/g,' '))}</small><b>${esc(typeof v==='number'?num(v):v)}</b></div>`).join('');
-   const records=(title,arr)=>{const list=Array.isArray(arr)?arr:arr&&typeof arr==='object'?[arr]:[];if(!list.length)return '';return `<section class="npco-fund-card"><div class="npco-fund-title">${esc(title)}</div>${list.slice(0,30).map((row,i)=>`<details class="npco-company-record" ${i===0?'open':''}><summary>${esc(row.fiscalYear||row.year||row.quarter||row.date||row.bookCloseDate||row.title||`${title} ${i+1}`)}</summary><div class="npco-fund-grid">${scalarRows(row)||'<div class="npco-fund-item">No fields supplied</div>'}</div></details>`).join('')}</section>`};
-   const extraInfo=`<section class="npco-fund-card" data-company-extra="${esc(symbol)}"><div class="npco-fund-title">Company Information — available fields</div><div class="npco-fund-grid">${scalarRows(company)+scalarRows(prof)+scalarRows(pub.profile)+scalarRows(pub.security)||'<div class="npco-fund-item"><small>Company profile</small><b>Not provided by source</b></div>'}</div></section>`+records('Financial Reports',pub.financials||f.financials||f.financialReports)+records('Dividend History',pub.dividends||f.dividends)+records('52-Week / Market Details',pub.highLow);
-   if(!content.querySelector('[data-fund-symbol="'+CSS.escape(symbol)+'"]')){content.insertAdjacentHTML('beforeend',chartCard+fundCard+extraInfo);}
-   const chartEl=content.querySelector('[data-chart-symbol="'+CSS.escape(symbol)+'"]');
-   function draw(range){const limits={'1D':120,'1W':5,'1M':22,'3M':66,'6M':132,'1Y':264,'ALL':Infinity};let pts=allPoints.slice(-limits[range]);const area=chartEl.querySelector('.npco-chart-area'),badge=chartEl.querySelector('.npco-chart-change');chartEl.querySelectorAll('[data-range]').forEach(b=>b.classList.toggle('active',b.dataset.range===range));if(pts.length<2){area.innerHTML='<div class="npco-note">Not enough price history for this range.</div>';badge.textContent='';return;}const vals=pts.map(p=>p.v),first=vals[0],last=vals.at(-1),delta=last-first,pct=first?delta/first*100:0,color=delta>=0?'#35a853':'#d94343',min=Math.min(...vals),max=Math.max(...vals),span=max-min||1,xy=vals.map((v,i)=>`${(8+i*284/(vals.length-1)).toFixed(1)},${(156-(v-min)*130/span).toFixed(1)}`).join(' '),fill=xy+' 292,156 8,156';badge.style.color=color;badge.textContent=`${delta>=0?'+':''}${num(delta)} (${pct>=0?'+':''}${pct.toFixed(2)}%)`;area.innerHTML=`<svg class="npco-company-chart" viewBox="0 0 300 170" preserveAspectRatio="none"><defs><linearGradient id="npcoFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${color}" stop-opacity=".35"/><stop offset="100%" stop-color="${color}" stop-opacity=".05"/></linearGradient></defs>${[26,69,112,156].map(y=>`<line x1="8" y1="${y}" x2="292" y2="${y}" stroke="#d6dadd" stroke-dasharray="4 4"/>`).join('')}<polygon points="${fill}" fill="url(#npcoFill)"/><polyline points="${xy}" fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg><div class="npco-chart-meta">${pts.length} price points · Rs ${num(min)}–${num(max)}</div>`;}
-   chartEl.querySelectorAll('[data-range]').forEach(b=>b.addEventListener('click',()=>draw(b.dataset.range)));draw('1D');
-  }catch(e){loaded='';}
- }
- const observer=new MutationObserver(()=>{if(root.classList.contains('open'))enrich()});observer.observe(content,{childList:true,subtree:true});document.getElementById('npcoTabs')?.addEventListener('click',()=>{loaded='';setTimeout(enrich,80)});setInterval(()=>{if(root.classList.contains('open'))enrich()},1500);
+ const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+ const num=v=>{const n=Number(v);return Number.isFinite(n)?n.toLocaleString(undefined,{maximumFractionDigits:2}):esc(v)};
+ window.renderCompanyChart=function(rows,symbol){
+   const card=document.querySelector('#npcoContent .npco-live-chart-card'); if(!card)return;
+   const area=card.querySelector('.npco-chart-area'), badge=card.querySelector('.npco-chart-change');
+   const pts=(Array.isArray(rows)?rows:[]).map(r=>({v:Number(r.close??r.ltp??r.price??r.lastTradedPrice),d:r.date??r.businessDate??r.timestamp??r.time})).filter(x=>Number.isFinite(x.v));
+   function draw(range){
+     const lim={'1D':120,'1W':5,'1M':22,'3M':66,'6M':132,'1Y':252,'ALL':Infinity}[range]??22, p=pts.slice(-lim);
+     card.querySelectorAll('[data-range]').forEach(b=>b.classList.toggle('active',b.dataset.range===range));
+     if(p.length<2){area.innerHTML='<div class="npco-note">Verified historical price data is not available for this range.</div>';if(badge)badge.textContent='';return;}
+     const vals=p.map(x=>x.v), first=vals[0], last=vals.at(-1), delta=last-first, pct=first?(delta/first*100):0, min=Math.min(...vals), max=Math.max(...vals), span=max-min||1, color=delta>=0?'#159b68':'#e34c56';
+     const xy=vals.map((v,i)=>`${(8+i*284/(vals.length-1)).toFixed(1)},${(156-(v-min)*130/span).toFixed(1)}`).join(' ');
+     area.innerHTML='<svg class="npco-company-chart" viewBox="0 0 300 170" preserveAspectRatio="none">'+[26,69,112,156].map(y=>`<line x1="8" y1="${y}" x2="292" y2="${y}" stroke="#d6dadd" stroke-dasharray="4 4"/>`).join('')+`<polyline points="${xy}" fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg><div class="npco-chart-meta">${p.length} verified sessions · Rs ${num(min)}–${num(max)}</div>`;
+     if(badge){badge.textContent=`${delta>=0?'+':''}${num(delta)} (${pct>=0?'+':''}${pct.toFixed(2)}%)`;badge.style.color=color;}
+   }
+   card.querySelectorAll('[data-range]').forEach(b=>b.onclick=()=>draw(b.dataset.range));draw('1D');
+ };
 })();
 </script>
 
