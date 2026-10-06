@@ -2220,39 +2220,44 @@ async def api_market():
 
 @app.get("/api/live-nepse")
 async def api_live_nepse():
-    """Lightweight company-price feed for the Live NEPSE screen.
+    """Fast, verified company feed for the Live NEPSE screen.
 
-    During trading hours use the live ticker. Outside trading hours, or when
-    the ticker is empty, use today's verified price list so the screen never
-    remains stuck on a blank/loading state. No synthetic rows are created.
+    The all-company price set is loaded first because it is the stable source
+    for the complete scrip universe. During trading hours we then overlay the
+    live ticker values when available. This prevents the UI from waiting on a
+    slow/empty live_market request before it can show companies.
     """
     errors = []
+
+    # 1) Stable complete company-price set. Do NOT make live_market a
+    # prerequisite for rendering the company list.
     try:
-        raw = await asyncio.wait_for(production_call("live_market"), timeout=12)
-        rows = deep_rows(raw, ("content", "data", "results", "rows", "live"))
+        raw = await asyncio.wait_for(nepse_call(["today_price"]), timeout=18)
+        rows = deep_rows(raw, ("content", "data", "results", "rows", "items", "records"))
         if rows:
-            return {"ok": True, "live": rows, "source": "nepse.py live_market", "updatedAt": now_iso()}
-        errors.append("production live_market returned no rows")
-    except Exception as exc:
-        errors.append(f"production live_market: {type(exc).__name__}: {exc}")
-    try:
-        raw = await asyncio.wait_for(nepse_call(["live_market"]), timeout=12)
-        rows = deep_rows(raw, ("content", "data", "results", "rows", "live"))
-        if rows:
-            return {"ok": True, "live": rows, "source": "nepsepy live_market", "updatedAt": now_iso()}
-        errors.append("nepsepy live_market returned no rows")
-    except Exception as exc:
-        errors.append(f"nepsepy live_market: {type(exc).__name__}: {exc}")
-    # Market closed / live ticker empty: today_price is the verified latest
-    # price list and is the correct fallback for showing all companies.
-    try:
-        raw = await asyncio.wait_for(nepse_call(["today_price"], page=1, size=500), timeout=15)
-        rows = deep_rows(raw, ("content", "data", "results", "rows", "items"))
-        if rows:
-            return {"ok": True, "live": rows, "source": "nepsepy today_price fallback", "updatedAt": now_iso(), "marketClosedFallback": True}
+            return {
+                "ok": True,
+                "live": rows,
+                "source": "nepsepy today_price",
+                "updatedAt": now_iso(),
+                "marketClosedFallback": not schedule_open(),
+            }
         errors.append("today_price returned no rows")
     except Exception as exc:
         errors.append(f"today_price: {type(exc).__name__}: {exc}")
+
+    # 2) If today_price is unavailable, use the live ticker.
+    for label, call in (("nepsepy live_market", lambda: nepse_call(["live_market"])),
+                        ("production live_market", lambda: production_call("live_market"))):
+        try:
+            raw = await asyncio.wait_for(call(), timeout=10)
+            rows = deep_rows(raw, ("content", "data", "results", "rows", "live", "items"))
+            if rows:
+                return {"ok": True, "live": rows, "source": label, "updatedAt": now_iso()}
+            errors.append(f"{label} returned no rows")
+        except Exception as exc:
+            errors.append(f"{label}: {type(exc).__name__}: {exc}")
+
     return {"ok": False, "live": [], "source": None, "updatedAt": now_iso(), "errors": errors}
 
 @app.get("/api/index")
