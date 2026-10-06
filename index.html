@@ -6249,9 +6249,10 @@ input,select{background:#fff!important;color:var(--text)!important}
  const root=document.getElementById('npCompanyPage'), content=document.getElementById('npcoContent');let symbol='',cache={};
  const esc=v=>String(v??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const arr=x=>{if(Array.isArray(x))return x;if(!x||typeof x!=='object')return [];const seen=new Set();const walk=v=>{if(Array.isArray(v))return v;if(!v||typeof v!=='object'||seen.has(v))return [];seen.add(v);for(const k of ['data','content','rows','result','results','items','records','live','liveMarket','market','history','priceVolumeHistory','payload']){const q=v[k];if(Array.isArray(q))return q;if(q&&typeof q==='object'){const a=walk(q);if(a.length)return a}}return []};return walk(x)};
- const unwrapObject=x=>{if(!x||typeof x!=='object'||Array.isArray(x))return x;let cur=x;const seen=new Set();for(let i=0;i<8;i++){if(!cur||typeof cur!=='object'||seen.has(cur))break;seen.add(cur);if(cur.market||cur.performance||cur.history||cur.companyName)return cur;const q=cur.data??cur.payload??cur.result??cur.response;if(q&&typeof q==='object'&&!Array.isArray(q)){cur=q;continue}break}return cur};
  const num=x=>x==null||x===''?'—':(Number.isFinite(Number(x))?Number(x).toLocaleString(undefined,{maximumFractionDigits:2}):esc(x));
- const get=async path=>{if(cache[path])return cache[path];const raw=await (window.PulseFeedEngine?.fetchJSON?PulseFeedEngine.fetchJSON(path):fetch(path).then(r=>{if(!r.ok)throw Error(r.status);return r.json()}));const v=(raw&&raw.ok===true&&Object.prototype.hasOwnProperty.call(raw,'data'))?raw.data:raw;cache[path]=v;return v};
+ const API=()=>String(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
+ const unwrap=raw=>{if(raw&&typeof raw==='object'&&!Array.isArray(raw)){if(Object.prototype.hasOwnProperty.call(raw,'data') && (raw.ok===true || raw.status==='ok')) return raw.data; if(raw.payload&&typeof raw.payload==='object') return raw.payload;}return raw};
+ const get=async path=>{if(cache[path])return cache[path];const r=await fetch(API()+path+(path.includes('?')?'&':'?')+'_stockinfo='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});if(!r.ok)throw Error(path+' HTTP '+r.status);const raw=await r.json();const v=unwrap(raw);cache[path]=v;return v};
  function liveRow(sym){try{const st=window.PulseFeedEngine?.state?.()||{};const raw=st.live||st.market?.data||st.market||[];return arr(raw).map(x=>typeof normRow==='function'?normRow(x):x).find(x=>String(x.symbol||x.symbolName||x.securitySymbol||'').toUpperCase()===sym)}catch(e){return null}}
  async function resolveSymbol(q){const up=q.trim().toUpperCase();if(/^[A-Z0-9&.-]{2,12}$/.test(up))return up;try{const d=await get('/CompanyList');const rows=arr(d);const hit=rows.find(r=>[r.companyName,r.securityName,r.name,r.company_name].some(v=>String(v||'').trim().toLowerCase()===q.trim().toLowerCase()));return String(hit?.symbol||hit?.symbolName||hit?.securitySymbol||hit?.security_code||'').toUpperCase()||up}catch(e){return up}}
  window.npCloseCompany=()=>root.classList.remove('open');
@@ -6264,8 +6265,7 @@ input,select{background:#fff!important;color:var(--text)!important}
     // verified company/fundamentals/history endpoints.
     let d=null;
     try{d=await get('/api/stock-overview/'+encodeURIComponent(symbol));}catch(e){d=null;}
-    if(d&&typeof d==='object'){const inner=unwrapObject(d);if(inner&&inner!==d)d={...inner,ok:true};}
-    if(!d?.ok || !(d.market||d.performance||d.history)){
+    if(!d?.ok){
       const [marketRaw,liveRaw,companyRaw,fundRaw,publicRaw,histRaw]=await Promise.all([
         get('/api/market').catch(()=>null),
         get('/LiveMarket').catch(()=>[]),
@@ -6278,10 +6278,9 @@ input,select{background:#fff!important;color:var(--text)!important}
       const marketRows=arr(marketRaw?.live||marketRaw?.data?.live||marketRaw);
       const candidates=liveRows.concat(marketRows);
       const live=candidates.map(x=>typeof normRow==='function'?normRow(x):x).find(x=>String(x?.symbol||x?.ticker||x?.securitySymbol||x?.symbolName||'').toUpperCase()===symbol)||candidates.find(x=>String(x?.symbol||x?.ticker||x?.securitySymbol||x?.symbolName||'').toUpperCase()===symbol)||{};
-      const companyObj=unwrapObject(companyRaw)||{};
-      const company=companyObj?.details||companyObj?.company||companyObj?.profile||companyObj||{};
-      const pub=unwrapObject(publicRaw)||{};
-      const fund=unwrapObject(fundRaw)||{};
+      const company=companyRaw?.details||companyRaw?.company||companyRaw?.profile||companyRaw||{};
+      const pub=publicRaw||{};
+      const fund=fundRaw||{};
       const prof=company||pub.profile||{};
       const fin=Array.isArray(fund.financials)?fund.financials[0]:(Array.isArray(pub.financials)?pub.financials[0]:(fund.financials||pub.financials||{}));
       const hist=arr(histRaw);
@@ -6327,42 +6326,241 @@ input,select{background:#fff!important;color:var(--text)!important}
       f('LTP',m.ltp),f('Change',m.change),f('Change %',m.changePercent,'%'),f('Open',m.open),f('High',m.high),f('Low',m.low),
       f('Previous Close',m.previousClose),f('Turnover',m.turnover),f('Volume',m.volume),f('Transactions',m.transactions),f('Average Price',m.averagePrice),f('Listed Shares',m.listedShares)
     ].join('')+'</div></section>';
-    const chartCard='<section class="npco-fund-card npco-live-chart-card" data-chart-symbol="'+esc(symbol)+'"><div class="npco-chart-head"><b>'+esc(symbol)+' Price Chart</b><span class="npco-chart-change"></span></div><div class="npco-range-buttons">'+['1D','1W','1M','3M','6M','1Y','ALL'].map((r,i)=>'<button type="button" data-range="'+r+'" class="'+(i===1?'active':'')+'">'+r+'</button>').join('')+'</div><div class="npco-chart-area"><div class="npco-note">Loading verified price history…</div></div></section>';
-    const performanceCard='<section class="npco-fund-card"><div class="npco-fund-title">Performance & Fundamentals</div><div class="npco-fund-grid">'+[
+    const chartCard='<section class="npco-fund-card npco-live-chart-card" data-chart-symbol="'+esc(symbol)+'"><div class="npco-chart-head"><b>'+esc(symbol)+' Price Chart</b><span class="npco-chart-change"></span></div><div class="npco-range-buttons">'+['1D','1W','1M','3M','6M','1Y','ALL'].map((r,i)=>'<button type="button" data-range="'+r+'" class="'+(i===0?'active':'')+'">'+r+'</button>').join('')+'</div><div class="npco-chart-area"><div class="npco-note">Loading verified price history…</div></div></section>';
+    const fundamentalsExtra=(Array.isArray(d.financials)?d.financials:arr(d.financials)).map(x=>({field:x}));
+    const latestFin=Array.isArray(d.financials)&&d.financials.length?d.financials[d.financials.length-1]:{};
+    const fundamentalCards=[
       ['EPS',p.eps],['P/E Ratio',p.pe],['Book Value',p.bookValue],['PBV',p.pbv],['ROE',p.roe],['Dividend Yield',p.dividendYield],
       ['Cash Dividend',p.cashDividend],['Bonus Dividend',p.bonusDividend],['52 Week High',p.high52],['52 Week Low',p.low52],
       ['1 Week Return',p.return1W],['1 Month Return',p.return1M],['3 Month Return',p.return3M],['6 Month Return',p.return6M],['1 Year Return',p.return1Y],
-      ['Market Cap',m.marketCap],['History Sessions',p.historySessions]
-    ].map(([k,v])=>'<div class="npco-fund-item"><small>'+esc(k)+'</small><b>'+((v==null||v==='')?'—':num(v)+(k.includes('Return')||k==='Dividend Yield'||k==='ROE'?'%':''))+'</b></div>').join('')+'</div></section>';
+      ['Market Cap',m.marketCap],['Listed Shares',m.listedShares],['History Sessions',p.historySessions],
+      ['Net Profit',latestFin.netProfit],['Revenue',latestFin.revenue],['Total Assets',latestFin.assets],['Total Liabilities',latestFin.liabilities],['Total Equity',latestFin.equity]
+    ];
+    const performanceCard='<section class="npco-fund-card"><div class="npco-fund-title">Performance & Fundamentals</div><div class="npco-fund-grid">'+fundamentalCards.map(([k,v])=>'<div class="npco-fund-item"><small>'+esc(k)+'</small><b>'+((v==null||v==='')?'—':num(v)+(k.includes('Return')||k==='Dividend Yield'||k==='ROE'?'%':''))+'</b></div>').join('')+'</div></section>';
+    const detailBlocks=[];
+    const addDetail=(title,rows)=>{rows=Array.isArray(rows)?rows.filter(x=>x&&typeof x==='object'):[];if(!rows.length)return;const keys=[...new Set(rows.flatMap(r=>Object.keys(r)))].slice(0,30);detailBlocks.push('<section class="npco-fund-card npco-detail-card"><div class="npco-fund-title">'+esc(title)+'</div><div class="npco-scroll"><table class="npco-table"><thead><tr>'+keys.map(k=>'<th>'+esc(k)+'</th>').join('')+'</tr></thead><tbody>'+rows.slice(-20).reverse().map(r=>'<tr>'+keys.map(k=>'<td>'+esc(r[k]==null||r[k]===''?'—':typeof r[k]==='object'?JSON.stringify(r[k]):r[k])+'</td>').join('')+'</tr>').join('')+'</tbody></table></div></section>');};
+    addDetail('Financial Statements & Ratios',d.financials);
+    addDetail('Dividend History',d.dividends);
+    addDetail('Corporate Actions',d.corporateActions);
     const sourceNote='<div class="npco-note npco-source-note">Data source: '+esc(d.source?.market||'NEPSE')+' · History: '+esc(d.source?.history||'Unavailable')+' · Missing source fields are shown as —. No synthetic values are generated.</div>';
-    html=chartCard+marketCard+performanceCard+sourceNote;
-    setTimeout(()=>renderCompanyChart(d.history||[],symbol),0);
+    html=chartCard+marketCard+performanceCard+detailBlocks.join('')+sourceNote;
+    setTimeout(async()=>{let h=Array.isArray(d.history)?d.history:arr(d.history);if(h.length<2){try{h=arr(await get('/PriceVolumeHistory?symbol='+encodeURIComponent(symbol)));}catch(e){}}renderCompanyChart(h,symbol);},0);
   } else if(tab==='depth'){
-    const d=await get('/api/production/depth/'+encodeURIComponent(symbol)+'?_t='+Date.now()).catch(()=>null);
-    const fmtDepth=v=>v==null||v===''?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:2});
-    const side=(rows,kind)=>{
-      const a=Array.isArray(rows)?rows:[];
-      const isBuy=kind==='buy';
-      return '<div class="npco-depth-side '+kind+'"><div class="npco-depth-title">'+(isBuy?'BUY ORDERS':'SELL ORDERS')+'</div><div class="npco-depth-head"><span>Orders</span><span>Quantity</span><span>Price</span></div>'+[0,1,2,3,4].map(i=>{const r=a[i];return '<div class="npco-depth-row"><span>'+fmtDepth(r?.orders)+'</span><span>'+fmtDepth(r?.quantity)+'</span><span>'+fmtDepth(r?.price)+'</span></div>'}).join('')+'</div>';
+    const [primary,ov]=await Promise.all([
+      get('/api/production/depth/'+encodeURIComponent(symbol)+'?_t='+Date.now()).catch(()=>null),
+      get('/api/stock-overview/'+encodeURIComponent(symbol)+'?_t='+Date.now()).catch(()=>null)
+    ]);
+
+    // Normalize all known REAL NEPSE depth response shapes.
+    const unwrapDepth=raw=>{
+      const seen=new Set();
+      const walk=v=>{
+        if(!v||typeof v!=='object'||seen.has(v))return null;
+        seen.add(v);
+        if(Array.isArray(v))return null;
+        const buy=v.buyMarketDepthList??v.buyMarketDepth??v.buyOrders??v.bids;
+        const sell=v.sellMarketDepthList??v.sellMarketDepth??v.sellOrders??v.asks;
+        if(Array.isArray(buy)||Array.isArray(sell)){
+          return {
+            buy:Array.isArray(buy)?buy:[],
+            sell:Array.isArray(sell)?sell:[],
+            totalBuyQuantity:v.totalBuyQty??v.totalBuyQuantity??v.totalBuy??null,
+            totalSellQuantity:v.totalSellQty??v.totalSellQuantity??v.totalSell??null,
+            source:v.source||null
+          };
+        }
+        for(const k of ['depth','marketDepth','data','content','result','results','payload','response']){
+          const q=v[k];
+          if(q&&typeof q==='object'){
+            const hit=walk(q);
+            if(hit)return hit;
+          }
+        }
+        return null;
+      };
+      return walk(raw);
     };
-    if(d?.ok){
-      const b=Number.isFinite(Number(d.totalBuyQuantity))?Number(d.totalBuyQuantity):null;
-      const s=Number.isFinite(Number(d.totalSellQuantity))?Number(d.totalSellQuantity):null;
+
+    const normalizeLevel=(r,side)=>{
+      if(!r||typeof r!=='object')return null;
+      const pick=(...keys)=>{
+        for(const k of keys){
+          if(r[k]!==undefined&&r[k]!==null&&r[k]!=='')return r[k];
+        }
+        const wanted=keys.map(k=>String(k).toLowerCase().replace(/[^a-z0-9]/g,''));
+        for(const k of Object.keys(r)){
+          const nk=k.toLowerCase().replace(/[^a-z0-9]/g,'');
+          if(wanted.includes(nk)&&r[k]!==undefined&&r[k]!==null&&r[k]!=='')return r[k];
+        }
+        return null;
+      };
+      return {
+        price:pick('price','orderBookOrderPrice','orderPrice','rate','bidPrice','askPrice'),
+        quantity:pick('quantity','qty','orderQuantity','volume','totalQuantity'),
+        orders:pick('orderCount','orders','numberOfOrders','noOfOrders','count'),
+        side
+      };
+    };
+
+    const extractDepth=raw=>{
+      const d=unwrapDepth(raw);
+      if(!d)return null;
+      return {
+        buy:d.buy.map(x=>normalizeLevel(x,'buy')).filter(Boolean),
+        sell:d.sell.map(x=>normalizeLevel(x,'sell')).filter(Boolean),
+        totalBuyQuantity:d.totalBuyQuantity,
+        totalSellQuantity:d.totalSellQuantity,
+        source:d.source
+      };
+    };
+
+    let d=extractDepth(primary);
+
+    // Some symbols are available through the raw MarketDepth route even when
+    // the production adapter returns no usable levels.
+    if(!d || (!d.buy.length&&!d.sell.length)){
+      const rawFallback=await get('/MarketDepth?symbol='+encodeURIComponent(symbol)+'&_t='+Date.now()).catch(()=>null);
+      d=extractDepth(rawFallback)||d;
+    }
+
+    const fmtDepth=v=>{
+      if(v==null||v==='')return '—';
+      const n=Number(String(v).replace(/,/g,''));
+      return Number.isFinite(n)?n.toLocaleString(undefined,{maximumFractionDigits:2}):esc(v);
+    };
+
+    const sortLevels=(rows,kind)=>{
+      return (Array.isArray(rows)?rows:[]).slice().sort((x,y)=>{
+        const px=Number(x?.price),py=Number(y?.price);
+        if(Number.isFinite(px)&&Number.isFinite(py))return kind==='buy'?py-px:px-py;
+        return 0;
+      }).slice(0,5);
+    };
+
+    const side=(rows,kind)=>{
+      const a=sortLevels(rows,kind),isBuy=kind==='buy';
+      return '<div class="npco-depth-side '+kind+'"><div class="npco-depth-title">'+
+        (isBuy?'BUY ORDERS':'SELL ORDERS')+
+        '</div><div class="npco-depth-head"><span>Orders</span><span>Quantity</span><span>Price</span></div>'+
+        [0,1,2,3,4].map(i=>{
+          const r=a[i];
+          return '<div class="npco-depth-row"><span>'+fmtDepth(r?.orders)+'</span><span>'+
+            fmtDepth(r?.quantity)+'</span><span>'+fmtDepth(r?.price)+'</span></div>';
+        }).join('')+'</div>';
+    };
+
+    if(d && (d.buy.length||d.sell.length)){
+      const b=Number.isFinite(Number(d.totalBuyQuantity))?Number(d.totalBuyQuantity):
+        (d.buy.reduce((a,r)=>a+(Number(r.quantity)||0),0)||null);
+      const s=Number.isFinite(Number(d.totalSellQuantity))?Number(d.totalSellQuantity):
+        (d.sell.reduce((a,r)=>a+(Number(r.quantity)||0),0)||null);
       const diff=(b!==null&&s!==null)?s-b:null;
-      const supply=diff===null?'Supply / demand total unavailable':diff>0?'Supply High by '+fmtDepth(Math.abs(diff))+' units':diff<0?'Demand High by '+fmtDepth(Math.abs(diff))+' units':'Balanced Order Book';
-      const lr=liveRow(symbol)||{};
-      const pct=lr.pct;
+      const supply=diff===null?'Supply / demand total unavailable':
+        diff>0?'Supply High by '+fmtDepth(Math.abs(diff))+' units':
+        diff<0?'Demand High by '+fmtDepth(Math.abs(diff))+' units':'Balanced Order Book';
+
+      const om=ov?.market||{},lr=liveRow(symbol)||{};
+      const ltp=om.ltp!=null?Number(om.ltp):(lr.ltp!=null?Number(lr.ltp):null);
+      const prev=om.previousClose!=null?Number(om.previousClose):(lr.prev!=null?Number(lr.prev):null);
+      const change=om.change!=null?Number(om.change):((ltp!=null&&prev!=null)?ltp-prev:null);
+      const pct=om.changePercent!=null?Number(om.changePercent):
+        ((change!=null&&prev)?change/prev*100:(lr.pct!=null?Number(lr.pct):null));
       const pctText=pct==null?'—':(pct>=0?'+':'')+Number(pct).toFixed(2)+'%';
-      const change=(lr.ltp!=null&&lr.prev!=null)?lr.ltp-lr.prev:null;
-      const marketHead='<div class="npco-depth-market"><div><small>Change</small><b>'+(change==null?'—':fmtDepth(change))+' ('+esc(pctText)+')</b></div><div><small>LTP</small><b>'+fmtDepth(lr.ltp)+'</b></div><div><small>Pr. Close</small><b>'+fmtDepth(lr.prev)+'</b></div></div>';
-      html='<section class="npco-depth-wrap"><div class="npco-depth-summary"><div><b>('+esc(symbol)+') '+esc(document.getElementById('npcoName')?.textContent||symbol)+'</b><small>Live Market Depth · Top 5 Buy / Top 5 Sell</small></div><div class="npco-depth-updated">Updated '+new Date(d.updatedAt||Date.now()).toLocaleTimeString()+'</div></div>'+marketHead+'<div class="npco-depth-grid">'+side(d.buy,'buy')+side(d.sell,'sell')+'</div><div class="npco-depth-totals"><span>Total Buy Quantity : <b>'+fmtDepth(b)+'</b></span><span>Total Sell Quantity : <b>'+fmtDepth(s)+'</b></span></div><div class="npco-depth-supply '+(diff>0?'sell':'buy')+'">'+supply+'</div><div class="npco-note npco-depth-source">'+esc(d.source||'NEPSE live market-depth feed')+' · Exact exchange order-book levels when supplied · No synthetic values.</div></section>';
-    } else html='<div class="npco-card npco-note">Live market-depth data is unavailable for '+esc(symbol)+' right now. The application will not substitute historical or fabricated orders.</div>'
-;
-  } else if(tab==='floorsheet'){const d=await get('/FloorsheetOf?symbol='+encodeURIComponent(symbol)).catch(()=>null);html=table(arr(d));
-  } else if(tab==='brokers'){const d=await get('/api/brokers/history?symbol='+encodeURIComponent(symbol)+'&months=3').catch(()=>null);const rows=arr(d?.data??d?.rows??d);html=rows.length?table(rows):'<div class="npco-card npco-note">Broker analysis is unavailable for this company from the current endpoint.</div>';
+
+      const marketHead='<div class="npco-depth-market"><div><small>Change</small><b>'+
+        fmtDepth(change)+' ('+esc(pctText)+')</b></div><div><small>LTP</small><b>'+
+        fmtDepth(ltp)+'</b></div><div><small>Pr. Close</small><b>'+
+        fmtDepth(prev)+'</b></div></div>';
+
+      html='<section class="npco-depth-wrap"><div class="npco-depth-summary"><div><b>('+esc(symbol)+') '+
+        esc(document.getElementById('npcoName')?.textContent||symbol)+'</b><small>Live Market Depth · Top 5 Buy / Top 5 Sell</small></div><div class="npco-depth-updated">Updated '+
+        new Date(primary?.updatedAt||Date.now()).toLocaleTimeString()+'</div></div>'+marketHead+
+        '<div class="npco-depth-grid">'+side(d.buy,'buy')+side(d.sell,'sell')+
+        '</div><div class="npco-depth-totals"><span>Total Buy Quantity : <b>'+fmtDepth(b)+
+        '</b></span><span>Total Sell Quantity : <b>'+fmtDepth(s)+
+        '</b></span></div><div class="npco-depth-supply '+(diff>0?'sell':'buy')+'">'+supply+
+        '</div><div class="npco-note npco-depth-source">'+esc(d.source||primary?.source||
+        'NEPSE live market-depth feed')+' · Exact exchange order-book levels when supplied · No synthetic values.</div></section>';
+    } else {
+      html='<div class="npco-card npco-note">Live market-depth data is unavailable for '+esc(symbol)+
+        ' right now. The application will not substitute historical or fabricated orders.</div>';
+    }
+  } else if(tab==='floorsheet'){
+    const d=await get('/api/company-floorsheet/'+encodeURIComponent(symbol)+'?_t='+Date.now()).catch(()=>get('/FloorsheetOf?symbol='+encodeURIComponent(symbol)+'&_t='+Date.now()).catch(()=>null));
+    let all=arr(d?.data??d?.rows??d);
+    const dayOf=r=>{
+      const v=r?.businessDate??r?.tradeDate??r?.date??r?.calculationDate??r?.raw?.businessDate??r?.raw?.tradeDate??r?.raw?.date;
+      if(!v)return '';
+      const s=String(v);
+      return s.length>=10?s.slice(0,10):s;
+    };
+    const dated=all.map(r=>({r,date:dayOf(r)})).filter(x=>x.date);
+    const latestDay=dated.length?dated.map(x=>x.date).sort().slice(-1)[0]:'';
+    const rows=latestDay?all.filter(r=>!dayOf(r)||dayOf(r)===latestDay):all;
+    const n=v=>{if(v==null||v==='')return null;const x=Number(String(v).replace(/,/g,''));return Number.isFinite(x)?x:null};
+    const money2=v=>{const x=n(v);return x==null?'—':'Rs '+x.toLocaleString(undefined,{maximumFractionDigits:2})};
+    const qty2=v=>{const x=n(v);return x==null?'—':x.toLocaleString(undefined,{maximumFractionDigits:0})};
+    const val=(r,keys)=>{for(const k of keys){if(r?.[k]!=null&&r[k]!=='')return r[k];if(r?.raw?.[k]!=null&&r.raw[k]!=='')return r.raw[k]}return null};
+    const floorRows=rows.map(r=>({
+      time:val(r,['tradeTime','time'])??'—',
+      trade:val(r,['trade','contractId','contractNumber','transactionNumber'])??'—',
+      buyer:val(r,['buyerBrokerName','buyerBroker','buyerBrokerId','buyer'])??'—',
+      seller:val(r,['sellerBrokerName','sellerBroker','sellerBrokerId','seller'])??'—',
+      qty:val(r,['quantity','contractQuantity','tradedQuantity','volume','shares','qty']),
+      rate:val(r,['rate','contractRate','price','tradedPrice']),
+      amount:val(r,['amount','contractAmount','turnover','totalAmount']),
+    }));
+    const totalQty=floorRows.reduce((s,r)=>s+(n(r.qty)||0),0);
+    const totalValue=floorRows.reduce((s,r)=>s+(n(r.amount) ?? ((n(r.qty)||0)*(n(r.rate)||0))),0);
+    const buyers=new Set(floorRows.map(r=>String(r.buyer)).filter(x=>x&&x!=='—'));
+    const sellers=new Set(floorRows.map(r=>String(r.seller)).filter(x=>x&&x!=='—'));
+    const floorTable='<div class="npco-card npco-scroll npco-day-floor-card"><table class="npco-table npco-day-floor-table"><thead><tr><th>Time</th><th>Trade</th><th>Buyer</th><th>Seller</th><th>Quantity</th><th>Rate</th><th>Amount</th></tr></thead><tbody>'+
+      floorRows.map(r=>'<tr><td>'+esc(r.time)+'</td><td>'+esc(r.trade)+'</td><td>'+esc(r.buyer)+'</td><td>'+esc(r.seller)+'</td><td>'+qty2(r.qty)+'</td><td>'+money2(r.rate).replace(/^Rs /,'')+'</td><td>'+money2(r.amount)+'</td></tr>').join('')+
+      '</tbody></table></div>';
+    html='<section class="npco-day-panel"><div class="npco-day-head"><div><b>'+esc(symbol)+' · Daily Floorsheet</b><small>'+(latestDay?'Trading day: '+esc(latestDay):'Current trading session')+' · Every returned trade for this company</small></div><button type="button" class="npco-day-refresh" onclick="showCompanyTab&&showCompanyTab(\'floorsheet\')">Refresh</button></div>'+
+      '<div class="npco-day-stats"><div><small>Trades</small><b>'+rows.length.toLocaleString()+'</b></div><div><small>Shares</small><b>'+qty2(totalQty)+'</b></div><div><small>Turnover</small><b>'+money2(totalValue)+'</b></div><div><small>Buy brokers</small><b>'+buyers.size+'</b></div><div><small>Sell brokers</small><b>'+sellers.size+'</b></div></div>'+
+      (rows.length?floorTable:'<div class="npco-card npco-note">No verified floorsheet trades were returned for '+esc(symbol)+' for the current trading day.</div>')+
+      '<div class="npco-note npco-day-source">Source: verified NEPSE floorsheet feed · No synthetic transactions. The table contains the complete company rows returned for the selected trading day.</div></section>';
+  } else if(tab==='brokers'){
+    const d=await get('/api/company-floorsheet/'+encodeURIComponent(symbol)+'?_t='+Date.now()).catch(()=>get('/FloorsheetOf?symbol='+encodeURIComponent(symbol)+'&_t='+Date.now()).catch(()=>null));
+    let all=arr(d?.data??d?.rows??d);
+    const dayOf=r=>{const v=r?.businessDate??r?.tradeDate??r?.date??r?.calculationDate??r?.raw?.businessDate??r?.raw?.tradeDate??r?.raw?.date;return v?String(v).slice(0,10):''};
+    const dated=all.map(r=>dayOf(r)).filter(Boolean);
+    const latestDay=dated.length?dated.sort().slice(-1)[0]:'';
+    const rows=latestDay?all.filter(r=>!dayOf(r)||dayOf(r)===latestDay):all;
+    const num2=v=>{if(v==null||v==='')return null;const x=Number(String(v).replace(/,/g,''));return Number.isFinite(x)?x:null};
+    const pick2=(r,keys)=>{for(const k of keys){if(r?.[k]!=null&&r[k]!=='')return r[k];if(r?.raw?.[k]!=null&&r.raw[k]!=='')return r.raw[k]}return null};
+    const brokers={};
+    for(const r of rows){
+      const q=num2(pick2(r,['quantity','contractQuantity','tradedQuantity','volume','shares','qty']))||0;
+      const rate=num2(pick2(r,['rate','contractRate','price','tradedPrice']))||0;
+      const amount=num2(pick2(r,['amount','contractAmount','turnover','totalAmount'])) ?? q*rate;
+      const buy=String(pick2(r,['buyerBrokerName','buyerBroker','buyerBrokerId','buyer'])??'').trim();
+      const sell=String(pick2(r,['sellerBrokerName','sellerBroker','sellerBrokerId','seller'])??'').trim();
+      if(buy){const b=brokers[buy]??={broker:buy,buyValue:0,sellValue:0,buyQty:0,sellQty:0,buyTrades:0,sellTrades:0};b.buyValue+=amount;b.buyQty+=q;b.buyTrades++}
+      if(sell){const b=brokers[sell]??={broker:sell,buyValue:0,sellValue:0,buyQty:0,sellQty:0,buyTrades:0,sellTrades:0};b.sellValue+=amount;b.sellQty+=q;b.sellTrades++}
+    }
+    const br=Object.values(brokers).map(b=>({...b,netValue:b.buyValue-b.sellValue,netQty:b.buyQty-b.sellQty,trades:b.buyTrades+b.sellTrades,totalValue:b.buyValue+b.sellValue})).sort((a,b)=>Math.abs(b.netValue)-Math.abs(a.netValue));
+    const max=Math.max(1,...br.map(b=>Math.max(b.buyValue,b.sellValue)));
+    const fmt=v=>Number(v||0).toLocaleString(undefined,{maximumFractionDigits:2});
+    const graph=br.slice(0,12).map(b=>{
+      const buyW=Math.max(2,b.buyValue/max*100), sellW=Math.max(2,b.sellValue/max*100);
+      const netClass=b.netValue>=0?'positive':'negative';
+      return '<div class="npco-broker-bar-row"><div class="npco-broker-bar-label"><b>'+esc(b.broker)+'</b><span>Net '+(b.netValue>=0?'+':'')+'Rs '+fmt(b.netValue)+'</span></div><div class="npco-broker-track"><div class="npco-broker-bar buy" style="width:'+buyW.toFixed(2)+'%"><span>Buy Rs '+fmt(b.buyValue)+'</span></div></div><div class="npco-broker-track"><div class="npco-broker-bar sell" style="width:'+sellW.toFixed(2)+'%"><span>Sell Rs '+fmt(b.sellValue)+'</span></div></div></div>';
+    }).join('');
+    const brokerTable='<div class="npco-card npco-scroll"><table class="npco-table"><thead><tr><th>Broker</th><th>Buy Value</th><th>Sell Value</th><th>Net Flow</th><th>Buy Qty</th><th>Sell Qty</th><th>Trades</th></tr></thead><tbody>'+
+      br.map(b=>'<tr><td><b>'+esc(b.broker)+'</b></td><td>Rs '+fmt(b.buyValue)+'</td><td>Rs '+fmt(b.sellValue)+'</td><td class="'+(b.netValue>=0?'npco-net-buy':'npco-net-sell')+'">'+(b.netValue>=0?'+':'')+'Rs '+fmt(b.netValue)+'</td><td>'+fmt(b.buyQty)+'</td><td>'+fmt(b.sellQty)+'</td><td>'+b.trades+'</td></tr>').join('')+
+      '</tbody></table></div>';
+    const totalBuy=br.reduce((s,b)=>s+b.buyValue,0), totalSell=br.reduce((s,b)=>s+b.sellValue,0), net=totalBuy-totalSell;
+    html='<section class="npco-day-panel"><div class="npco-day-head"><div><b>'+esc(symbol)+' · Daily Broker Analysis</b><small>'+(latestDay?'Trading day: '+esc(latestDay):'Current trading session')+' · Calculated from this company’s actual executed NEPSE floorsheet trades</small></div><span class="npco-day-badge">'+br.length+' brokers</span></div>'+
+      '<div class="npco-day-stats"><div><small>Total Buy</small><b>Rs '+fmt(totalBuy)+'</b></div><div><small>Total Sell</small><b>Rs '+fmt(totalSell)+'</b></div><div><small>Net Flow</small><b class="'+(net>=0?'npco-net-buy':'npco-net-sell')+'">'+(net>=0?'+':'')+'Rs '+fmt(net)+'</b></div><div><small>Floorsheet Trades</small><b>'+rows.length+'</b></div></div>'+
+      '<div class="npco-card npco-broker-chart"><div class="npco-section-title">Top Broker Buy vs Sell Flow</div><div class="npco-broker-legend"><span><i class="buy-dot"></i> Buy value</span><span><i class="sell-dot"></i> Sell value</span></div>'+ (graph||'<div class="npco-note">No broker rows returned.</div>') +'</div>'+
+      (br.length?brokerTable:'<div class="npco-card npco-note">No verified broker activity was returned for '+esc(symbol)+' for the current trading day.</div>')+
+      '<div class="npco-note npco-day-source">Source: company-specific NEPSE floorsheet trades. Net flow = broker buy value − broker sell value. This is transaction flow, not current demat holding.</div></section>';
   } else {const d=await get('/PriceVolumeHistory?symbol='+encodeURIComponent(symbol)).catch(()=>null);const rows=arr(d);html=rows.length?table(rows):'<div class="npco-card npco-note">Price history is unavailable for this company.</div>';}
   content.innerHTML=html||'<div class="npco-card npco-note">No data returned.</div>';
  }catch(e){content.innerHTML='<div class="npco-card npco-note">Could not load this section: '+esc(e.message)+'</div>'}}
+ window.showCompanyTab=show;
  function table(rows){if(!rows.length)return '<div class="npco-card npco-note">No rows returned by the data source.</div>';const keys=Object.keys(rows[0]).slice(0,8);return '<div class="npco-card npco-scroll"><table class="npco-table"><thead><tr>'+keys.map(k=>'<th>'+esc(k)+'</th>').join('')+'</tr></thead><tbody>'+rows.slice(0,250).map(r=>'<tr>'+keys.map(k=>'<td>'+esc(typeof r[k]==='object'?JSON.stringify(r[k]):r[k])+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>'}
  document.getElementById('npcoTabs').addEventListener('click',e=>{const b=e.target.closest('button[data-tab]');if(b)show(b.dataset.tab)});
  let depthTimer=null;
@@ -6383,6 +6581,22 @@ input,select{background:#fff!important;color:var(--text)!important}
 .npco-depth-market{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:#d7e3e8;border-bottom:1px solid #d7e3e8}.npco-depth-market>div{background:#3f9f45;color:#fff;text-align:center;padding:12px 7px}.npco-depth-market small{display:block;font-size:11px;opacity:.9}.npco-depth-market b{display:block;font-size:17px;margin-top:3px;font-variant-numeric:tabular-nums}.npco-depth-market>div:first-child b{font-size:15px}@media(max-width:650px){.npco-depth-market b{font-size:15px}.npco-depth-market>div:first-child b{font-size:13px}}
 .npco-depth-wrap{background:#fff;border:1px solid #dce7ec;border-radius:16px;overflow:hidden;margin:0 0 12px}.npco-depth-summary{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;background:#0b3434;color:#fff}.npco-depth-summary b{font-size:20px}.npco-depth-summary small{display:block;opacity:.75;margin-top:2px}.npco-depth-updated{font-size:11px;opacity:.8}.npco-depth-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:8px;background:#f5f7f8}.npco-depth-side{overflow:hidden;border-radius:10px;background:#dcecf8}.npco-depth-side.sell{background:#f9dede}.npco-depth-title{font-weight:850;font-size:16px;padding:12px;text-align:center;color:#fff;background:#087bd1}.npco-depth-side.sell .npco-depth-title{background:#d8464b}.npco-depth-head,.npco-depth-row{display:grid;grid-template-columns:.8fr 1.2fr 1.2fr;text-align:right}.npco-depth-head{font-weight:800;padding:10px 8px;background:rgba(0,0,0,.06);font-size:12px}.npco-depth-head span:first-child,.npco-depth-row span:first-child{text-align:left}.npco-depth-row{padding:11px 8px;border-top:1px solid rgba(20,50,70,.08);font-variant-numeric:tabular-nums}.npco-depth-row:nth-child(even){background:rgba(255,255,255,.24)}.npco-depth-totals{display:grid;grid-template-columns:1fr 1fr;text-align:center;padding:14px 8px;gap:8px;font-size:14px}.npco-depth-supply{text-align:center;padding:12px;font-weight:800;color:#fff;background:#d8464b}.npco-depth-supply.buy{background:#168a4a}.npco-depth-source{text-align:center;padding:10px}.npco-depth-side.sell .npco-depth-row span:last-child{color:#c7353c;font-weight:800}.npco-depth-side.buy .npco-depth-row span:last-child{color:#0875c8;font-weight:800}@media(max-width:650px){.npco-depth-grid{grid-template-columns:1fr}.npco-depth-summary{padding:12px}.npco-depth-summary b{font-size:18px}}
 </style>
+
+<style id="npco-daily-floorsheet-broker-style">
+.npco-day-panel{margin:0 0 12px}
+.npco-day-head{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 16px;background:#0b3434;color:#fff;border-radius:16px 16px 0 0}
+.npco-day-head b{font-size:19px}.npco-day-head small{display:block;opacity:.78;margin-top:3px}.npco-day-badge{font-size:12px;font-weight:800;background:rgba(255,255,255,.12);padding:7px 10px;border-radius:999px;white-space:nowrap}
+.npco-day-refresh{border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.1);color:#fff;border-radius:9px;padding:7px 11px;font-weight:800;cursor:pointer}
+.npco-day-stats{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:#dce7ec;border:1px solid #dce7ec;border-top:0}
+.npco-day-stats>div{background:#fff;padding:12px 10px;text-align:center}.npco-day-stats small{display:block;color:#60727a;font-size:11px}.npco-day-stats b{display:block;margin-top:4px;font-size:15px;font-variant-numeric:tabular-nums}
+.npco-day-floor-card{margin-top:10px;border-radius:14px}.npco-day-floor-table th{position:sticky;top:0;z-index:2;background:#edf4f6}.npco-day-floor-table td,.npco-day-floor-table th{white-space:nowrap}
+.npco-day-source{text-align:center;margin-top:8px}
+.npco-broker-chart{margin-top:10px}.npco-broker-legend{display:flex;gap:16px;font-size:12px;font-weight:700;color:#53656d;margin:8px 0 14px}.npco-broker-legend span{display:inline-flex;align-items:center;gap:6px}.npco-broker-legend i{width:9px;height:9px;border-radius:50%;display:inline-block}.buy-dot{background:#168a4a}.sell-dot{background:#d8464b}
+.npco-broker-bar-row{padding:10px 0;border-top:1px solid #e6eef1}.npco-broker-bar-label{display:flex;justify-content:space-between;gap:10px;margin-bottom:6px;font-size:12px}.npco-broker-bar-label span{font-variant-numeric:tabular-nums;color:#5f7078}.npco-broker-track{height:22px;background:#f0f4f5;border-radius:5px;overflow:hidden;margin:3px 0}.npco-broker-bar{height:100%;min-width:2px;display:flex;align-items:center;padding:0 7px;box-sizing:border-box;color:#fff;font-size:10px;font-weight:800;white-space:nowrap;border-radius:5px}.npco-broker-bar.buy{background:#168a4a}.npco-broker-bar.sell{background:#d8464b}.npco-net-buy{color:#168a4a!important;font-weight:850}.npco-net-sell{color:#d8464b!important;font-weight:850}
+@media(max-width:760px){.npco-day-stats{grid-template-columns:repeat(2,1fr)}.npco-day-head{align-items:flex-start}.npco-day-head b{font-size:17px}.npco-broker-bar-label{font-size:11px}}
+@media(max-width:430px){.npco-day-stats{grid-template-columns:1fr 1fr}.npco-day-stats>div{padding:10px 6px}.npco-day-stats b{font-size:13px}}
+</style>
+
 <style id="npco-fundamentals-chart-style">
 /* Market Movers stay neutral; color only the change figures. */
 #pulseMoversRows .pulse-row{background:transparent!important;color:#18252a!important}
@@ -6406,11 +6620,9 @@ input,select{background:#fff!important;color:var(--text)!important}
  window.renderCompanyChart=function(rows,symbol){
    const card=document.querySelector('#npcoContent .npco-live-chart-card'); if(!card)return;
    const area=card.querySelector('.npco-chart-area'), badge=card.querySelector('.npco-chart-change');
-   function unwrap(v,depth){if(depth>6||v==null)return [];if(Array.isArray(v))return v;if(typeof v!=='object')return [];for(const k of ['data','content','rows','result','results','items','records','history']){const x=v[k];if(Array.isArray(x))return x;const a=unwrap(x,depth+1);if(a.length)return a}return []}
-   const pts=unwrap(rows,0).map(r=>({v:Number(r.close??r.ltp??r.price??r.lastTradedPrice),d:r.date??r.businessDate??r.timestamp??r.time})).filter(x=>Number.isFinite(x.v));
+   const pts=(Array.isArray(rows)?rows:[]).map(r=>({v:Number(r.close??r.ltp??r.price??r.lastTradedPrice),d:r.date??r.businessDate??r.timestamp??r.time})).filter(x=>Number.isFinite(x.v));
    function draw(range){
-     let p=pts.slice(-({'1D':2,'1W':5,'1M':22,'3M':66,'6M':132,'1Y':252,'ALL':Infinity}[range]??5));
-     if(range==='1D'&&p.length<2)p=pts.slice(-2);
+     let lim={'1D':2,'1W':5,'1M':22,'3M':66,'6M':132,'1Y':252,'ALL':Infinity}[range]??5; let p=pts.slice(-lim); if(range==='1D'&&p.length<2)p=pts.slice(-2);
      card.querySelectorAll('[data-range]').forEach(b=>b.classList.toggle('active',b.dataset.range===range));
      if(p.length<2){area.innerHTML='<div class="npco-note">Verified historical price data is not available for this range.</div>';if(badge)badge.textContent='';return;}
      const vals=p.map(x=>x.v), first=vals[0], last=vals.at(-1), delta=last-first, pct=first?(delta/first*100):0, min=Math.min(...vals), max=Math.max(...vals), span=max-min||1, color=delta>=0?'#159b68':'#e34c56';
@@ -6418,7 +6630,7 @@ input,select{background:#fff!important;color:var(--text)!important}
      area.innerHTML='<svg class="npco-company-chart" viewBox="0 0 300 170" preserveAspectRatio="none">'+[26,69,112,156].map(y=>`<line x1="8" y1="${y}" x2="292" y2="${y}" stroke="#d6dadd" stroke-dasharray="4 4"/>`).join('')+`<polyline points="${xy}" fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg><div class="npco-chart-meta">${p.length} verified sessions · Rs ${num(min)}–${num(max)}</div>`;
      if(badge){badge.textContent=`${delta>=0?'+':''}${num(delta)} (${pct>=0?'+':''}${pct.toFixed(2)}%)`;badge.style.color=color;}
    }
-   card.querySelectorAll('[data-range]').forEach(b=>b.onclick=()=>draw(b.dataset.range));draw('1W');
+   card.querySelectorAll('[data-range]').forEach(b=>b.onclick=()=>draw(b.dataset.range));draw('1D');
  };
 })();
 </script>

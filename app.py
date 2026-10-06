@@ -1332,6 +1332,9 @@ async def static_daily_history(symbol: str) -> list[dict]:
     urls = [
         f"https://binayabaral.github.io/nepal-market-data/data/nepse/{symbol}.csv",
         f"https://raw.githubusercontent.com/binayabaral/nepal-market-data/main/data/nepse/{symbol}.csv",
+        # Secondary public historical archive. Keep this as a real-data fallback
+        # only; it is never used to manufacture missing sessions.
+        f"https://raw.githubusercontent.com/Aabishkar2/nepse-data/main/data/company-wise/{symbol}.csv",
     ]
     for url in urls:
         try:
@@ -1489,19 +1492,97 @@ legacy_get_fundamentals = get_fundamentals
 # so FastAPI's event loop remains responsive.
 
 async def get_floorsheet(symbol: Optional[str] = None):
+    """Return real NEPSE executed floor-sheet rows for the current trading day.
+
+    The production SDK may return a paginated wrapper such as
+    {"floorsheets": {"content": [...]}} rather than a bare list.  Always
+    normalize that response before it reaches the frontend.  When a symbol is
+    supplied, resolve its NEPSE security id and request that company directly;
+    only fall back to the all-market feed when the SDK does not accept the
+    company filter.
+    """
+    s = symbol.upper().strip() if symbol else None
+    errors = []
+
     try:
-        return await production_call("trades", symbol=symbol, max_pages=1000, size=500)
-    except TypeError:
-        # Older generated SDK signature: fetch all trades then filter.
-        rows = await production_call("trades", max_pages=1000, size=500)
-        if symbol:
-            s = symbol.upper().strip()
-            rows = [r for r in rows if str(r.get("symbol", "")).upper() == s]
-        return rows
-    except Exception:
-        # Preserve the existing backend fallback if the production layer is
-        # temporarily unavailable.
-        return await legacy_get_floorsheet(symbol)
+        company_id = None
+        if s:
+            try:
+                company = await resolve_company(s)
+                company_id = pick(company, ["id", "securityId", "security_id"])
+            except Exception as exc:
+                errors.append(f"company lookup: {exc}")
+
+        raw = None
+
+        # Preferred: company-specific NEPSE floorsheet through the production
+        # SDK. Different SDK versions expose the filter as stock_id or symbol.
+        if company_id is not None:
+            for kwargs in (
+                {"stock_id": int(company_id), "max_pages": 1000, "size": 500},
+                {"stock_id": int(company_id), "page": 1, "size": 500},
+                {"symbol": s, "max_pages": 1000, "size": 500},
+                {"symbol": s, "page": 1, "size": 500},
+            ):
+                try:
+                    raw = await production_call("trades", **kwargs)
+                    if raw is not None:
+                        break
+                except TypeError:
+                    continue
+                except Exception as exc:
+                    errors.append(f"production trades {kwargs}: {exc}")
+
+        # If the SDK did not accept the company filter, retrieve the complete
+        # current-day floorsheet and filter by the exact symbol locally.
+        if raw is None:
+            for kwargs in (
+                {"max_pages": 1000, "size": 500},
+                {"page": 1, "size": 500},
+            ):
+                try:
+                    raw = await production_call("trades", **kwargs)
+                    if raw is not None:
+                        break
+                except TypeError:
+                    continue
+                except Exception as exc:
+                    errors.append(f"production all trades {kwargs}: {exc}")
+
+        rows = floor_rows(raw) if raw is not None else []
+
+        # floor_rows() already maps NEPSE's real contract fields:
+        # symbol, buyer/seller broker, contract quantity/rate/amount,
+        # contract id, business date and trade time.
+        if s:
+            rows = [
+                r for r in rows
+                if str(r.get("symbol") or "").upper().strip() == s
+            ]
+
+        if rows:
+            return rows
+
+    except Exception as exc:
+        errors.append(f"production floorsheet: {exc}")
+
+    # Proven legacy loader remains the fallback. It also uses the real NEPSE
+    # floorsheet endpoint/compatibility sources; it never fabricates trades.
+    try:
+        rows = await legacy_get_floorsheet(s)
+        if rows:
+            normalized = floor_rows(rows)
+            if s:
+                normalized = [
+                    r for r in normalized
+                    if str(r.get("symbol") or "").upper().strip() == s
+                ]
+            if normalized:
+                return normalized
+    except Exception as exc:
+        errors.append(f"legacy floorsheet: {exc}")
+
+    return []
 
 async def get_broker_analysis():
     try:
@@ -1538,6 +1619,19 @@ async def get_fundamentals(symbol: str):
     return await legacy_get_fundamentals(symbol)
 
 # Preserve original implementations as explicit fallbacks.
+@app.get("/api/company-floorsheet/{symbol}")
+async def api_company_floorsheet(symbol: str, limit: int = Query(100000, ge=1, le=100000)):
+    rows = await get_floorsheet(symbol.upper().strip())
+    rows = rows[:limit]
+    return {
+        "ok": bool(rows),
+        "symbol": symbol.upper().strip(),
+        "source": "NEPSE executed floorsheet",
+        "data": rows,
+        "count": len(rows),
+        "updatedAt": now_iso(),
+    }
+
 @app.get("/api/floorsheet")
 async def api_floorsheet(symbol: Optional[str]=None, limit:int=Query(100000,ge=1,le=100000)):
     rows=await get_floorsheet(symbol)
@@ -1597,10 +1691,122 @@ async def production_market():
 async def production_company(symbol: str):
     return await production_call("company_snapshot", symbol)
 
+def _depth_rows(value: Any) -> list[dict]:
+    """Flatten NEPSE order-book payloads into candidate depth rows."""
+    out=[]
+    def walk(v, side_hint=None, depth=0):
+        if depth>8 or v is None: return
+        if isinstance(v, list):
+            for x in v: walk(x, side_hint, depth+1)
+            return
+        if not isinstance(v, dict): return
+        side = str(pick(v, ["side","orderSide","transactionType","type","direction"], side_hint) or "").lower()
+        if side in ("b","bid","buy","buyorder","buyorders","demand"):
+            side="buy"
+        elif side in ("s","ask","sell","sellorder","sellorders","supply"):
+            side="sell"
+        price=num(pick(v,["price","orderPrice","orderBookOrderPrice","order_book_order_price","rate","buyPrice","sellPrice","bidPrice","askPrice"]))
+        qty=num(pick(v,["quantity","qty","orderQuantity","tradedQuantity","totalQuantity","buyQuantity","sellQuantity","bidQuantity","askQuantity"]))
+        orders=num(pick(v,["orders","orderCount","order_count","noOfOrders","numberOfOrders","buyOrders","sellOrders","bidOrders","askOrders"]))
+        if price is not None and (qty is not None or orders is not None):
+            out.append({"side":side,"price":price,"quantity":qty or 0,"orders":orders or 0})
+        for k,vv in v.items():
+            kl=str(k).lower()
+            child_side=side_hint
+            if any(x in kl for x in ("buy","bid","demand")): child_side="buy"
+            elif any(x in kl for x in ("sell","ask","supply")): child_side="sell"
+            if isinstance(vv,(dict,list)):
+                walk(vv,child_side,depth+1)
+    walk(value)
+    # Remove duplicate rows produced by nested wrappers.
+    seen=set(); clean=[]
+    for r in out:
+        key=(r["side"],r["price"],r["quantity"],r["orders"])
+        if key in seen: continue
+        seen.add(key); clean.append(r)
+    return clean
+
+
+def _first_nested_number(value: Any, keys: list[str]) -> Optional[float]:
+    target={str(k).lower() for k in keys}
+    def walk(v, depth=0):
+        if depth>8 or v is None:
+            return None
+        if isinstance(v, dict):
+            for k,val in v.items():
+                if str(k).lower() in target:
+                    n=num(val)
+                    if n is not None:
+                        return n
+            for val in v.values():
+                n=walk(val, depth+1)
+                if n is not None:
+                    return n
+        elif isinstance(v, list):
+            for val in v:
+                n=walk(val, depth+1)
+                if n is not None:
+                    return n
+        return None
+    return walk(value)
+
+
+def _normalize_depth_payload(raw: Any, symbol: str) -> dict:
+    rows=_depth_rows(raw)
+    buys=sorted([r for r in rows if r["side"]=="buy"], key=lambda r:r["price"], reverse=True)[:5]
+    sells=sorted([r for r in rows if r["side"]=="sell"], key=lambda r:r["price"])[:5]
+    # Prefer exchange/feed totals when supplied. Falling back to the visible
+    # top-5 sum is mathematically derived from real rows, never fabricated.
+    buy_qty=_first_nested_number(raw,["totalBuyQuantity","total_buy_quantity","totalBuyQty","totalBuyQty","buyQuantityTotal"])
+    sell_qty=_first_nested_number(raw,["totalSellQuantity","total_sell_quantity","totalSellQty","totalSellQty","sellQuantityTotal"])
+    buy_orders=_first_nested_number(raw,["totalBuyOrders","total_buy_orders","buyOrdersTotal"])
+    sell_orders=_first_nested_number(raw,["totalSellOrders","total_sell_orders","sellOrdersTotal"])
+    return {
+        "ok": bool(buys or sells),
+        "symbol": symbol.upper(),
+        "buy": buys, "sell": sells,
+        "totalBuyQuantity": buy_qty if buy_qty is not None else sum(float(r["quantity"] or 0) for r in buys),
+        "totalSellQuantity": sell_qty if sell_qty is not None else sum(float(r["quantity"] or 0) for r in sells),
+        "totalBuyOrders": buy_orders if buy_orders is not None else sum(float(r["orders"] or 0) for r in buys),
+        "totalSellOrders": sell_orders if sell_orders is not None else sum(float(r["orders"] or 0) for r in sells),
+        "updatedAt": now_iso(),
+    }
+
 @app.get("/api/production/depth/{symbol}")
 async def production_depth(symbol: str):
-    depth, supply = await asyncio.gather(production_call("depth", symbol), production_call("supply_demand", symbol))
-    return {"ok": True, "symbol": symbol.upper(), "depth": depth, "supplyDemand": supply, "updatedAt": now_iso()}
+    symbol=symbol.upper().strip()
+    errors=[]
+    # Primary: nepse.py production SDK.
+    # Different NEPSE Python clients expose this same endpoint under different
+    # method names. Try the known market-depth names before using the HTTP
+    # compatibility endpoint. All of them return the exchange order book.
+    for method in ("getSymbolMarketDepth", "get_market_depth", "market_depth", "depth"):
+        try:
+            raw=await production_call(method, symbol)
+            normalized=_normalize_depth_payload(raw, symbol)
+            normalized["source"]="NEPSE production market-depth feed"
+            normalized["rawAvailable"]=raw is not None
+            if normalized["ok"]:
+                return normalized
+            errors.append(f"production SDK {method}: no usable levels")
+        except Exception as exc:
+            errors.append(f"production SDK {method}: {exc}")
+
+    # Fallback: the public NEPSE-compatible marketDepth endpoint. This is
+    # still live order-book data; do not substitute historical/derived prices.
+    for path in ("/marketDepth", "/MarketDepth"):
+        try:
+            raw=await public_get(path, {"symbol":symbol})
+            normalized=_normalize_depth_payload(raw, symbol)
+            normalized["source"]="NEPSE market-depth public feed"
+            normalized["rawAvailable"]=raw is not None
+            if normalized["ok"]:
+                return normalized
+            errors.append(f"{path}: no usable levels")
+        except Exception as exc:
+            errors.append(f"{path}: {exc}")
+
+    return {"ok":False,"symbol":symbol,"buy":[],"sell":[],"totalBuyQuantity":None,"totalSellQuantity":None,"totalBuyOrders":None,"totalSellOrders":None,"updatedAt":now_iso(),"source":"NEPSE live market-depth feeds","error":"; ".join(errors[-4:])}
 
 @app.get("/api/production/technical/{symbol}")
 async def production_technical(symbol: str):
@@ -2072,34 +2278,6 @@ async def api_stock_overview(symbol: str):
     def rows(obj):
         return deep_rows(obj) or arr(obj)
 
-    def recursive_num(obj, keys, depth=0, seen=None):
-        """Find a real numeric fundamental anywhere inside NEPSE wrappers."""
-        if depth > 8 or obj is None:
-            return None
-        if seen is None:
-            seen=set()
-        if isinstance(obj, dict):
-            oid=id(obj)
-            if oid in seen:
-                return None
-            seen.add(oid)
-            # Prefer exact aliases at the current object before descending.
-            for k in keys:
-                if k in obj:
-                    v=num(obj.get(k))
-                    if v is not None:
-                        return v
-            for v in obj.values():
-                found=recursive_num(v, keys, depth+1, seen)
-                if found is not None:
-                    return found
-        elif isinstance(obj, list):
-            for v in obj:
-                found=recursive_num(v, keys, depth+1, seen)
-                if found is not None:
-                    return found
-        return None
-
     profile = first_obj(base.get("profile"), base.get("detail"), public.get("profile"))
     market = first_obj(base.get("market"))
     valuation = first_obj(base.get("valuation"), base.get("fundamentals"))
@@ -2150,42 +2328,17 @@ async def api_stock_overview(symbol: str):
         market_cap = ltp * listed_shares
 
     latest_fin = first_obj(*(base.get("financials") or []), *financial_rows)
-
-    # NEPSE/company providers do not use one universal field name. Accept the
-    # actual aliases used by financial-report, profile and public-data payloads.
-    fundamental_sources = [valuation, latest_fin, profile, base.get("financials"),
-                           public.get("financials"), financial_rows]
-    eps_keys=("eps","basicEps","basicEPS","dilutedEps","dilutedEPS",
-              "earningPerShare","earningsPerShare","earningsPerShareValue",
-              "epsValue","earningPerShareValue")
-    book_keys=("bookValue","book_value","bookValuePerShare","bookvaluepershare",
-               "netWorthPerShare","networthpershare","netAssetValuePerShare",
-               "navPerShare","netAssetValue")
-    pe_keys=("pe","peRatio","priceEarningRatio","priceEarningsRatio",
-             "priceToEarnings","priceToEarning","priceEarning")
-    pb_keys=("pbv","pb","pbRatio","priceBookRatio","priceToBookRatio",
-             "priceBookValue","priceToBookValue","priceToBook")
-    roe_keys=("roe","ROE","returnOnEquity","returnOnEquityPercent","roePercent")
-
-    eps = next((recursive_num(x, eps_keys) for x in fundamental_sources
-                if recursive_num(x, eps_keys) is not None), None)
-    book_value = next((recursive_num(x, book_keys) for x in fundamental_sources
-                       if recursive_num(x, book_keys) is not None), None)
-    pe = next((recursive_num(x, pe_keys) for x in fundamental_sources
-               if recursive_num(x, pe_keys) is not None), None)
-    pbv = next((recursive_num(x, pb_keys) for x in fundamental_sources
-                if recursive_num(x, pb_keys) is not None), None)
-    roe = next((recursive_num(x, roe_keys) for x in fundamental_sources
-                if recursive_num(x, roe_keys) is not None), None)
+    eps = num(first_val(valuation, latest_fin, profile, *financial_rows, keys=("eps","earningPerShare","earningsPerShare")))
+    book_value = num(first_val(valuation, latest_fin, profile, *financial_rows, keys=("bookValue","book_value","netWorthPerShare")))
+    pe = num(first_val(valuation, latest_fin, profile, *financial_rows, keys=("pe","peRatio","priceEarningRatio")))
+    pbv = num(first_val(valuation, latest_fin, profile, *financial_rows, keys=("pb","pbv","pbRatio","priceBookRatio")))
+    roe = num(first_val(valuation, latest_fin, profile, *financial_rows, keys=("roe","returnOnEquity")))
     if pe is None and ltp is not None and eps not in (None, 0): pe = ltp / eps
     if pbv is None and ltp is not None and book_value not in (None, 0): pbv = ltp / book_value
 
-    cash_div = next((recursive_num(x, ("cashDividend","cashDividendPercent","cashPercentage","cashDividendValue","cash"))
-                     for x in [valuation, dividend_rows] if recursive_num(x, ("cashDividend","cashDividendPercent","cashPercentage","cashDividendValue","cash")) is not None), None)
-    bonus_div = next((recursive_num(x, ("bonusDividend","bonusDividendPercent","bonusPercentage","bonusDividendValue","bonus"))
-                      for x in [valuation, dividend_rows] if recursive_num(x, ("bonusDividend","bonusDividendPercent","bonusPercentage","bonusDividendValue","bonus")) is not None), None)
-    dividend_yield = next((recursive_num(x, ("dividendYield","dividendYieldPercent","yield"))
-                           for x in [valuation, dividend_rows] if recursive_num(x, ("dividendYield","dividendYieldPercent","yield")) is not None), None)
+    cash_div = num(first_val(valuation, *dividend_rows, keys=("cashDividend","cash","cashPercentage","cashDividendPercent")))
+    bonus_div = num(first_val(valuation, *dividend_rows, keys=("bonusDividend","bonus","bonusPercentage","bonusDividendPercent")))
+    dividend_yield = num(first_val(valuation, *dividend_rows, keys=("dividendYield","yield")))
     if dividend_yield is None and cash_div is not None and ltp not in (None, 0):
         dividend_yield = cash_div / ltp * 100
 
