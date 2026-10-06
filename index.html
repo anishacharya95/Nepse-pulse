@@ -6258,8 +6258,62 @@ input,select{background:#fff!important;color:var(--text)!important}
  async function show(tab){document.querySelectorAll('#npcoTabs button').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));content.innerHTML='<div class="npco-card">Loading '+esc(tab)+'…</div>';try{
   const live=liveRow(symbol);let html='';
   if(tab==='info') {
-    const d=await get('/api/stock-overview/'+encodeURIComponent(symbol));
-    if(!d?.ok) throw new Error('Stock data is unavailable from the backend');
+    // Prefer the normalized endpoint, but NEVER let an older deployed backend
+    // turn Stock Info into a blank/404 screen. Fall back to the existing,
+    // verified company/fundamentals/history endpoints.
+    let d=null;
+    try{d=await get('/api/stock-overview/'+encodeURIComponent(symbol));}catch(e){d=null;}
+    if(!d?.ok){
+      const [liveRaw,companyRaw,fundRaw,publicRaw,histRaw]=await Promise.all([
+        get('/LiveMarket').catch(()=>[]),
+        get('/api/company/'+encodeURIComponent(symbol)).catch(()=>null),
+        get('/api/fundamentals/'+encodeURIComponent(symbol)).catch(()=>null),
+        get('/api/public/fundamentals/'+encodeURIComponent(symbol)).catch(()=>null),
+        get('/PriceVolumeHistory?symbol='+encodeURIComponent(symbol)).catch(()=>null)
+      ]);
+      const liveRows=arr(liveRaw);
+      const live=liveRows.map(x=>typeof normRow==='function'?normRow(x):x).find(x=>String(x?.symbol||x?.ticker||x?.securitySymbol||'').toUpperCase()===symbol)||liveRows.find(x=>String(x?.symbol||x?.ticker||x?.securitySymbol||'').toUpperCase()===symbol)||{};
+      const company=companyRaw?.details||companyRaw?.company||companyRaw?.profile||companyRaw||{};
+      const pub=publicRaw||{};
+      const fund=fundRaw||{};
+      const prof=company||pub.profile||{};
+      const fin=Array.isArray(fund.financials)?fund.financials[0]:(Array.isArray(pub.financials)?pub.financials[0]:(fund.financials||pub.financials||{}));
+      const hist=arr(histRaw);
+      const pickv=(...objs)=>{const keys=Array.prototype.slice.call(arguments,objs.length);return null};
+      const pv=(keys,...objs)=>{for(const o of objs){if(!o||typeof o!=='object')continue;const m=Object.keys(o).reduce((a,k)=>(a[k.toLowerCase().replace(/[^a-z0-9]/g,'')]=o[k],a),{});for(const k of keys){const v=m[String(k).toLowerCase().replace(/[^a-z0-9]/g,'')];if(v!==undefined&&v!==null&&v!=='')return v;}}return null};
+      const n=v=>{if(v===null||v===undefined||v==='')return null;const x=Number(String(v).replace(/,/g,''));return Number.isFinite(x)?x:null};
+      let ltp=n(pv(['ltp','lastTradedPrice','lastPrice','close','closingPrice','price'],live,prof,pub.price,fin));
+      let prev=n(pv(['previousClose','previousClosingPrice','prevClose','previousPrice','preClose'],live,prof,pub.price,fin));
+      let ch=n(pv(['change','pointChange','difference','changeValue'],live,prof,pub.price,fin));
+      let pct=n(pv(['percentageChange','perChange','percentChange','changePercent','pChange','pct'],live,prof,pub.price,fin));
+      if(ch==null&&ltp!=null&&prev!=null)ch=ltp-prev;
+      if(pct==null&&ch!=null&&prev) pct=ch/prev*100;
+      const open=n(pv(['open','openPrice','openingPrice'],live,prof,pub.price));
+      const high=n(pv(['high','highPrice','dayHigh'],live,prof,pub.price));
+      const low=n(pv(['low','lowPrice','dayLow'],live,prof,pub.price));
+      const volume=n(pv(['volume','totalTradedQuantity','tradedQuantity','quantity','tradedShares','sharesTraded'],live,pub.price));
+      const turnover=n(pv(['turnover','totalTurnover','totalTradedValue','tradedAmount','value'],live,pub.price));
+      const transactions=n(pv(['transactions','totalTransactions','totalTrades','noOfTransactions','numberOfTransactions'],live,pub.price));
+      const avg=n(pv(['averagePrice','avgPrice','weightedAveragePrice'],live,pub.price));
+      const listed=n(pv(['listedShares','totalListedShares','numberOfListedShares','totalShares','shareOutstanding'],prof,pub.security,fin));
+      let mcap=n(pv(['marketCap','marketCapitalization','marketCapitalizationValue','marCap'],prof,pub.security,fin));
+      if(mcap==null&&ltp!=null&&listed!=null)mcap=ltp*listed;
+      const eps=n(pv(['eps','earningPerShare','earningsPerShare'],fin,prof,pub.financials));
+      const book=n(pv(['bookValue','book_value','netWorthPerShare'],fin,prof,pub.financials));
+      let pe=n(pv(['pe','peRatio','priceEarningRatio'],fin,prof)); if(pe==null&&ltp!=null&&eps)pe=ltp/eps;
+      let pbv=n(pv(['pbv','pb','priceBookValue','priceToBook'],fin,prof)); if(pbv==null&&ltp!=null&&book)pbv=ltp/book;
+      const roe=n(pv(['roe','returnOnEquity'],fin,prof));
+      const cash=n(pv(['cashDividend','cashDividendPercent','cash'],pub.dividends,fin,prof));
+      const bonus=n(pv(['bonusDividend','bonusDividendPercent','bonus'],pub.dividends,fin,prof));
+      let dy=n(pv(['dividendYield','dividendYieldPercent'],fin,prof)); if(dy==null&&cash!=null&&ltp)dy=cash/ltp*100;
+      const closes=hist.map(x=>n(pv(['close','ltp','lastPrice','price'],x))).filter(x=>x!=null);
+      const slice252=hist.slice(-252);
+      const high52=slice252.map(x=>n(pv(['high','highPrice','close','ltp'],x))).filter(x=>x!=null);
+      const low52=slice252.map(x=>n(pv(['low','lowPrice','close','ltp'],x))).filter(x=>x!=null);
+      const ret=(days)=>{if(closes.length<=days)return null;const a=closes[closes.length-1],b=closes[closes.length-1-days];return b?((a-b)/b*100):null};
+      d={ok:true,companyName:pv(['companyName','securityName','name'],prof,company)||symbol,source:{market:'NEPSE live market feed / existing backend',history:histRaw?.source||'NEPSE verified price history'},market:{ltp,change:ch,changePercent:pct,open,high,low,previousClose:prev,turnover,volume,transactions,averagePrice:avg,listedShares,marketCap:mcap},performance:{eps,pe,bookValue:book,pbv,roe,dividendYield:dy,cashDividend:cash,bonusDividend:bonus,high52:high52.length?Math.max(...high52):null,low52:low52.length?Math.min(...low52):null,return1W:ret(5),return1M:ret(21),return3M:ret(63),return6M:ret(126),return1Y:ret(252),historySessions:hist.length},history:hist,errors:['Normalized stock-overview endpoint unavailable; used verified legacy endpoints.']};
+    }
+    if(!d?.ok) throw new Error('No verified Stock Info data is available for '+symbol);
     const m=d.market||{}, p=d.performance||{};
     document.getElementById('npcoName').textContent=d.companyName||symbol;
     const f=(label,v,unit='')=>'<div class="npco-metric"><small>'+esc(label)+'</small><b>'+((v==null||v==='')?'—':num(v)+unit)+'</b></div>';
