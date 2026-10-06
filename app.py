@@ -1332,6 +1332,9 @@ async def static_daily_history(symbol: str) -> list[dict]:
     urls = [
         f"https://binayabaral.github.io/nepal-market-data/data/nepse/{symbol}.csv",
         f"https://raw.githubusercontent.com/binayabaral/nepal-market-data/main/data/nepse/{symbol}.csv",
+        # Secondary public historical archive. Keep this as a real-data fallback
+        # only; it is never used to manufacture missing sessions.
+        f"https://raw.githubusercontent.com/Aabishkar2/nepse-data/main/data/company-wise/{symbol}.csv",
     ]
     for url in urls:
         try:
