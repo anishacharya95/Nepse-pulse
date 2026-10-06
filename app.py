@@ -133,35 +133,11 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _plain(v: Any) -> Any:
-    """Convert SDK/Pydantic/dataclass response objects into plain JSON-like values."""
-    if v is None or isinstance(v, (str, int, float, bool)):
-        return v
-    if isinstance(v, dict):
-        return {str(k): _plain(x) for k, x in v.items()}
-    if isinstance(v, (list, tuple, set)):
-        return [_plain(x) for x in v]
-    for method in ("model_dump", "dict"):
-        fn = getattr(v, method, None)
-        if callable(fn):
-            try:
-                return _plain(fn())
-            except Exception:
-                pass
-    if hasattr(v, "__dict__"):
-        try:
-            return {str(k): _plain(x) for k, x in vars(v).items() if not str(k).startswith("_")}
-        except Exception:
-            pass
-    return v
-
-
 def arr(v: Any) -> list:
-    v = _plain(v)
     if isinstance(v, list):
         return v
     if isinstance(v, dict):
-        for k in ("data", "content", "results", "result", "items", "records", "rows", "live", "companies"):
+        for k in ("data", "content", "results", "result", "items", "records", "rows"):
             if isinstance(v.get(k), list):
                 return v[k]
         return [v]
@@ -169,12 +145,10 @@ def arr(v: Any) -> list:
 
 
 def deep_rows(v: Any, preferred_keys: tuple[str, ...] = ()) -> list[dict]:
-    """Extract actual NEPSE rows from dict/list or typed SDK responses."""
-    v = _plain(v)
+    """Extract the actual row list from NEPSE's nested response wrappers."""
     seen = set()
     def walk(x: Any, depth: int = 0):
-        x = _plain(x)
-        if depth > 8:
+        if depth > 6:
             return []
         if isinstance(x, list):
             rows = [r for r in x if isinstance(r, dict)]
@@ -1611,13 +1585,52 @@ async def get_floorsheet(symbol: Optional[str] = None):
     return []
 
 async def get_broker_analysis():
+    # Always analyze the same normalized real floorsheet rows used by the
+    # company detail page. This avoids SDK wrapper/shape differences.
     try:
-        rows = await production_call("trades", max_pages=1000, size=500)
-        analysis = await production_call("broker_analysis", rows)
-        flow = await production_call("broker_flow_by_symbol", rows)
-        return {"ok": True, "updatedAt": now_iso(), "data": analysis,
-                "bySymbol": flow, "sourceRows": len(rows),
-                "source": "nepse.py production data layer"}
+        rows = await get_floorsheet(None)
+        rows = floor_rows(rows)
+        if not rows:
+            return {"ok": False, "updatedAt": now_iso(), "data": [],
+                    "bySymbol": [], "sourceRows": 0,
+                    "source": "NEPSE verified floorsheet",
+                    "error": "No verified floorsheet rows returned"}
+
+        brokers = {}
+        by_symbol = {}
+        for r in rows:
+            q = float(r.get("quantity") or 0)
+            rate = float(r.get("rate") or 0)
+            amount = float(r.get("amount") or (q * rate))
+            buy = str(r.get("buyerBroker") or r.get("buyerBrokerName") or "").strip()
+            sell = str(r.get("sellerBroker") or r.get("sellerBrokerName") or "").strip()
+            sym = str(r.get("symbol") or "").upper().strip()
+
+            def ensure(label):
+                return brokers.setdefault(label, {"broker": label, "buyValue": 0, "sellValue": 0, "buyQty": 0, "sellQty": 0, "buyTrades": 0, "sellTrades": 0})
+            if buy:
+                b=ensure(buy); b["buyValue"]+=amount; b["buyQty"]+=q; b["buyTrades"]+=1
+            if sell:
+                b=ensure(sell); b["sellValue"]+=amount; b["sellQty"]+=q; b["sellTrades"]+=1
+
+            if sym:
+                z=by_symbol.setdefault(sym,{})
+                for label,side in ((buy,"buy"),(sell,"sell")):
+                    if not label: continue
+                    x=z.setdefault(label,{"broker":label,"symbol":sym,"buyValue":0,"sellValue":0,"buyQty":0,"sellQty":0,"trades":0})
+                    x[side+"Value"] += amount; x[side+"Qty"] += q; x["trades"] += 1
+
+        out=[]
+        for b in brokers.values():
+            b["net"] = b["buyValue"] - b["sellValue"]
+            b["trades"] = b["buyTrades"] + b["sellTrades"]
+            b["netValue"] = b["net"]
+            out.append(b)
+        out.sort(key=lambda x: abs(x["net"]), reverse=True)
+        symbol_rows=[x for z in by_symbol.values() for x in z.values()]
+        return {"ok": True, "updatedAt": now_iso(), "data": out,
+                "bySymbol": symbol_rows, "sourceRows": len(rows),
+                "source": "NEPSE verified floorsheet"}
     except Exception:
         return await legacy_get_broker_analysis()
 
@@ -1643,6 +1656,80 @@ async def get_fundamentals(symbol: str):
     except Exception:
         pass
     return await legacy_get_fundamentals(symbol)
+
+# FINAL VERIFIED TRADE LOADER
+# One normalized path for company floorsheets.  Every source is treated as
+# untrusted wrapper data until floor_rows() has flattened it.
+async def get_floorsheet(symbol: Optional[str] = None):
+    wanted = symbol.upper().strip() if symbol else None
+
+    def only_symbol(rows):
+        rows = floor_rows(rows)
+        if wanted:
+            rows = [r for r in rows if str(r.get("symbol") or "").upper().strip() == wanted]
+        return rows
+
+    # 1) Original NEPSE paginated loader. It understands the current
+    # {floorsheets:{content:[...]}} response and compatibility endpoints.
+    try:
+        rows = only_symbol(await legacy_get_floorsheet(wanted))
+        if rows:
+            return rows
+    except Exception:
+        pass
+
+    # 2) Production trades adapter. Try company-specific forms, but NEVER
+    # stop just because a valid call returned an empty wrapper. If it is empty,
+    # request the full live trades feed and filter locally.
+    attempts = []
+    if wanted:
+        try:
+            company = await resolve_company(wanted)
+            cid = pick(company, ["id", "securityId", "security_id", "stockId"])
+            if cid is not None:
+                attempts.extend([
+                    ("trades", {"stock_id": int(cid), "max_pages": 1000, "size": 500}),
+                    ("trades", {"stockId": int(cid), "max_pages": 1000, "size": 500}),
+                ])
+        except Exception:
+            pass
+        attempts.extend([
+            ("trades", {"symbol": wanted, "max_pages": 1000, "size": 500}),
+            ("trades", {"symbol": wanted, "page": 1, "size": 500}),
+        ])
+    attempts.extend([
+        ("trades", {"max_pages": 1000, "size": 500}),
+        ("trades", {"page": 1, "size": 500}),
+    ])
+
+    for method, kwargs in attempts:
+        try:
+            raw = await production_call(method, **kwargs)
+            rows = only_symbol(raw)
+            if rows:
+                return rows
+        except TypeError:
+            continue
+        except Exception:
+            continue
+
+    # 3) Explicit compatibility/public endpoint fallback.
+    for path, params in (
+        ("/FloorsheetOf", {"symbol": wanted} if wanted else None),
+        ("/Floorsheet", None),
+    ):
+        if not wanted and path == "/FloorsheetOf":
+            continue
+        try:
+            raw = await public_get(path, params)
+            rows = only_symbol(raw)
+            if rows:
+                return rows
+        except Exception:
+            continue
+
+    # No verified trades: return empty rather than fabricated values.
+    return []
 
 # Preserve original implementations as explicit fallbacks.
 @app.get("/api/company-floorsheet/{symbol}")
@@ -1994,69 +2081,6 @@ def _tv_resample(rows: list[dict], resolution: str):
             b["v"] = (b.get("v") or 0) + (r.get("v") or 0)
     return list(sorted(buckets.values(), key=lambda x: x["t"]))
 
-
-TV_INDEX_ALIASES = {
-    "NEPSE": {"id": 58, "name": "NEPSE Index", "aliases": ["NEPSE", "NEPSE INDEX"]},
-    "SENSITIVE": {"name": "Sensitive Index", "aliases": ["SENSITIVE", "SENSITIVE INDEX"]},
-    "FLOAT": {"name": "Float Index", "aliases": ["FLOAT", "FLOAT INDEX"]},
-    "SENSITIVE FLOAT": {"name": "Sensitive Float Index", "aliases": ["SENSITIVE FLOAT", "SENSITIVE FLOAT INDEX"]},
-    "BANKING": {"name": "Banking Index", "aliases": ["BANKING", "BANKING INDEX"]},
-    "DEVELOPMENT BANK": {"name": "Development Bank Index", "aliases": ["DEVELOPMENT BANK", "DEVELOPMENT BANK INDEX"]},
-    "FINANCE": {"name": "Finance Index", "aliases": ["FINANCE", "FINANCE INDEX"]},
-    "HOTELS": {"name": "Hotels And Tourism Index", "aliases": ["HOTELS", "HOTELS AND TOURISM", "HOTELS AND TOURISM INDEX"]},
-    "HYDROPOWER": {"name": "Hydropower Index", "aliases": ["HYDROPOWER", "HYDROPOWER INDEX"]},
-    "INVESTMENT": {"name": "Investment Index", "aliases": ["INVESTMENT", "INVESTMENT INDEX"]},
-    "LIFE INSURANCE": {"name": "Life Insurance Index", "aliases": ["LIFE INSURANCE", "LIFE INSURANCE INDEX"]},
-    "MANUFACTURING": {"name": "Manufacturing And Processing Index", "aliases": ["MANUFACTURING", "MANUFACTURING AND PROCESSING INDEX"]},
-    "MICROFINANCE": {"name": "Microfinance Index", "aliases": ["MICROFINANCE", "MICROFINANCE INDEX"]},
-    "MUTUAL FUND": {"name": "Mutual Fund Index", "aliases": ["MUTUAL FUND", "MUTUAL FUND INDEX"]},
-    "NON-LIFE INSURANCE": {"name": "Non-Life Insurance Index", "aliases": ["NON-LIFE INSURANCE", "NON-LIFE INSURANCE INDEX"]},
-    "TRADING": {"name": "Trading Index", "aliases": ["TRADING", "TRADING INDEX"]},
-}
-TV_INDEX_PUBLIC_PATHS = {
-    "SENSITIVE": ["/DailySensitiveIndexGraph"], "FLOAT": ["/DailyFloatIndexGraph"], "SENSITIVE FLOAT": ["/DailySensitiveFloatIndexGraph"],
-    "BANKING": ["/DailyBankingIndexGraph", "/DailyBankIndexGraph"], "DEVELOPMENT BANK": ["/DailyDevelopmentBankIndexGraph"],
-    "FINANCE": ["/DailyFinanceIndexGraph"], "HOTELS": ["/DailyHotelsAndTourismIndexGraph", "/DailyHotelsTourismIndexGraph"],
-    "HYDROPOWER": ["/DailyHydropowerIndexGraph", "/DailyHydroPowerIndexGraph"], "INVESTMENT": ["/DailyInvestmentIndexGraph"],
-    "LIFE INSURANCE": ["/DailyLifeInsuranceIndexGraph"], "MANUFACTURING": ["/DailyManufacturingAndProcessingIndexGraph", "/DailyManufacturingIndexGraph"],
-    "MICROFINANCE": ["/DailyMicrofinanceIndexGraph"], "MUTUAL FUND": ["/DailyMutualFundIndexGraph"],
-    "NON-LIFE INSURANCE": ["/DailyNonLifeInsuranceIndexGraph", "/DailyNon-LifeInsuranceIndexGraph"], "TRADING": ["/DailyTradingIndexGraph"],
-}
-TV_INDEX_GRAPH_METHODS = {k: [] for k in TV_INDEX_ALIASES if k != "NEPSE"}
-TV_INDEX_GRAPH_METHODS.update({
-    "SENSITIVE": ["daily_sensitive_index_graph"], "FLOAT": ["daily_float_index_graph"], "SENSITIVE FLOAT": ["daily_sensitive_float_index_graph"],
-    "BANKING": ["daily_bank_subindex_graph", "daily_banking_index_graph"], "DEVELOPMENT BANK": ["daily_development_bank_subindex_graph", "daily_development_bank_index_graph"],
-    "FINANCE": ["daily_finance_subindex_graph", "daily_finance_index_graph"], "HOTELS": ["daily_hotels_and_tourism_subindex_graph", "daily_hotels_tourism_index_graph"],
-    "HYDROPOWER": ["daily_hydropower_subindex_graph", "daily_hydro_power_index_graph"], "INVESTMENT": ["daily_investment_subindex_graph", "daily_investment_index_graph"],
-    "LIFE INSURANCE": ["daily_life_insurance_subindex_graph", "daily_life_insurance_index_graph"], "MANUFACTURING": ["daily_manufacturing_and_processing_subindex_graph", "daily_manufacturing_index_graph"],
-    "MICROFINANCE": ["daily_microfinance_subindex_graph", "daily_microfinance_index_graph"], "MUTUAL FUND": ["daily_mutual_fund_subindex_graph", "daily_mutual_fund_index_graph"],
-    "NON-LIFE INSURANCE": ["daily_non_life_insurance_subindex_graph", "daily_non_life_insurance_index_graph"], "TRADING": ["daily_trading_subindex_graph", "daily_trading_index_graph"],
-})
-def _tv_index_key(symbol: str) -> str | None:
-    raw=str(symbol or "").strip().upper().replace("NEPSE:", "").replace("INDEX:", "")
-    for key,meta in TV_INDEX_ALIASES.items():
-        if raw==key or raw in [str(x).upper() for x in meta.get("aliases",[])]: return key
-    return None
-async def _tv_index_history(symbol: str, countback: int=5000):
-    key=_tv_index_key(symbol)
-    if not key: return []
-    if key=="NEPSE":
-        try:
-            r=await get_index_history(58); return (r.get("data") or [])[-countback:] if isinstance(r,dict) else []
-        except Exception: return []
-    for method in TV_INDEX_GRAPH_METHODS.get(key,[]):
-        try:
-            raw=await nepse_call([method], 1, max(100,min(countback,5000)))
-            rows=normalize_index_history_rows(raw,-1)
-            if rows:return rows[-countback:]
-        except Exception: pass
-    for path in TV_INDEX_PUBLIC_PATHS.get(key,[]):
-        try:
-            raw=await public_get(path); rows=normalize_index_history_rows(raw,-1)
-            if rows:return rows[-countback:]
-        except Exception: pass
-    return []
-
 TV_INTRADAY_RESOLUTIONS = ["1", "3", "5", "10", "15", "30", "60"]
 TV_ALL_RESOLUTIONS = TV_INTRADAY_RESOLUTIONS + ["D", "W", "M", "Y"]
 
@@ -2083,10 +2107,6 @@ async def tv_config():
 async def tv_time():
     return int(time.time())
 
-@app.get("/api/tv/indexes")
-async def tv_indexes():
-    return {"ok": True, "data": [{"symbol":"INDEX:"+k,"ticker":"INDEX:"+k,"name":v.get("name",k),"description":v.get("name",k),"type":"index","exchange":"NEPSE"} for k,v in TV_INDEX_ALIASES.items()], "updatedAt": now_iso()}
-
 @app.get("/api/tv/search")
 async def tv_search(
     q: str = Query(""),
@@ -2101,10 +2121,6 @@ async def tv_search(
     raw = await company_list()
     companies = arr(raw)
     out = []
-    for key, meta in TV_INDEX_ALIASES.items():
-        if not query or query in key or query in str(meta.get("name", "")).upper():
-            out.append({"symbol":"INDEX:"+key,"full_name":"INDEX:"+key,"description":meta.get("name",key),"exchange":"NEPSE","ticker":"INDEX:"+key,"type":"index"})
-            if len(out)>=limit: return out
     for c in companies:
         sym = str(pick(c, ["symbol", "ticker", "code"], "") or "").upper()
         name = str(pick(c, ["companyName", "company", "securityName", "name"], "") or "")
@@ -2127,8 +2143,6 @@ async def tv_search(
 @app.get("/api/tv/symbols")
 async def tv_symbols(symbol: str):
     sym = symbol.upper().strip()
-    if _tv_index_key(sym):
-        return {"name": sym, "ticker": sym, "description": TV_INDEX_ALIASES[_tv_index_key(sym)].get("name", sym), "type":"index", "session":"1100-1500", "timezone":"Asia/Kathmandu", "exchange":"NEPSE", "listed_exchange":"NEPSE", "minmov":1, "pricescale":100, "has_intraday":False, "has_daily":True, "has_weekly_and_monthly":True, "supported_resolutions":["D","W","M","Y"], "volume_precision":0, "data_status":"delayed"}
     return {
         "name": sym, "ticker": sym, "description": f"{sym} · NEPSE",
         "type": "stock", "session": "1100-1500",
@@ -2150,13 +2164,7 @@ async def tv_history(
     from_: int = Query(0, alias="from"), to: int = Query(0),
     countback: int = Query(500, ge=1, le=5000),
 ):
-    if _tv_index_key(symbol):
-        base_rows = await _tv_index_history(symbol, countback=5000)
-        res = str(resolution or "D").upper()
-        if res not in ("D","W","M","Y"): res = "D"
-        rows = _tv_resample(base_rows, res)[-5000:] if base_rows else []
-    else:
-        rows = await _tv_rows_for_resolution(symbol, resolution, countback=5000)
+    rows = await _tv_rows_for_resolution(symbol, resolution, countback=5000)
     if from_:
         rows = [r for r in rows if r["t"] >= from_]
     if to:
@@ -2217,48 +2225,6 @@ async def health():
 async def api_market():
     return await get_market()
 
-
-@app.get("/api/live-nepse")
-async def api_live_nepse():
-    """Fast, verified company feed for the Live NEPSE screen.
-
-    The all-company price set is loaded first because it is the stable source
-    for the complete scrip universe. During trading hours we then overlay the
-    live ticker values when available. This prevents the UI from waiting on a
-    slow/empty live_market request before it can show companies.
-    """
-    errors = []
-
-    # 1) Stable complete company-price set. Do NOT make live_market a
-    # prerequisite for rendering the company list.
-    try:
-        raw = await asyncio.wait_for(nepse_call(["today_price"]), timeout=18)
-        rows = deep_rows(raw, ("content", "data", "results", "rows", "items", "records"))
-        if rows:
-            return {
-                "ok": True,
-                "live": rows,
-                "source": "nepsepy today_price",
-                "updatedAt": now_iso(),
-                "marketClosedFallback": not schedule_open(),
-            }
-        errors.append("today_price returned no rows")
-    except Exception as exc:
-        errors.append(f"today_price: {type(exc).__name__}: {exc}")
-
-    # 2) If today_price is unavailable, use the live ticker.
-    for label, call in (("nepsepy live_market", lambda: nepse_call(["live_market"])),
-                        ("production live_market", lambda: production_call("live_market"))):
-        try:
-            raw = await asyncio.wait_for(call(), timeout=10)
-            rows = deep_rows(raw, ("content", "data", "results", "rows", "live", "items"))
-            if rows:
-                return {"ok": True, "live": rows, "source": label, "updatedAt": now_iso()}
-            errors.append(f"{label} returned no rows")
-        except Exception as exc:
-            errors.append(f"{label}: {type(exc).__name__}: {exc}")
-
-    return {"ok": False, "live": [], "source": None, "updatedAt": now_iso(), "errors": errors}
 
 @app.get("/api/index")
 async def api_index():
