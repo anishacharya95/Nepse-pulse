@@ -445,6 +445,35 @@ async def get_market():
         if not deep_rows(live_raw):
             live_raw, live_method = await one("today_price", ["today_price"], page=1, size=500)
 
+        # If the production SDK is unavailable/empty, use the documented
+        # hosted NEPSE-compatible REST routes before falling back to static data.
+        # This is still live/session data; we only use static data if this fails.
+        hosted_used = False
+        if not deep_rows(live_raw):
+            try:
+                hosted_live = await public_get("/LiveMarket")
+                if deep_rows(hosted_live):
+                    live_raw, live_method = hosted_live, "hosted_nepseapi:/LiveMarket"
+                    hosted_used = True
+            except Exception as exc:
+                errors.append(f"hosted /LiveMarket: {type(exc).__name__}: {exc}")
+        if index_raw is None or not normalize_index(index_raw):
+            try:
+                hosted_index = await public_get("/NepseIndex")
+                if normalize_index(hosted_index):
+                    index_raw, index_method = hosted_index, "hosted_nepseapi:/NepseIndex"
+                    hosted_used = True
+            except Exception as exc:
+                errors.append(f"hosted /NepseIndex: {type(exc).__name__}: {exc}")
+        if summary_raw is None:
+            try:
+                hosted_summary = await public_get("/Summary")
+                if hosted_summary is not None:
+                    summary_raw, summary_method = hosted_summary, "hosted_nepseapi:/Summary"
+                    hosted_used = True
+            except Exception as exc:
+                errors.append(f"hosted /Summary: {type(exc).__name__}: {exc}")
+
         # If the primary session is empty (for example after a token/rate-limit
         # failure), load a single static snapshot from YONEPSE in parallel.
         # This is a fallback only; primary NEPSE data remains authoritative.
@@ -512,7 +541,7 @@ async def get_market():
             "transaction": transaction_method,
         }
         failed = [k for k,v in source_methods.items() if k not in ("companies",) and v is None]
-        source = "YONEPSE static fallback" if fallback_used else "nepsepy public NEPSE session"
+        source = "YONEPSE static fallback" if fallback_used else ("hosted NEPSE-compatible REST feed" if hosted_used else "nepsepy public NEPSE session")
         stale = bool(fallback_used)
 
         explicit_breadth = _find_breadth_values(summary_raw)
@@ -1518,16 +1547,23 @@ async def get_broker_analysis():
         return await legacy_get_broker_analysis()
 
 async def get_history(symbol: str):
+    symbol = symbol.upper().strip()
+    errors = []
     try:
-        rows = await production_call("history_ohlcv", symbol)
+        raw = await production_call("history_ohlcv", symbol)
+        rows = normalize_history_rows(raw)
         if rows:
-            return {"ok": True, "symbol": symbol.upper(),
+            return {"ok": True, "symbol": symbol,
                     "source": "nepse.py production history", "data": rows,
-                    "updatedAt": now_iso(), "errors": []}
+                    "updatedAt": now_iso(), "errors": errors}
     except Exception as e:
-        production_history_error = str(e)
+        errors.append(f"production history: {e}")
     # Keep existing multi-source chart fallback.
-    return await legacy_get_history(symbol)
+    result = await legacy_get_history(symbol)
+    if isinstance(result, dict):
+        result.setdefault("errors", [])
+        result["errors"] = errors + list(result.get("errors") or [])
+    return result
 
 async def get_fundamentals(symbol: str):
     try:
@@ -2163,19 +2199,48 @@ async def api_public_fundamentals(symbol: str):
 
 @app.get("/api/stock-overview/{symbol}")
 async def api_stock_overview(symbol: str):
-    """Single normalized payload for the Stock Info terminal.
+    """Reliable normalized Stock Info payload.
 
-    Every value is sourced from an actual market/company/history dataset or is
-    mathematically derived from those values. Missing source values remain null
-    so the frontend can render an explicit em dash instead of inventing data.
+    The endpoint is deliberately fail-soft: one broken provider must never
+    erase all of Stock Info. Live NEPSE data is preferred, then verified
+    historical OHLCV is used for the fields that are inherently session based.
+    No values are invented.
     """
     symbol = symbol.upper().strip()
-    base = await get_fundamentals(symbol)
-    public = await get_public_fundamentals(symbol)
-    history = await get_history(symbol)
+    errors = []
+
+    async def safe(label, fn, default):
+        try:
+            value = await fn()
+            return value if value is not None else default
+        except Exception as exc:
+            errors.append(f"{label}: {type(exc).__name__}: {exc}")
+            return default
+
+    # Do not let a fundamentals failure prevent price/history from loading.
+    base, public, history = await asyncio.gather(
+        safe("fundamentals", lambda: get_fundamentals(symbol), {}),
+        safe("public fundamentals", lambda: get_public_fundamentals(symbol), {}),
+        safe("history", lambda: get_history(symbol), {"ok": False, "data": [], "errors": []}),
+    )
+
+    def rows(obj):
+        if isinstance(obj, list):
+            return [x for x in obj if isinstance(x, dict)]
+        if isinstance(obj, dict):
+            # History/public endpoints sometimes wrap rows several levels deep.
+            found = deep_rows(obj)
+            if found:
+                return found
+            for k in ("data", "content", "rows", "result", "results", "items", "records"):
+                v = obj.get(k)
+                if isinstance(v, list):
+                    return [x for x in v if isinstance(x, dict)]
+        return []
 
     def first_obj(*objs):
-        return next((o for o in objs if isinstance(o, dict)), {})
+        return next((o for o in objs if isinstance(o, dict) and o), {})
+
     def first_val(*objs, keys=()):
         for o in objs:
             if not isinstance(o, dict):
@@ -2184,121 +2249,156 @@ async def api_stock_overview(symbol: str):
             if v not in (None, "", "-"):
                 return v
         return None
-    def rows(obj):
-        return deep_rows(obj) or arr(obj)
 
     profile = first_obj(base.get("profile"), base.get("detail"), public.get("profile"))
-    market = first_obj(base.get("market"))
-    valuation = first_obj(base.get("valuation"), base.get("fundamentals"))
+    market = first_obj(base.get("market"), base.get("valuation"))
     price_rows = rows(public.get("price"))
     security_rows = rows(public.get("security"))
     financial_rows = rows(public.get("financials"))
     dividend_rows = rows(public.get("dividends"))
-    history_rows = history.get("data", []) if isinstance(history, dict) else []
+    history_rows = rows(history.get("data") if isinstance(history, dict) else history)
 
-    # Merge the live row from the authoritative market feed when available.
+    # Primary live row. Try the production SDK and then the actual hosted API
+    # route names documented by NepseAPI-Unofficial.
     live = {}
     try:
         raw_live = await production_call("live_market")
-        live_rows = deep_rows(raw_live, ("content", "data", "results", "rows"))
-        for r in live_rows:
+        for r in deep_rows(raw_live, ("content", "data", "results", "rows")):
             rs = str(pick(r, ["symbol", "ticker", "securitySymbol", "code", "stockSymbol"], "")).upper()
             if rs == symbol:
                 live = r
                 break
-    except Exception:
-        pass
-    if not live:
-        for r in rows((await get_market()).get("live", [])):
-            rs = str(pick(r, ["symbol", "ticker", "securitySymbol", "code", "stockSymbol"], "")).upper()
-            if rs == symbol:
-                live = r
-                break
+    except Exception as exc:
+        errors.append(f"production live market: {exc}")
 
-    ltp = num(first_val(live, market, valuation, profile, *price_rows, keys=("ltp","lastTradedPrice","lastPrice","close","closingPrice","price")))
-    previous_close = num(first_val(live, market, profile, *price_rows, keys=("previousClose","previousClosingPrice","prevClose","previousPrice","preClose")))
-    open_price = num(first_val(live, market, profile, *price_rows, keys=("open","openPrice","openingPrice")))
-    high = num(first_val(live, market, profile, *price_rows, keys=("high","highPrice","dayHigh")))
-    low = num(first_val(live, market, profile, *price_rows, keys=("low","lowPrice","dayLow")))
-    absolute_change = num(first_val(live, market, profile, *price_rows, keys=("change","pointChange","difference","changeValue")))
-    change_pct = num(first_val(live, market, profile, *price_rows, keys=("percentageChange","perChange","percentChange","changePercent","pChange","pct")))
-    if change_pct is None and absolute_change is not None and previous_close not in (None, 0):
-        change_pct = absolute_change / previous_close * 100
+    if not live:
+        try:
+            market_data = await get_market()
+            for r in deep_rows(market_data.get("live", []) if isinstance(market_data, dict) else []):
+                rs = str(pick(r, ["symbol", "ticker", "securitySymbol", "code", "stockSymbol"], "")).upper()
+                if rs == symbol:
+                    live = r
+                    break
+        except Exception as exc:
+            errors.append(f"central live market: {exc}")
+
+    # Direct hosted API aliases. The service documents /LiveMarket and
+    # /companyPriceVolumeHistory; older builds used different casing.
+    if not live:
+        for path in ("/LiveMarket", "/liveMarket", "/live-market"):
+            try:
+                raw = await public_get(path)
+                for r in deep_rows(raw):
+                    rs = str(pick(r, ["symbol", "ticker", "securitySymbol", "code", "stockSymbol"], "")).upper()
+                    if rs == symbol:
+                        live = r
+                        break
+                if live:
+                    break
+            except Exception as exc:
+                errors.append(f"{path}: {exc}")
+
+    # If the live feed is unavailable, load the documented company history
+    # route directly before falling back to the generic history archive.
+    if len(history_rows) < 2:
+        for path in ("/companyPriceVolumeHistory", "/CompanyPriceVolumeHistory", "/PriceVolumeHistory"):
+            try:
+                raw = await public_get(path, {"symbol": symbol})
+                candidate = rows(raw)
+                if len(candidate) >= 2:
+                    history_rows = candidate
+                    history = {"ok": True, "symbol": symbol, "source": f"NEPSE public {path}", "data": candidate, "updatedAt": now_iso(), "errors": history.get("errors", []) if isinstance(history, dict) else []}
+                    break
+            except Exception as exc:
+                errors.append(f"history {path}: {exc}")
+
+    # Last verified fallback is the public daily CSV archive. It is real data,
+    # but it is labelled historical rather than pretending to be live.
+    if len(history_rows) < 2:
+        try:
+            backup = await static_daily_history(symbol)
+            if len(backup) >= 2:
+                history_rows = backup
+                history = {"ok": True, "symbol": symbol, "source": "Daily OHLCV archive fallback", "data": backup, "updatedAt": now_iso(), "errors": history.get("errors", []) if isinstance(history, dict) else []}
+        except Exception as exc:
+            errors.append(f"static history: {exc}")
+
+    # Latest history row is an honest session snapshot fallback for price fields.
+    # It is NOT called live; source label tells the UI exactly what it is.
+    latest = history_rows[-1] if history_rows else {}
+    previous = history_rows[-2] if len(history_rows) >= 2 else {}
+
+    ltp = num(first_val(live, market, profile, latest, *price_rows, keys=("ltp","lastTradedPrice","lastPrice","close","closingPrice","price")))
+    previous_close = num(first_val(live, market, profile, latest, previous, *price_rows, keys=("previousClose","previousClosingPrice","prevClose","previousPrice","preClose")))
+    if previous_close is None and previous:
+        previous_close = num(pick(previous, ["close","closingPrice","ltp","lastPrice","price"]))
+    open_price = num(first_val(live, market, latest, *price_rows, keys=("open","openPrice","openingPrice")))
+    high = num(first_val(live, market, latest, *price_rows, keys=("high","highPrice","dayHigh")))
+    low = num(first_val(live, market, latest, *price_rows, keys=("low","lowPrice","dayLow")))
+    absolute_change = num(first_val(live, market, latest, *price_rows, keys=("change","pointChange","difference","changeValue")))
+    change_pct = num(first_val(live, market, latest, *price_rows, keys=("percentageChange","perChange","percentChange","changePercent","pChange","pct")))
     if absolute_change is None and ltp is not None and previous_close is not None:
         absolute_change = ltp - previous_close
+    if change_pct is None and absolute_change is not None and previous_close not in (None, 0):
+        change_pct = absolute_change / previous_close * 100
 
-    volume = num(first_val(live, market, *price_rows, keys=("volume","totalTradedQuantity","tradedQuantity","quantity","tradedShares","sharesTraded")))
-    turnover = num(first_val(live, market, *price_rows, keys=("turnover","totalTurnover","totalTradedValue","tradedAmount","value")))
-    transactions = num(first_val(live, market, *price_rows, keys=("transactions","totalTransactions","totalTrades","noOfTransactions","numberOfTransactions")))
-    average_price = num(first_val(live, market, *price_rows, keys=("averagePrice","avgPrice","weightedAveragePrice")))
-    listed_shares = num(first_val(valuation, profile, *security_rows, keys=("listedShares","totalListedShares","numberOfListedShares","totalShares","shareOutstanding")))
-    market_cap = num(first_val(valuation, market, profile, *security_rows, keys=("marketCap","marketCapitalization","marketCapitalizationValue","marCap")))
+    volume = num(first_val(live, market, latest, *price_rows, keys=("volume","totalTradedQuantity","tradedQuantity","quantity","tradedShares","sharesTraded")))
+    turnover = num(first_val(live, market, latest, *price_rows, keys=("turnover","totalTurnover","totalTradedValue","tradedAmount","value")))
+    transactions = num(first_val(live, market, latest, *price_rows, keys=("transactions","totalTransactions","totalTrades","noOfTransactions","numberOfTransactions")))
+    average_price = num(first_val(live, market, latest, *price_rows, keys=("averagePrice","avgPrice","weightedAveragePrice")))
+    if average_price is None and latest.get("tradedAmount") is not None and latest.get("tradedQuantity") not in (None, 0):
+        average_price = num(latest.get("tradedAmount")) / num(latest.get("tradedQuantity"))
+
+    listed_shares = num(first_val(base.get("valuation"), profile, *security_rows, keys=("listedShares","totalListedShares","numberOfListedShares","totalShares","shareOutstanding","sharesOutstanding")))
+    market_cap = num(first_val(base.get("valuation"), market, profile, *security_rows, keys=("marketCap","marketCapitalization","marketCapitalizationValue","marCap")))
     if market_cap is None and ltp is not None and listed_shares is not None:
         market_cap = ltp * listed_shares
 
     latest_fin = first_obj(*(base.get("financials") or []), *financial_rows)
-    eps = num(first_val(valuation, latest_fin, profile, *financial_rows, keys=("eps","earningPerShare","earningsPerShare")))
-    book_value = num(first_val(valuation, latest_fin, profile, *financial_rows, keys=("bookValue","book_value","netWorthPerShare")))
-    pe = num(first_val(valuation, latest_fin, profile, *financial_rows, keys=("pe","peRatio","priceEarningRatio")))
-    pbv = num(first_val(valuation, latest_fin, profile, *financial_rows, keys=("pb","pbv","pbRatio","priceBookRatio")))
-    roe = num(first_val(valuation, latest_fin, profile, *financial_rows, keys=("roe","returnOnEquity")))
+    eps = num(first_val(base.get("valuation"), latest_fin, profile, *financial_rows, keys=("eps","earningPerShare","earningsPerShare")))
+    book_value = num(first_val(base.get("valuation"), latest_fin, profile, *financial_rows, keys=("bookValue","book_value","netWorthPerShare")))
+    pe = num(first_val(base.get("valuation"), latest_fin, profile, *financial_rows, keys=("pe","peRatio","priceEarningRatio")))
+    pbv = num(first_val(base.get("valuation"), latest_fin, profile, *financial_rows, keys=("pb","pbv","pbRatio","priceBookRatio","priceToBook")))
+    roe = num(first_val(base.get("valuation"), latest_fin, profile, *financial_rows, keys=("roe","returnOnEquity")))
     if pe is None and ltp is not None and eps not in (None, 0): pe = ltp / eps
     if pbv is None and ltp is not None and book_value not in (None, 0): pbv = ltp / book_value
 
-    cash_div = num(first_val(valuation, *dividend_rows, keys=("cashDividend","cash","cashPercentage","cashDividendPercent")))
-    bonus_div = num(first_val(valuation, *dividend_rows, keys=("bonusDividend","bonus","bonusPercentage","bonusDividendPercent")))
-    dividend_yield = num(first_val(valuation, *dividend_rows, keys=("dividendYield","yield")))
+    cash_div = num(first_val(base.get("valuation"), *dividend_rows, keys=("cashDividend","cash","cashPercentage","cashDividendPercent")))
+    bonus_div = num(first_val(base.get("valuation"), *dividend_rows, keys=("bonusDividend","bonus","bonusPercentage","bonusDividendPercent")))
+    dividend_yield = num(first_val(base.get("valuation"), *dividend_rows, keys=("dividendYield","yield","dividendYieldPercent")))
     if dividend_yield is None and cash_div is not None and ltp not in (None, 0):
         dividend_yield = cash_div / ltp * 100
 
     closes = [num(r.get("close")) for r in history_rows if isinstance(r, dict) and num(r.get("close")) is not None]
     def trailing_return(n):
-        if ltp is None or len(closes) <= n or closes[-(n+1)] in (None, 0): return None
-        return (ltp / closes[-(n+1)] - 1) * 100
+        if len(closes) <= n or closes[-(n+1)] in (None, 0): return None
+        return (closes[-1] / closes[-(n+1)] - 1) * 100
     high52 = num(first_val(*price_rows, *security_rows, profile, keys=("fiftyTwoWeekHigh","high52","yearHigh","week52High")))
     low52 = num(first_val(*price_rows, *security_rows, profile, keys=("fiftyTwoWeekLow","low52","yearLow","week52Low")))
     if closes:
         last252 = closes[-252:]
-        if high52 is None and last252: high52 = max(last252)
-        if low52 is None and last252: low52 = min(last252)
+        if high52 is None: high52 = max(last252)
+        if low52 is None: low52 = min(last252)
 
-    company_name = first_val(base.get("company"), profile, *public.get("profile", []), keys=("companyName","securityName","name","company_name")) or symbol
+    company_name = first_val(base.get("company"), profile, *rows(public.get("profile")), keys=("companyName","securityName","name","company_name")) or symbol
     sector = first_val(profile, *security_rows, keys=("sectorName","sector","sectorDescription"))
+    live_available = bool(live)
+    source_market = "NEPSE live market feed" if live_available else ("Verified latest session OHLCV" if latest else "Unavailable")
 
     return {
-        "ok": bool(base.get("ok") or public.get("ok") or history.get("ok") or live),
+        "ok": bool(live_available or history_rows or base.get("ok") or public.get("ok")),
         "symbol": symbol,
         "companyName": company_name,
         "sector": sector,
         "updatedAt": now_iso(),
-        "source": {
-            "market": "NEPSE live market feed" if live else (base.get("sources", {}).get("market") or "Unavailable"),
-            "history": history.get("source") if isinstance(history, dict) else "Unavailable",
-            "fundamentals": "NEPSE company/fundamental data + YONEPSE public fallback",
-        },
-        "market": {
-            "ltp": ltp, "change": absolute_change, "changePercent": change_pct,
-            "open": open_price, "high": high, "low": low, "previousClose": previous_close,
-            "turnover": turnover, "volume": volume, "transactions": transactions,
-            "averagePrice": average_price, "listedShares": listed_shares, "marketCap": market_cap,
-        },
-        "performance": {
-            "eps": eps, "pe": pe, "bookValue": book_value, "pbv": pbv, "roe": roe,
-            "cashDividend": cash_div, "bonusDividend": bonus_div, "dividendYield": dividend_yield,
-            "high52": high52, "low52": low52, "return1W": trailing_return(5),
-            "return1M": trailing_return(22), "return3M": trailing_return(66),
-            "return6M": trailing_return(132), "return1Y": trailing_return(252),
-            "historySessions": len(closes),
-        },
+        "source": {"market": source_market, "history": history.get("source") if isinstance(history, dict) else "Unavailable", "fundamentals": "NEPSE company/fundamental data + YONEPSE public fallback"},
+        "market": {"ltp": ltp, "change": absolute_change, "changePercent": change_pct, "open": open_price, "high": high, "low": low, "previousClose": previous_close, "turnover": turnover, "volume": volume, "transactions": transactions, "averagePrice": average_price, "listedShares": listed_shares, "marketCap": market_cap},
+        "performance": {"eps": eps, "pe": pe, "bookValue": book_value, "pbv": pbv, "roe": roe, "cashDividend": cash_div, "bonusDividend": bonus_div, "dividendYield": dividend_yield, "high52": high52, "low52": low52, "return1W": trailing_return(5), "return1M": trailing_return(22), "return3M": trailing_return(66), "return6M": trailing_return(132), "return1Y": trailing_return(252), "historySessions": len(closes)},
         "history": history_rows,
         "financials": base.get("financials") or financial_rows,
         "dividends": dividend_rows,
-        "corporateActions": base.get("corporateActions") or [],
-        "board": base.get("board") or [],
-        "agm": base.get("agm") or [],
-        "companyNews": base.get("companyNews") or [],
-        "profile": profile,
-        "errors": (base.get("errors") or []) + (public.get("errors") or []) + (history.get("errors") or [] if isinstance(history, dict) else []),
+        "corporateActions": base.get("corporateActions") or [], "board": base.get("board") or [], "agm": base.get("agm") or [], "companyNews": base.get("companyNews") or [], "profile": profile,
+        "errors": errors + (base.get("errors") or []) + (public.get("errors") or []) + (history.get("errors") or [] if isinstance(history, dict) else []),
     }
 
 @app.get("/api/fundamentals/{symbol}")

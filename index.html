@@ -6324,7 +6324,7 @@ input,select{background:#fff!important;color:var(--text)!important}
       f('LTP',m.ltp),f('Change',m.change),f('Change %',m.changePercent,'%'),f('Open',m.open),f('High',m.high),f('Low',m.low),
       f('Previous Close',m.previousClose),f('Turnover',m.turnover),f('Volume',m.volume),f('Transactions',m.transactions),f('Average Price',m.averagePrice),f('Listed Shares',m.listedShares)
     ].join('')+'</div></section>';
-    const chartCard='<section class="npco-fund-card npco-live-chart-card" data-chart-symbol="'+esc(symbol)+'"><div class="npco-chart-head"><b>'+esc(symbol)+' Price Chart</b><span class="npco-chart-change"></span></div><div class="npco-range-buttons">'+['1D','1W','1M','3M','6M','1Y','ALL'].map((r,i)=>'<button type="button" data-range="'+r+'" class="'+(i===0?'active':'')+'">'+r+'</button>').join('')+'</div><div class="npco-chart-area"><div class="npco-note">Loading verified price history…</div></div></section>';
+    const chartCard='<section class="npco-fund-card npco-live-chart-card" data-chart-symbol="'+esc(symbol)+'"><div class="npco-chart-head"><b>'+esc(symbol)+' Price Chart</b><span class="npco-chart-change"></span></div><div class="npco-range-buttons">'+['1D','1W','1M','3M','6M','1Y','ALL'].map((r,i)=>'<button type="button" data-range="'+r+'" class="'+(i===1?'active':'')+'">'+r+'</button>').join('')+'</div><div class="npco-chart-area"><div class="npco-note">Loading verified price history…</div></div></section>';
     const performanceCard='<section class="npco-fund-card"><div class="npco-fund-title">Performance & Fundamentals</div><div class="npco-fund-grid">'+[
       ['EPS',p.eps],['P/E Ratio',p.pe],['Book Value',p.bookValue],['PBV',p.pbv],['ROE',p.roe],['Dividend Yield',p.dividendYield],
       ['Cash Dividend',p.cashDividend],['Bonus Dividend',p.bonusDividend],['52 Week High',p.high52],['52 Week Low',p.low52],
@@ -6403,7 +6403,8 @@ input,select{background:#fff!important;color:var(--text)!important}
  window.renderCompanyChart=function(rows,symbol){
    const card=document.querySelector('#npcoContent .npco-live-chart-card'); if(!card)return;
    const area=card.querySelector('.npco-chart-area'), badge=card.querySelector('.npco-chart-change');
-   const pts=(Array.isArray(rows)?rows:[]).map(r=>({v:Number(r.close??r.ltp??r.price??r.lastTradedPrice),d:r.date??r.businessDate??r.timestamp??r.time})).filter(x=>Number.isFinite(x.v));
+   function unwrap(v,depth){if(depth>6||v==null)return [];if(Array.isArray(v))return v;if(typeof v!=='object')return [];for(const k of ['data','content','rows','result','results','items','records','history']){const x=v[k];if(Array.isArray(x))return x;const a=unwrap(x,depth+1);if(a.length)return a}return []}
+   const pts=unwrap(rows,0).map(r=>({v:Number(r.close??r.ltp??r.price??r.lastTradedPrice),d:r.date??r.businessDate??r.timestamp??r.time})).filter(x=>Number.isFinite(x.v));
    function draw(range){
      const lim={'1D':120,'1W':5,'1M':22,'3M':66,'6M':132,'1Y':252,'ALL':Infinity}[range]??22, p=pts.slice(-lim);
      card.querySelectorAll('[data-range]').forEach(b=>b.classList.toggle('active',b.dataset.range===range));
@@ -6413,7 +6414,7 @@ input,select{background:#fff!important;color:var(--text)!important}
      area.innerHTML='<svg class="npco-company-chart" viewBox="0 0 300 170" preserveAspectRatio="none">'+[26,69,112,156].map(y=>`<line x1="8" y1="${y}" x2="292" y2="${y}" stroke="#d6dadd" stroke-dasharray="4 4"/>`).join('')+`<polyline points="${xy}" fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg><div class="npco-chart-meta">${p.length} verified sessions · Rs ${num(min)}–${num(max)}</div>`;
      if(badge){badge.textContent=`${delta>=0?'+':''}${num(delta)} (${pct>=0?'+':''}${pct.toFixed(2)}%)`;badge.style.color=color;}
    }
-   card.querySelectorAll('[data-range]').forEach(b=>b.onclick=()=>draw(b.dataset.range));draw('1D');
+   card.querySelectorAll('[data-range]').forEach(b=>b.onclick=()=>draw(b.dataset.range));draw('1W');
  };
 })();
 </script>
