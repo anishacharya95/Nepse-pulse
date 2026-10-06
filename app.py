@@ -767,7 +767,10 @@ def normalize_index_history_rows(raw: Any, wanted_id: int = 58) -> list[dict]:
 
     dict_rows=[r for r in rows if isinstance(r,dict)]
     labelled=[r for r in dict_rows if any(pick(r,[k]) is not None for k in ["id","indexId","index","indexName","name"])]
-    candidates=[r for r in labelled if matches(r)] if any(matches(r) for r in labelled) else dict_rows
+    # If the payload is labelled with index ids/names, require the requested
+    # series to match. This prevents a failed sector lookup from silently
+    # displaying the headline NEPSE index instead.
+    candidates=[r for r in labelled if matches(r)] if labelled else dict_rows
     out=[]
     for r in candidates:
         date=pick(r,["date","businessDate","publishedDate","generatedTime","tradingDate","tradeDate","timestamp","time","datetime","dateTime"])
@@ -1257,6 +1260,9 @@ async def get_sectors():
             out.append({
                 "sector": name,
                 "name": name,
+                # Preserve the NEPSE sub-index id so Professional Charting can
+                # request the correct historical OHLC series without guessing.
+                "indexId": num(pick(x, ["id", "subIndexId", "sub_index_id", "indexId", "index_id", "exchangeIndexId"])),
                 "change": num(pick(x, ["pointChange", "difference", "change"])) or 0 if change is None else change,
                 "changePercent": change,
                 "indexValue": index_value,
