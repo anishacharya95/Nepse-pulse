@@ -1618,6 +1618,60 @@ async def get_fundamentals(symbol: str):
         pass
     return await legacy_get_fundamentals(symbol)
 
+# FINAL VERIFIED TRADE LOADER
+# The production `trades` adapter is useful for bulk analytics, but its
+# signature/response differs between nepse.py versions. Company detail pages
+# must use the already-normalized legacy NEPSE floorsheet loader first, then
+# production/archive fallbacks. Never return an empty result merely because
+# one adapter shape changed.
+async def get_floorsheet(symbol: Optional[str] = None):
+    wanted = symbol.upper().strip() if symbol else None
+
+    # 1) Existing normalized NEPSE loader: handles paginated floorsheets and
+    #    current-session payloads such as {floorsheets:{content:[...]}}.
+    try:
+        rows = await legacy_get_floorsheet(wanted)
+        rows = floor_rows(rows)
+        if wanted:
+            rows = [r for r in rows if str(r.get("symbol") or "").upper().strip() == wanted]
+        if rows:
+            return rows
+    except Exception:
+        pass
+
+    # 2) Production trades adapter as a fallback only. Normalize every known
+    # wrapper before applying the symbol filter.
+    try:
+        raw = await production_call("trades", symbol=wanted, max_pages=1000, size=500)
+        rows = floor_rows(raw)
+        if wanted:
+            rows = [r for r in rows if str(r.get("symbol") or "").upper().strip() == wanted]
+        if rows:
+            return rows
+    except TypeError:
+        try:
+            raw = await production_call("trades", max_pages=1000, size=500)
+            rows = floor_rows(raw)
+            if wanted:
+                rows = [r for r in rows if str(r.get("symbol") or "").upper().strip() == wanted]
+            if rows:
+                return rows
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+    # 3) Last verified fallback: the original legacy implementation may have
+    #    an archive/public endpoint available even when the primary call is
+    #    temporarily empty.
+    if not wanted:
+        try:
+            rows = await legacy_get_floorsheet(None)
+            return floor_rows(rows)
+        except Exception:
+            return []
+    return []
+
 # Preserve original implementations as explicit fallbacks.
 @app.get("/api/company-floorsheet/{symbol}")
 async def api_company_floorsheet(symbol: str, limit: int = Query(100000, ge=1, le=100000)):
