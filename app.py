@@ -2233,23 +2233,27 @@ async def technical_screener(
     async def load():
         errors = []
         live = []
+        live_source = 'unavailable'
         # Fast path: the screener needs only the live security universe.  Do
         # not wait for the full Command Center (index, sectors, brokers, etc.).
         try:
             raw = await production_call('live_market')
             live = deep_rows(raw, ('content','data','results','rows'))
+            if live: live_source = 'NEPSE production market endpoint'
         except Exception as exc:
             errors.append(f'production live market: {exc}')
         if not live:
             try:
                 raw = await nepse_call(['live_market','today_price'], page=1, size=500)
                 live = deep_rows(raw, ('content','data','results','rows'))
+                if live: live_source = 'NEPSE live market endpoint'
             except Exception as exc:
                 errors.append(f'NEPSE live market: {exc}')
         if not live:
             try:
                 market = await get_market()
                 live = market.get('live') or []
+                if live: live_source = 'NEPSE Pulse cached market snapshot'
             except Exception as exc:
                 errors.append(f'market fallback: {exc}')
 
@@ -2290,6 +2294,8 @@ async def technical_screener(
         else:
             live = sorted(live, key=turnover_key, reverse=True)[:limit]
 
+        # Preserve the true universe size before the responsive browser slice.
+        universe_count = len(live)
         # Search results are intentionally small; all-stock scans are capped
         # for responsiveness while still showing real live market rows.
         if q:
@@ -2316,22 +2322,29 @@ async def technical_screener(
                         base['technicalError'] = str(exc)
             # Never lose the real live snapshot just because history is absent.
             base['price'] = num(pick(r,['price','ltp','lastPrice','lastTradedPrice','close','closePrice'])) if num(pick(r,['price','ltp','lastPrice','lastTradedPrice','close','closePrice'])) is not None else base.get('price')
-            base['change'] = num(pick(r,['percentageChange','percentChange','changePercent','perChange','pChange','changePercentage']))
+            base['change'] = num(pick(r,['percentageChange','percentChange','percent_change','changePercent','perChange','pChange','changePercentage']))
+            if base['change'] is None:
+                # Some real NEPSE feeds expose absolute change plus previous close.
+                abs_change = num(pick(r,['change','changeValue']))
+                prev_close = num(pick(r,['previousClose','previous_close','prevClose']))
+                if abs_change is not None and prev_close not in (None, 0):
+                    base['change'] = abs_change / prev_close * 100
             base['volume'] = num(pick(r,['volume','totalTradedQuantity','quantity','tradedQuantity'])) if num(pick(r,['volume','totalTradedQuantity','quantity','tradedQuantity'])) is not None else base.get('volume')
-            base['turnover'] = num(pick(r,['turnover','totalTurnover','value','totalTradedValue'])) if num(pick(r,['turnover','totalTurnover','value','totalTradedValue'])) is not None else base.get('turnover')
+            base['turnover'] = num(pick(r,['turnover','totalTurnover','value','totalTradedValue','tradedAmount'])) if num(pick(r,['turnover','totalTurnover','value','totalTradedValue','tradedAmount'])) is not None else base.get('turnover')
             base['marketCap'] = num(pick(r,['marketCap','marketCapitalization','totalMarketCapitalization']))
             base['pe'] = num(pick(r,['pe','peRatio','priceEarningsRatio']))
+            base['dataSource'] = live_source
             return base
 
         results = await asyncio.gather(*(one(r) for r in live))
         results = [r for r in results if r]
         return {
             'ok': bool(results),
-            'source': f'NEPSE live market + OHLCV history ({tf})',
+            'source': f'{live_source} + historical OHLCV ({tf})',
             'timeframe': tf,
             'updatedAt': now_iso(),
             'count': len(results),
-            'universeCount': len(live) if q else len(live),
+            'universeCount': universe_count,
             'data': results,
             'errors': errors,
         }
