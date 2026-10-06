@@ -1664,6 +1664,198 @@ body{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",san
 #npAllMarket #npamRows tr.down>td{background:#d13f43!important;color:#fff!important}
 #npAllMarket #npamRows tr.flat>td{background:#1681c8!important;color:#fff!important}.npam-table td:first-child{font-weight:800}.npam-foot{padding:9px 12px;background:#073536;color:#fff;font-size:12px;display:flex;justify-content:space-between}</style>
 <div id="npAllMarket" aria-label="All traded companies market table"><div class="npam-head"><button class="npam-back" onclick="npCloseAllMarket()">‹</button><div class="npam-title">Live Nepse<div class="npam-sub" id="npamUpdated">All traded companies</div></div><button onclick="npLoadAllMarket()" style="background:none;color:white;border:0;font-size:20px">⟳</button></div><div class="npam-tools"><input id="npamSearch" placeholder="Search company or symbol" oninput="npFilterAllMarket()"><button onclick="npLoadAllMarket()">Refresh</button></div><div class="npam-scroll"><table class="npam-table"><thead><tr><th>SYM</th><th>LTP</th><th>HIGH</th><th>LOW</th><th>CH</th><th>CH%</th></tr></thead><tbody id="npamRows"><tr><td colspan="6" style="text-align:center;background:#073536">Loading live market…</td></tr></tbody></table></div><div class="npam-foot"><span id="npamCount">Loading…</span><span>Tap a company for details</span></div></div>
+<style id="company-detail-page-style">
+#npCompanyPage{position:fixed;inset:0;z-index:10050;background:#f3f8fc;color:#142b3b;display:none;overflow:auto;font-family:inherit}
+#npCompanyPage.open{display:block}.npco-head{position:sticky;top:0;background:#fff;border-bottom:1px solid #dbe6ee;padding:12px 15px;display:flex;align-items:center;gap:12px;z-index:2}.npco-back{border:0;background:#eaf3fa;border-radius:10px;padding:9px 13px;font-size:18px}.npco-title{font-size:19px;font-weight:850}.npco-sub{font-size:12px;color:#718596}.npco-tabs{display:flex;overflow:auto;gap:4px;padding:9px;background:#fff;position:sticky;top:60px;z-index:2;border-bottom:1px solid #dbe6ee}.npco-tabs button{white-space:nowrap;border:0;background:transparent;padding:10px 12px;border-radius:9px;font-weight:750;color:#66798a}.npco-tabs button.active{background:#dff0ff;color:#1269aa}.npco-body{padding:14px;max-width:1000px;margin:auto}.npco-card{background:#fff;border:1px solid #e0eaf1;border-radius:15px;padding:14px;margin-bottom:12px}.npco-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.npco-metric small{display:block;color:#738696;font-size:11px}.npco-metric b{font-size:19px}.npco-up{color:#159b68}.npco-down{color:#e34c56}.npco-table{width:100%;border-collapse:collapse;font-size:12px}.npco-table th,.npco-table td{text-align:right;padding:9px 6px;border-bottom:1px solid #edf1f4;white-space:nowrap}.npco-table th:first-child,.npco-table td:first-child{text-align:left}.npco-scroll{overflow:auto}.npco-note{color:#718596;font-size:12px;padding:8px 2px}@media(min-width:700px){.npco-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
+</style>
+<div id="npCompanyPage" aria-label="Company details"><div class="npco-head"><button class="npco-back" onclick="npCloseCompany()" aria-label="Back">‹</button><img id="npcoCompanyLogo" class="npco-company-logo" alt="" src="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div id="npcoLogoFallback" class="npco-company-logo-fallback" style="display:none">N</div><div><div class="npco-title" id="npcoSymbol">Company</div><div class="npco-sub" id="npcoName">Market information</div></div></div><div class="npco-tabs" id="npcoTabs"><button class="active" data-tab="info">Stock Info</button><button data-tab="depth">Market Depth</button><button data-tab="floorsheet">Floorsheet</button><button data-tab="brokers">Broker Analysis</button><button data-tab="history">Price History</button></div><div class="npco-body" id="npcoContent"><div class="npco-card">Loading company information…</div></div></div>
+<script id="npco-real-chart-renderer">
+(function(){
+  window.renderCompanyChart=function(history,symbol){
+    const card=document.querySelector('#npcoContent .npco-live-chart-card'); if(!card)return;
+    const area=card.querySelector('.npco-chart-area'); if(!area)return;
+    const rows=(Array.isArray(history)?history:[]).map(x=>({
+      t:x.date||x.businessDate||x.timestamp||x.time||x.t,
+      o:Number(x.open??x.o),h:Number(x.high??x.h),l:Number(x.low??x.l),c:Number(x.close??x.c),v:Number(x.volume??x.v)
+    })).filter(x=>Number.isFinite(x.c)&&Number.isFinite(x.h)&&Number.isFinite(x.l)).sort((a,b)=>String(a.t).localeCompare(String(b.t)));
+    if(rows.length<2){area.innerHTML='<div class="npco-note">Verified price history is not available for this symbol.</div>';return;}
+    const ranges={"1D":1,"1W":5,"1M":22,"3M":66,"6M":132,"1Y":252,"ALL":rows.length};
+    let active='1D';
+    function draw(){
+      const n=Math.min(rows.length,ranges[active]||rows.length), data=rows.slice(-n), w=Math.max(640,area.clientWidth||760),h=280,pad={l:48,r:18,t:18,b:34},cw=w-pad.l-pad.r,ch=h-pad.t-pad.b;
+      const hi=Math.max(...data.map(x=>x.h)),lo=Math.min(...data.map(x=>x.l)); const span=(hi-lo)||1;
+      const y=v=>pad.t+(hi-v)/span*ch, x=i=>pad.l+(i/(Math.max(1,data.length-1)))*cw;
+      const candleW=Math.max(2,Math.min(12,cw/data.length*.62));
+      const lines=[]; for(let i=0;i<5;i++){const yy=pad.t+i*ch/4,val=hi-i*span/4;lines.push(`<line x1="${pad.l}" y1="${yy}" x2="${w-pad.r}" y2="${yy}" stroke="#e6edf3"/><text x="4" y="${yy+4}" fill="#718596" font-size="10">${val.toFixed(2)}</text>`)}
+      const candles=data.map((r,i)=>{const xx=x(i),up=r.c>=r.o,bodyTop=y(Math.max(r.o,r.c)),bodyBottom=y(Math.min(r.o,r.c)),bodyH=Math.max(1,bodyBottom-bodyTop);return `<line x1="${xx}" y1="${y(r.h)}" x2="${xx}" y2="${y(r.l)}" stroke="${up?'#159b68':'#e34c56'}" stroke-width="1"/><rect x="${xx-candleW/2}" y="${bodyTop}" width="${candleW}" height="${bodyH}" rx="1" fill="${up?'#159b68':'#e34c56'}"/>`}).join('');
+      const last=data.at(-1); const first=data[0]; const pct=first.c?((last.c-first.c)/first.c*100):null;
+      area.innerHTML=`<div class="npco-chart-toolbar"><b>${esc(symbol)} · ${active}</b><span>${Number(last.c).toFixed(2)} ${pct==null?'':'('+(pct>=0?'+':'')+pct.toFixed(2)+'%)'}</span></div><div class="npco-chart-svg"><svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="${esc(symbol)} price chart">${lines.join('')}${candles}</svg></div>`;
+      card.querySelectorAll('[data-range]').forEach(b=>b.classList.toggle('active',b.dataset.range===active));
+    }
+    card.querySelectorAll('[data-range]').forEach(b=>b.onclick=()=>{active=b.dataset.range;draw()});
+    draw(); window.addEventListener('resize',draw,{once:true});
+  };
+})();
+</script>
+<style id="npco-real-chart-style">.npco-chart-toolbar{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border-bottom:1px solid #edf1f4;font-size:12px}.npco-chart-svg{height:280px;width:100%;background:#fff}.npco-chart-svg svg{width:100%;height:100%;display:block}.npco-range-buttons{display:flex;gap:5px;padding:9px 12px;border-bottom:1px solid #edf1f4;overflow:auto}.npco-range-buttons button{border:1px solid #dce6ed;background:#fff;border-radius:7px;padding:6px 9px;font-size:10px;font-weight:800;color:#63798a}.npco-range-buttons button.active{background:#e5f3ff;color:#1269aa;border-color:#b9ddf5}</style>
+<script id="np-company-detail-controller">
+(function(){
+ const root=document.getElementById('npCompanyPage'), content=document.getElementById('npcoContent');let symbol='',cache={};
+ const esc=v=>String(v??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+ const arr=x=>{if(Array.isArray(x))return x;if(!x||typeof x!=='object')return [];const seen=new Set();const walk=v=>{if(Array.isArray(v))return v;if(!v||typeof v!=='object'||seen.has(v))return [];seen.add(v);for(const k of ['data','content','rows','result','results','items','records','live','liveMarket','market','history','priceVolumeHistory','payload']){const q=v[k];if(Array.isArray(q))return q;if(q&&typeof q==='object'){const a=walk(q);if(a.length)return a}}return []};return walk(x)};
+ const num=x=>x==null||x===''?'—':(Number.isFinite(Number(x))?Number(x).toLocaleString(undefined,{maximumFractionDigits:2}):esc(x));
+ const API=()=>String(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
+ const unwrap=raw=>{if(raw&&typeof raw==='object'&&!Array.isArray(raw)){if(Object.prototype.hasOwnProperty.call(raw,'data') && (raw.ok===true || raw.status==='ok')) return raw.data; if(raw.payload&&typeof raw.payload==='object') return raw.payload;}return raw};
+ const get=async path=>{if(cache[path])return cache[path];const r=await fetch(API()+path+(path.includes('?')?'&':'?')+'_stockinfo='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});if(!r.ok)throw Error(path+' HTTP '+r.status);const raw=await r.json();const v=unwrap(raw);cache[path]=v;return v};
+ function liveRow(sym){try{const st=window.PulseFeedEngine?.state?.()||{};const raw=st.live||st.market?.data||st.market||[];return arr(raw).map(x=>typeof normRow==='function'?normRow(x):x).find(x=>String(x.symbol||x.symbolName||x.securitySymbol||'').toUpperCase()===sym)}catch(e){return null}}
+ async function resolveSymbol(q){const up=q.trim().toUpperCase();if(/^[A-Z0-9&.-]{2,12}$/.test(up))return up;try{const d=await get('/CompanyList');const rows=arr(d);const hit=rows.find(r=>[r.companyName,r.securityName,r.name,r.company_name].some(v=>String(v||'').trim().toLowerCase()===q.trim().toLowerCase()));return String(hit?.symbol||hit?.symbolName||hit?.securitySymbol||hit?.security_code||'').toUpperCase()||up}catch(e){return up}}
+ window.npCloseCompany=()=>root.classList.remove('open');
+ window.npOpenCompany=async function(sym){symbol=String(sym||'').trim().toUpperCase();if(!symbol)return;cache={};root.classList.add('open');document.getElementById('npcoSymbol').textContent=symbol;document.getElementById('npcoName').textContent='Loading company data…';await show('info')};
+ async function show(tab){document.querySelectorAll('#npcoTabs button').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));content.innerHTML='<div class="npco-card">Loading '+esc(tab)+'…</div>';try{
+  const live=liveRow(symbol);let html='';
+  if(tab==='info') {
+    // Prefer the normalized endpoint, but NEVER let an older deployed backend
+    // turn Stock Info into a blank/404 screen. Fall back to the existing,
+    // verified company/fundamentals/history endpoints.
+    let d=null;
+    try{d=await get('/api/stock-overview/'+encodeURIComponent(symbol));}catch(e){d=null;}
+    if(!d?.ok){
+      const [marketRaw,liveRaw,companyRaw,fundRaw,publicRaw,histRaw]=await Promise.all([
+        get('/api/market').catch(()=>null),
+        get('/LiveMarket').catch(()=>[]),
+        get('/api/company/'+encodeURIComponent(symbol)).catch(()=>null),
+        get('/api/fundamentals/'+encodeURIComponent(symbol)).catch(()=>null),
+        get('/api/public/fundamentals/'+encodeURIComponent(symbol)).catch(()=>null),
+        get('/PriceVolumeHistory?symbol='+encodeURIComponent(symbol)).catch(()=>null)
+      ]);
+      const liveRows=arr(liveRaw);
+      const marketRows=arr(marketRaw?.live||marketRaw?.data?.live||marketRaw);
+      const candidates=liveRows.concat(marketRows);
+      const live=candidates.map(x=>typeof normRow==='function'?normRow(x):x).find(x=>String(x?.symbol||x?.ticker||x?.securitySymbol||x?.symbolName||'').toUpperCase()===symbol)||candidates.find(x=>String(x?.symbol||x?.ticker||x?.securitySymbol||x?.symbolName||'').toUpperCase()===symbol)||{};
+      const company=companyRaw?.details||companyRaw?.company||companyRaw?.profile||companyRaw||{};
+      const pub=publicRaw||{};
+      const fund=fundRaw||{};
+      const prof=company||pub.profile||{};
+      const fin=Array.isArray(fund.financials)?fund.financials[0]:(Array.isArray(pub.financials)?pub.financials[0]:(fund.financials||pub.financials||{}));
+      const hist=arr(histRaw);
+      const pickv=(...objs)=>{const keys=Array.prototype.slice.call(arguments,objs.length);return null};
+      const pv=(keys,...objs)=>{for(const o of objs){if(!o||typeof o!=='object')continue;const m=Object.keys(o).reduce((a,k)=>(a[k.toLowerCase().replace(/[^a-z0-9]/g,'')]=o[k],a),{});for(const k of keys){const v=m[String(k).toLowerCase().replace(/[^a-z0-9]/g,'')];if(v!==undefined&&v!==null&&v!=='')return v;}}return null};
+      const n=v=>{if(v===null||v===undefined||v==='')return null;const x=Number(String(v).replace(/,/g,''));return Number.isFinite(x)?x:null};
+      let ltp=n(pv(['ltp','lastTradedPrice','lastPrice','close','closingPrice','price'],live,prof,pub.price,fin));
+      let prev=n(pv(['previousClose','previousClosingPrice','prevClose','previousPrice','preClose'],live,prof,pub.price,fin));
+      let ch=n(pv(['change','pointChange','difference','changeValue'],live,prof,pub.price,fin));
+      let pct=n(pv(['percentageChange','perChange','percentChange','changePercent','pChange','pct'],live,prof,pub.price,fin));
+      if(ch==null&&ltp!=null&&prev!=null)ch=ltp-prev;
+      if(pct==null&&ch!=null&&prev) pct=ch/prev*100;
+      const open=n(pv(['open','openPrice','openingPrice'],live,prof,pub.price));
+      const high=n(pv(['high','highPrice','dayHigh'],live,prof,pub.price));
+      const low=n(pv(['low','lowPrice','dayLow'],live,prof,pub.price));
+      const volume=n(pv(['volume','totalTradedQuantity','tradedQuantity','quantity','tradedShares','sharesTraded'],live,pub.price));
+      const turnover=n(pv(['turnover','totalTurnover','totalTradedValue','tradedAmount','value'],live,pub.price));
+      const transactions=n(pv(['transactions','totalTransactions','totalTrades','noOfTransactions','numberOfTransactions'],live,pub.price));
+      const avg=n(pv(['averagePrice','avgPrice','weightedAveragePrice'],live,pub.price));
+      const listed=n(pv(['listedShares','totalListedShares','numberOfListedShares','totalShares','shareOutstanding'],prof,pub.security,fin));
+      let mcap=n(pv(['marketCap','marketCapitalization','marketCapitalizationValue','marCap'],prof,pub.security,fin));
+      if(mcap==null&&ltp!=null&&listed!=null)mcap=ltp*listed;
+      const eps=n(pv(['eps','earningPerShare','earningsPerShare'],fin,prof,pub.financials));
+      const book=n(pv(['bookValue','book_value','netWorthPerShare'],fin,prof,pub.financials));
+      let pe=n(pv(['pe','peRatio','priceEarningRatio'],fin,prof)); if(pe==null&&ltp!=null&&eps)pe=ltp/eps;
+      let pbv=n(pv(['pbv','pb','priceBookValue','priceToBook'],fin,prof)); if(pbv==null&&ltp!=null&&book)pbv=ltp/book;
+      const roe=n(pv(['roe','returnOnEquity'],fin,prof));
+      const cash=n(pv(['cashDividend','cashDividendPercent','cash'],pub.dividends,fin,prof));
+      const bonus=n(pv(['bonusDividend','bonusDividendPercent','bonus'],pub.dividends,fin,prof));
+      let dy=n(pv(['dividendYield','dividendYieldPercent'],fin,prof)); if(dy==null&&cash!=null&&ltp)dy=cash/ltp*100;
+      const closes=hist.map(x=>n(pv(['close','ltp','lastPrice','price'],x))).filter(x=>x!=null);
+      const slice252=hist.slice(-252);
+      const high52=slice252.map(x=>n(pv(['high','highPrice','close','ltp'],x))).filter(x=>x!=null);
+      const low52=slice252.map(x=>n(pv(['low','lowPrice','close','ltp'],x))).filter(x=>x!=null);
+      const ret=(days)=>{if(closes.length<=days)return null;const a=closes[closes.length-1],b=closes[closes.length-1-days];return b?((a-b)/b*100):null};
+      d={ok:true,companyName:pv(['companyName','securityName','name'],prof,company)||symbol,source:{market:'NEPSE live market feed / existing backend',history:histRaw?.source||'NEPSE verified price history'},market:{ltp,change:ch,changePercent:pct,open,high,low,previousClose:prev,turnover,volume,transactions,averagePrice:avg,listedShares:listed,marketCap:mcap},performance:{eps,pe,bookValue:book,pbv,roe,dividendYield:dy,cashDividend:cash,bonusDividend:bonus,high52:high52.length?Math.max(...high52):null,low52:low52.length?Math.min(...low52):null,return1W:ret(5),return1M:ret(21),return3M:ret(63),return6M:ret(126),return1Y:ret(252),historySessions:hist.length},history:hist,errors:['Normalized stock-overview endpoint unavailable; used verified legacy endpoints.']};
+    }
+    if(!d?.ok) throw new Error('No verified Stock Info data is available for '+symbol);
+    const m=d.market||{}, p=d.performance||{};
+    document.getElementById('npcoName').textContent=d.companyName||symbol;
+    const f=(label,v,unit='')=>'<div class="npco-metric"><small>'+esc(label)+'</small><b>'+((v==null||v==='')?'—':num(v)+unit)+'</b></div>';
+    const marketCard='<section class="npco-card"><div class="npco-section-title">Live Market</div><div class="npco-grid">'+[
+      f('LTP',m.ltp),f('Change',m.change),f('Change %',m.changePercent,'%'),f('Open',m.open),f('High',m.high),f('Low',m.low),
+      f('Previous Close',m.previousClose),f('Turnover',m.turnover),f('Volume',m.volume),f('Transactions',m.transactions),f('Average Price',m.averagePrice),f('Listed Shares',m.listedShares)
+    ].join('')+'</div></section>';
+    const chartCard='<section class="npco-fund-card npco-live-chart-card" data-chart-symbol="'+esc(symbol)+'"><div class="npco-chart-head"><b>'+esc(symbol)+' Price Chart</b><span class="npco-chart-change"></span></div><div class="npco-range-buttons">'+['1D','1W','1M','3M','6M','1Y','ALL'].map((r,i)=>'<button type="button" data-range="'+r+'" class="'+(i===0?'active':'')+'">'+r+'</button>').join('')+'</div><div class="npco-chart-area"><div class="npco-note">Loading verified price history…</div></div></section>';
+    const fundamentalsExtra=(Array.isArray(d.financials)?d.financials:arr(d.financials)).map(x=>({field:x}));
+    const latestFin=Array.isArray(d.financials)&&d.financials.length?d.financials[d.financials.length-1]:{};
+    const fundamentalCards=[
+      ['EPS',p.eps],['P/E Ratio',p.pe],['Book Value',p.bookValue],['PBV',p.pbv],['ROE',p.roe],['Dividend Yield',p.dividendYield],
+      ['Cash Dividend',p.cashDividend],['Bonus Dividend',p.bonusDividend],['52 Week High',p.high52],['52 Week Low',p.low52],
+      ['1 Week Return',p.return1W],['1 Month Return',p.return1M],['3 Month Return',p.return3M],['6 Month Return',p.return6M],['1 Year Return',p.return1Y],
+      ['Market Cap',m.marketCap],['Listed Shares',m.listedShares],['History Sessions',p.historySessions],
+      ['Net Profit',latestFin.netProfit],['Revenue',latestFin.revenue],['Total Assets',latestFin.assets],['Total Liabilities',latestFin.liabilities],['Total Equity',latestFin.equity]
+    ];
+    const performanceCard='<section class="npco-fund-card"><div class="npco-fund-title">Performance & Fundamentals</div><div class="npco-fund-grid">'+fundamentalCards.map(([k,v])=>'<div class="npco-fund-item"><small>'+esc(k)+'</small><b>'+((v==null||v==='')?'—':num(v)+(k.includes('Return')||k==='Dividend Yield'||k==='ROE'?'%':''))+'</b></div>').join('')+'</div></section>';
+    const detailBlocks=[];
+    const addDetail=(title,rows)=>{rows=Array.isArray(rows)?rows.filter(x=>x&&typeof x==='object'):[];if(!rows.length)return;const keys=[...new Set(rows.flatMap(r=>Object.keys(r)))].slice(0,30);detailBlocks.push('<section class="npco-fund-card npco-detail-card"><div class="npco-fund-title">'+esc(title)+'</div><div class="npco-scroll"><table class="npco-table"><thead><tr>'+keys.map(k=>'<th>'+esc(k)+'</th>').join('')+'</tr></thead><tbody>'+rows.slice(-20).reverse().map(r=>'<tr>'+keys.map(k=>'<td>'+esc(r[k]==null||r[k]===''?'—':typeof r[k]==='object'?JSON.stringify(r[k]):r[k])+'</td>').join('')+'</tr>').join('')+'</tbody></table></div></section>');};
+    addDetail('Financial Statements & Ratios',d.financials);
+    addDetail('Dividend History',d.dividends);
+    addDetail('Corporate Actions',d.corporateActions);
+    const sourceNote='<div class="npco-note npco-source-note">Data source: '+esc(d.source?.market||'NEPSE')+' · History: '+esc(d.source?.history||'Unavailable')+' · Missing source fields are shown as —. No synthetic values are generated.</div>';
+    html=chartCard+marketCard+performanceCard+detailBlocks.join('')+sourceNote;
+    setTimeout(async()=>{let h=Array.isArray(d.history)?d.history:arr(d.history);if(h.length<2){try{h=arr(await get('/PriceVolumeHistory?symbol='+encodeURIComponent(symbol)));}catch(e){}}renderCompanyChart(h,symbol);},0);
+  } else if(tab==='depth'){
+    const [d,ov]=await Promise.all([
+      get('/api/production/depth/'+encodeURIComponent(symbol)+'?_t='+Date.now()).catch(()=>null),
+      get('/api/stock-overview/'+encodeURIComponent(symbol)+'?_t='+Date.now()).catch(()=>null)
+    ]);
+    const fmtDepth=v=>v==null||v===''?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:2});
+    const side=(rows,kind)=>{
+      const a=Array.isArray(rows)?rows:[];
+      const isBuy=kind==='buy';
+      return '<div class="npco-depth-side '+kind+'"><div class="npco-depth-title">'+(isBuy?'BUY ORDERS':'SELL ORDERS')+'</div><div class="npco-depth-head"><span>Orders</span><span>Quantity</span><span>Price</span></div>'+[0,1,2,3,4].map(i=>{const r=a[i];return '<div class="npco-depth-row"><span>'+fmtDepth(r?.orders)+'</span><span>'+fmtDepth(r?.quantity)+'</span><span>'+fmtDepth(r?.price)+'</span></div>'}).join('')+'</div>';
+    };
+    if(d?.ok){
+      const b=Number.isFinite(Number(d.totalBuyQuantity))?Number(d.totalBuyQuantity):null;
+      const s=Number.isFinite(Number(d.totalSellQuantity))?Number(d.totalSellQuantity):null;
+      const diff=(b!==null&&s!==null)?s-b:null;
+      const supply=diff===null?'Supply / demand total unavailable':diff>0?'Supply High by '+fmtDepth(Math.abs(diff))+' units':diff<0?'Demand High by '+fmtDepth(Math.abs(diff))+' units':'Balanced Order Book';
+      const om=ov?.market||{};
+      const lr=liveRow(symbol)||{};
+      const ltp=om.ltp!=null?Number(om.ltp):(lr.ltp!=null?Number(lr.ltp):null);
+      const prev=om.previousClose!=null?Number(om.previousClose):(lr.prev!=null?Number(lr.prev):null);
+      const change=om.change!=null?Number(om.change):((ltp!=null&&prev!=null)?ltp-prev:null);
+      const pct=om.changePercent!=null?Number(om.changePercent):((change!=null&&prev)?change/prev*100:(lr.pct!=null?Number(lr.pct):null));
+      const pctText=pct==null?'—':(pct>=0?'+':'')+Number(pct).toFixed(2)+'%';
+      const marketHead='<div class="npco-depth-market"><div><small>Change</small><b>'+fmtDepth(change)+' ('+esc(pctText)+')</b></div><div><small>LTP</small><b>'+fmtDepth(ltp)+'</b></div><div><small>Pr. Close</small><b>'+fmtDepth(prev)+'</b></div></div>';
+      html='<section class="npco-depth-wrap"><div class="npco-depth-summary"><div><b>('+esc(symbol)+') '+esc(document.getElementById('npcoName')?.textContent||symbol)+'</b><small>Live Market Depth · Top 5 Buy / Top 5 Sell</small></div><div class="npco-depth-updated">Updated '+new Date(d.updatedAt||Date.now()).toLocaleTimeString()+'</div></div>'+marketHead+'<div class="npco-depth-grid">'+side(d.buy,'buy')+side(d.sell,'sell')+'</div><div class="npco-depth-totals"><span>Total Buy Quantity : <b>'+fmtDepth(b)+'</b></span><span>Total Sell Quantity : <b>'+fmtDepth(s)+'</b></span></div><div class="npco-depth-supply '+(diff>0?'sell':'buy')+'">'+supply+'</div><div class="npco-note npco-depth-source">'+esc(d.source||'NEPSE live market-depth feed')+' · Exact exchange order-book levels when supplied · No synthetic values.</div></section>';
+    } else html='<div class="npco-card npco-note">Live market-depth data is unavailable for '+esc(symbol)+' right now. The application will not substitute historical or fabricated orders.</div>'
+;
+  } else if(tab==='floorsheet'){
+    const d=await get('/api/floorsheet-intelligence?symbol='+encodeURIComponent(symbol)+'&months=1&detail_limit=3000&_t='+Date.now()).catch(()=>null);
+    const rows=arr(d?.floorsheet);
+    if(rows.length){
+      const cols=['date','time','trade','symbol','buyer','seller','quantity','rate','amount'];
+      html='<section class="npco-card"><div class="npco-section-title">Daily Floorsheet</div><div class="npco-note">Verified executed transactions for '+esc(symbol)+'.</div><div class="npco-scroll"><table class="npco-table"><thead><tr>'+cols.map(k=>'<th>'+k+'</th>').join('')+'</tr></thead><tbody>'+rows.slice(0,500).map(r=>'<tr>'+cols.map(k=>'<td>'+esc(r[k]==null||r[k]===''?'—':typeof r[k]==='number'?Number(r[k]).toLocaleString(undefined,{maximumFractionDigits:2}):r[k])+'</td>').join('')+'</tr>').join('')+'</tbody></table></div></section>';
+    } else html='<div class="npco-card npco-note">No verified floorsheet rows are available for '+esc(symbol)+' in the current archive.</div>';
+  } else if(tab==='brokers'){
+    const d=await get('/api/floorsheet-intelligence?symbol='+encodeURIComponent(symbol)+'&months=1&detail_limit=3000&_t='+Date.now()).catch(()=>null);
+    const bs=arr(d?.brokers).sort((a,b)=>Math.abs(Number(b.netValue||0))-Math.abs(Number(a.netValue||0)));
+    const fmtB=v=>v==null||v===''?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:2});
+    html=bs.length?'<section class="npco-card"><div class="npco-section-title">Broker Flow · 1 Month</div><div class="npco-note">Net flow = buy value − sell value. This is transaction flow, not current broker holdings.</div><div class="npco-scroll"><table class="npco-table"><thead><tr><th>Broker</th><th>Buy Value</th><th>Sell Value</th><th>Net Flow</th><th>Buy Qty</th><th>Sell Qty</th><th>Trades</th></tr></thead><tbody>'+bs.slice(0,100).map(r=>'<tr><td><b>'+esc(r.broker)+'</b></td><td>'+fmtB(r.buyValue)+'</td><td>'+fmtB(r.sellValue)+'</td><td class="'+(Number(r.netValue)>=0?'npco-up':'npco-down')+'">'+(Number(r.netValue)>=0?'+':'')+fmtB(r.netValue)+'</td><td>'+fmtB(r.buyQty)+'</td><td>'+fmtB(r.sellQty)+'</td><td>'+fmtB(r.tradeCount)+'</td></tr>').join('')+'</tbody></table></div></section>':'<div class="npco-card npco-note">No verified broker-flow data is available for '+esc(symbol)+' in the current archive.</div>';
+  } else {const d=await get('/PriceVolumeHistory?symbol='+encodeURIComponent(symbol)).catch(()=>null);const rows=arr(d);html=rows.length?table(rows):'<div class="npco-card npco-note">Price history is unavailable for this company.</div>';}
+  content.innerHTML=html||'<div class="npco-card npco-note">No data returned.</div>';
+ }catch(e){content.innerHTML='<div class="npco-card npco-note">Could not load this section: '+esc(e.message)+'</div>'}}
+ function table(rows){if(!rows.length)return '<div class="npco-card npco-note">No rows returned by the data source.</div>';const keys=Object.keys(rows[0]).slice(0,8);return '<div class="npco-card npco-scroll"><table class="npco-table"><thead><tr>'+keys.map(k=>'<th>'+esc(k)+'</th>').join('')+'</tr></thead><tbody>'+rows.slice(0,250).map(r=>'<tr>'+keys.map(k=>'<td>'+esc(typeof r[k]==='object'?JSON.stringify(r[k]):r[k])+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>'}
+ document.getElementById('npcoTabs').addEventListener('click',e=>{const b=e.target.closest('button[data-tab]');if(b)show(b.dataset.tab)});
+ let depthTimer=null;
+ document.getElementById('npcoTabs').addEventListener('click',e=>{
+   const b=e.target.closest('button[data-tab]');
+   if(!b)return;
+   if(depthTimer){clearInterval(depthTimer);depthTimer=null;}
+   if(b.dataset.tab==='depth') depthTimer=setInterval(()=>{if(document.querySelector('#npcoTabs button.active')?.dataset.tab==='depth')show('depth');},5000);
+ });
+ // Route existing company rows and search selections to the company page instead of Stock X-Ray.
+ document.addEventListener('click',e=>{const row=e.target.closest('#pulseMoversRows .pulse-row,#pulseMoversRows .pulse-table-row,[data-symbol].pulse-table-row');if(row){const sym=row.dataset.symbol||row.querySelector('b')?.textContent?.trim()||row.querySelector('span')?.textContent?.trim();if(sym&&/^[A-Z0-9&.-]{2,12}$/.test(sym)){e.preventDefault();e.stopImmediatePropagation();npOpenCompany(sym)}}},true);
+ const oldSearch=window.searchPulse;window.searchPulse=function(){const q=document.getElementById('searchBox')?.value.trim()||document.getElementById('mobileSearchBox')?.value.trim();if(q){resolveSymbol(q).then(sym=>npOpenCompany(sym));return}if(oldSearch)oldSearch()};
+})();
+</script>
+
 <div class="bottom mobile-exact-bottom"><nav class="nav">
   <button class="active" onclick="setNav(this,'Home')"><span class="ni">⌂</span>Home</button>
   <button onclick="setNav(this,'Markets')"><span class="ni">⌁</span>Market</button>
@@ -3503,6 +3695,16 @@ function sync(st){
  $('fsDot').style.background=status==='LIVE'?'#20a464':status==='CACHED'?'#d29b19':'#999';
  render();
 }
+async function loadVerifiedFloorsheet(){
+ try{
+   $('fsStatus').textContent='LOADING VERIFIED FLOORSHEET…';$('fsDot').style.background='#d29b19';
+   const r=await fetch((window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com')+'/api/floorsheet-intelligence?months=1&detail_limit=3000&_t='+Date.now(),{cache:'no-store'});
+   if(!r.ok)throw Error('HTTP '+r.status);
+   const d=await r.json();
+   const rows=arr(d.floorsheet).map(x=>normalize({symbol:x.symbol,buyerBroker:x.buyer,sellerBroker:x.seller,quantity:x.quantity,rate:x.rate,amount:x.amount,tradeTime:x.time,businessDate:x.date,trade:x.trade}));
+   sync({floorsheet:rows,status:d.ok?'LIVE':'EMPTY',updatedAt:d.updatedAt});
+ }catch(e){console.warn('Verified floorsheet:',e);$('fsStatus').textContent='FLOORSHEET UNAVAILABLE';$('fsDot').style.background='#999'}
+}
 document.addEventListener('DOMContentLoaded',()=>{
  document.querySelectorAll('.fs-tab').forEach(b=>b.addEventListener('click',()=>{
    document.querySelectorAll('.fs-tab').forEach(x=>x.classList.remove('active'));b.classList.add('active');
@@ -3511,11 +3713,11 @@ document.addEventListener('DOMContentLoaded',()=>{
    $(target).hidden=false;
  }));
  $('fsApply').addEventListener('click',render);
- $('fsRefresh').addEventListener('click',()=>window.PULSE_FEED?.refresh?.());
+ $('fsRefresh').addEventListener('click',()=>{loadVerifiedFloorsheet();window.PULSE_FEED?.refresh?.()});
  ['fsSearch','fsMinQty','fsMinValue','fsSide','fsLimit'].forEach(id=>$(id).addEventListener('change',render));
  window.addEventListener('pulse-central-snapshot',e=>sync(e.detail));
  window.addEventListener('pulse-feed-update',()=>{const st=window.PULSE_FEED_ENGINE?.state?.();if(st)sync(st)});
- const st=window.PULSE_FEED_ENGINE?.state?.();if(st)sync(st);
+ const st=window.PULSE_FEED_ENGINE?.state?.();if(st&&extract(st).length)sync(st); loadVerifiedFloorsheet();
 });
 })();
 </script>
@@ -5815,41 +6017,186 @@ document.addEventListener('click',e=>{const tr=e.target.closest('#npamRows tr[da
 </section>
 <script type="module" id="nepse-pulse-tradex-chart">
 (function(){'use strict';
-const API=String(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');const $=id=>document.getElementById(id);let chart=null,current='NABIL',resolution='D',requestId=0,tradexModule=null,talibModule=null;const rangeMap={1:500,3:500,5:500,10:500,15:500,30:500,60:500,D:500,W:260,M:120,Y:50},resolutionLabel={1:'1-minute',3:'3-minute',5:'5-minute',10:'10-minute',15:'15-minute',30:'30-minute',60:'1-hour',D:'Daily',W:'Weekly',M:'Monthly',Y:'Yearly'};
-function status(msg,ok){const e=$('txpStatus'),d=$('txpDot');if(e)e.textContent=msg;if(d)d.style.background=ok?'#20a464':'#b78300'}function setLoading(show,msg){const e=$('txpLoading');if(!e)return;e.textContent=msg||'Loading TradeX Chart…';e.classList.toggle('hidden',!show)}function toNum(v){const n=Number(v);return Number.isFinite(n)?n:null}
-async function getHistory(symbol,res){const id=++requestId;const u=API+'/api/tv/history?symbol='+encodeURIComponent(symbol)+'&resolution='+encodeURIComponent(res)+'&countback='+(rangeMap[res]||500)+'&_tradex='+Date.now();const r=await fetch(u,{cache:'no-store',headers:{Accept:'application/json'}});if(!r.ok)throw Error('History HTTP '+r.status);const d=await r.json();if(id!==requestId)throw Error('Request superseded');if(d.s!=='ok'||!Array.isArray(d.t)||!d.t.length)throw Error('No OHLCV history for '+symbol);const rows=[];for(let i=0;i<d.t.length;i++){const o=toNum(d.o?.[i]),h=toNum(d.h?.[i]),l=toNum(d.l?.[i]),c=toNum(d.c?.[i]),v=toNum(d.v?.[i])??0;if([o,h,l,c].every(Number.isFinite))rows.push([Number(d.t[i])*1000,o,h,l,c,v])}if(!rows.length)throw Error('Feed returned no usable candles');return rows}
-function destroyChart(){try{chart?.stopStream?.()}catch(e){}const host=$('txpChartMount');if(host)host.innerHTML='<div id="txpLoading" class="txp-loading">Loading TradeX Chart…</div>';chart=null}
-async function ensureLibraries(){if(tradexModule)return tradexModule;status('LOADING TRADEX…',false);setLoading(true,'Loading TradeX Chart library…');try{tradexModule=await Promise.race([import('https://cdn.jsdelivr.net/npm/tradex-chart@0.158.7/+esm'),new Promise((_,rej)=>setTimeout(()=>rej(Error('TradeX CDN timed out after 15 seconds')),15000))]);}catch(e){tradexModule=null;throw Error('TradeX library failed to load. Check GitHub Pages network/CSP access to jsDelivr. '+(e?.message||''))}try{talibModule=await Promise.race([import('https://cdn.jsdelivr.net/npm/talib-web@0.1.3/+esm'),new Promise((_,rej)=>setTimeout(()=>rej(Error('TA-Lib timeout')),10000))]);}catch(e){talibModule=null;console.warn('TA-Lib module unavailable; chart will still load.',e)}return tradexModule}
-async function render(symbol,res){current=String(symbol||'NABIL').trim().toUpperCase()||'NABIL';resolution=res||resolution;if(isIndexSymbol(current)&&!['D','W','M','Y'].includes(resolution)){resolution='D';document.querySelectorAll('[data-txp-res]').forEach(x=>x.classList.toggle('active',x.dataset.txpRes==='D'));}$('txpSymbol').value=current;setLoading(true,'Loading '+current+' '+resolutionLabel[resolution]+' candles…');try{await ensureLibraries();const rows=await getHistory(current,resolution);destroyChart();const mount=$('txpChartMount'),el=document.createElement('tradex-chart');el.style.width='100%';el.style.height='100%';mount.appendChild(el);const config={id:'NEPSE_Pulse_'+current,title:current+' · NEPSE',width:mount.clientWidth||1000,height:mount.clientHeight||650,rangeLimit:Math.min(120,Math.max(30,rows.length)),timeFrame:(resolution==='D'?'1d':resolution==='W'?'1w':resolution==='M'?'1M':resolution==='Y'?'1y':resolution+'m'),theme:{candle:{Type:'candle_solid'}},state:{ohlcv:rows},tools:{location:'left'},utils:{location:'right'},time:{navigation:true},legend:{controls:true},logs:false,infos:false,warnings:true,errors:true,...(talibModule?{talib:talibModule}:{})};chart=el;el.start(config);setLoading(false);status('NEPSE FEED · '+resolutionLabel[resolution],true);$('txpInfo').textContent=rows.length+' '+resolutionLabel[resolution].toLowerCase()+' candles · '+current+' · NEPSE Pulse';setTimeout(()=>{try{el.jumpToEnd?.(false)}catch(e){}},80)}catch(err){console.error('TradeX NEPSE chart:',err);setLoading(true,'TradeX could not load this symbol. '+(err?.message||'Unknown error'));status('CHART ERROR',false);$('txpInfo').textContent='Check the NEPSE Pulse datafeed and browser console.'}}
-function addIndicator(type){if(!chart){status('LOAD A CHART FIRST',false);return}try{const name=type+'_'+Date.now();const ind=chart.addIndicator(type,name);if(ind){status(type+' ADDED',true);setTimeout(()=>{try{chart.calcAllIndicators?.();chart.refresh?.()}catch(e){}},60);return}status(type+' UNAVAILABLE',false)}catch(e){console.warn('TradeX indicator:',type,e);status(type+' UNAVAILABLE',false)}}
-function resetIndicators(){if(!chart)return;try{const ids=[];if(chart.Chart?.indicators)Object.keys(chart.Chart.indicators).forEach(k=>ids.push(k));ids.forEach(id=>{try{chart.removeIndicator(id)}catch(e){}});status('INDICATORS RESET',true)}catch(e){console.warn('TradeX reset:',e)}}
+const API=String(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
+const $=id=>document.getElementById(id);
+let chart=null,current='NABIL',resolution='D',requestId=0,tradexModule=null,talibModule=null,libraryPromise=null;
+const rangeMap={1:300,3:300,5:400,10:400,15:400,30:300,60:240,D:320,W:180,M:96,Y:30};
+const resolutionLabel={1:'1-minute',3:'3-minute',5:'5-minute',10:'10-minute',15:'15-minute',30:'30-minute',60:'1-hour',D:'Daily',W:'Weekly',M:'Monthly',Y:'Yearly'};
+function status(msg,ok){const e=$('txpStatus'),d=$('txpDot');if(e)e.textContent=msg;if(d)d.style.background=ok?'#20a464':'#b78300'}
+function setLoading(show,msg){const e=$('txpLoading');if(!e)return;e.textContent=msg||'Loading TradeX Chart…';e.classList.toggle('hidden',!show)}
+function toNum(v){if(v==null||v==='')return null;const n=Number(String(v).replace(/,/g,''));return Number.isFinite(n)?n:null}
+function normaliseRows(d){
+  if(!d||d.s!=='ok'||!Array.isArray(d.t)||!d.t.length)throw Error('No OHLCV history returned');
+  const rows=[];
+  for(let i=0;i<d.t.length;i++){
+    let ts=toNum(d.t[i]); if(ts==null)continue;
+    if(ts<100000000000)ts*=1000;
+    const o=toNum(d.o?.[i]),h=toNum(d.h?.[i]),l=toNum(d.l?.[i]),c=toNum(d.c?.[i]),v=toNum(d.v?.[i])??0;
+    if([o,h,l,c].every(Number.isFinite)&&h>=Math.max(o,c,l)&&l<=Math.min(o,c,h))rows.push([ts,o,h,l,c,v]);
+  }
+  rows.sort((a,b)=>a[0]-b[0]);
+  const out=[];let last=0;
+  for(const r of rows){if(r[0]===last)out[out.length-1]=r;else{out.push(r);last=r[0]}}
+  if(!out.length)throw Error('Feed returned no usable candles');
+  // TradeX requires contiguous time-series data. NEPSE has weekends/holidays
+  // and intraday gaps, so explicitly insert null bars instead of dropping the gaps.
+  const stepMap={1:60000,3:180000,5:300000,10:600000,15:900000,30:1800000,60:3600000,D:86400000,W:604800000,M:null,Y:null};
+  const res=window.__PULSE_TRADEX_RESOLUTION||'D';
+  const step=stepMap[res]||null;
+  if(step&&out.length>1){
+    const filled=[];
+    for(let i=0;i<out.length;i++){
+      const cur=out[i];
+      if(i){
+        const prev=out[i-1][0];
+        for(let t=prev+step;t<cur[0]&&filled.length<12000;t+=step) filled.push([t,null,null,null,null,null]);
+      }
+      filled.push(cur);
+    }
+    return filled;
+  }
+  return out;
+}
+async function getHistory(symbol,res){
+  const id=++requestId;
+  window.__PULSE_TRADEX_RESOLUTION=res;
+  const count=rangeMap[res]||320;
+  const u=API+'/api/tv/history?symbol='+encodeURIComponent(symbol)+'&resolution='+encodeURIComponent(res)+'&countback='+count+'&_tradex='+Date.now();
+  const r=await fetch(u,{cache:'no-store',headers:{Accept:'application/json'}});
+  if(!r.ok)throw Error('History HTTP '+r.status);
+  const d=await r.json();
+  if(id!==requestId)throw Error('Request superseded');
+  return normaliseRows(d);
+}
+function destroyChart(){
+  try{chart?.stopStream?.();chart?.destroy?.()}catch(e){}
+  const host=$('txpChartMount');
+  if(host)host.innerHTML='<div id="txpLoading" class="txp-loading">Loading TradeX Chart…</div>';
+  chart=null;
+}
+async function ensureTradeX(){
+  if(tradexModule)return tradexModule;
+  if(libraryPromise)return libraryPromise;
+  status('LOADING TRADEX…',false);
+  libraryPromise=(async()=>{
+    try{
+      // Use the package's published ESM entry directly. This avoids the +esm
+      // transformer and makes custom-element registration deterministic.
+      tradexModule=await Promise.race([
+        import('https://cdn.jsdelivr.net/npm/tradex-chart@0.158.7/dist/tradex-chart.es.js'),
+        new Promise((_,rej)=>setTimeout(()=>rej(Error('TradeX CDN timeout')),12000))
+      ]);
+      if(!customElements.get('tradex-chart'))throw Error('TradeX custom element was not registered');
+      return tradexModule;
+    }catch(e){
+      libraryPromise=null;tradexModule=null;
+      throw Error('TradeX library failed: '+(e?.message||e));
+    }
+  })();
+  return libraryPromise;
+}
+async function loadTalibBackground(){
+  if(talibModule)return talibModule;
+  try{
+    // Indicators are optional. Never block the OHLCV chart on TA-Lib WASM.
+    talibModule=await import('https://cdn.jsdelivr.net/npm/talib-web@0.1.3/+esm');
+  }catch(e){talibModule=null;console.warn('TA-Lib unavailable; candles remain available.',e)}
+  return talibModule;
+}
+function makeState(rows,res){
+  const max=Math.max(0,rows.length-1),visible=Math.min(rows.length,120);
+  const start=Math.max(0,max-visible+1);
+  const tf=res==='D'?'1d':res==='W'?'1w':res==='M'?'1M':res==='Y'?'1y':res+'m';
+  const ms={1:60000,3:180000,5:300000,10:600000,15:900000,30:1800000,60:3600000,D:86400000,W:604800000,M:2592000000,Y:31536000000}[res]||86400000;
+  return {ohlcv:rows,range:{indexStart:start,indexEnd:max},timeData:{timeFrameMS:ms,timeFrame:tf,timeZone:'Asia/Kathmandu'}};
+}
+async function render(symbol,res){
+  current=String(symbol||'NABIL').trim().toUpperCase()||'NABIL';
+  resolution=res||resolution;
+  if(isIndexSymbol(current)&&!['D','W','M','Y'].includes(resolution)){
+    resolution='D';
+    document.querySelectorAll('[data-txp-res]').forEach(x=>x.classList.toggle('active',x.dataset.txpRes==='D'));
+  }
+  const token=++requestId;
+  $('txpSymbol').value=current;
+  setLoading(true,'Loading '+current+' '+resolutionLabel[resolution]+' candles…');
+  try{
+    // Fetch real market history and load the chart library concurrently.
+    const [rows]=await Promise.all([getHistory(current,resolution),ensureTradeX()]);
+    if(token!==requestId)throw Error('Request superseded');
+    destroyChart();
+    const mount=$('txpChartMount');
+    if(!mount)throw Error('TradeX mount not found');
+    const el=document.createElement('tradex-chart');
+    el.style.width='100%';el.style.height='100%';el.style.display='block';
+    mount.appendChild(el);
+    const config={
+      id:'NEPSE_Pulse_'+current.replace(/[^A-Z0-9_:-]/g,'_'),
+      title:current+' · NEPSE',
+      width:mount.clientWidth||1000,
+      height:mount.clientHeight||650,
+      rangeLimit:Math.min(120,rows.length),
+      timeFrame:(resolution==='D'?'1d':resolution==='W'?'1w':resolution==='M'?'1M':resolution==='Y'?'1y':resolution+'m'),
+      theme:{candle:{Type:'candle_solid'}},
+      state:makeState(rows,resolution),
+      tools:{location:'left'},
+      utils:{location:'right'},
+      time:{navigation:true},
+      legend:{controls:true},
+      logs:false,infos:false,warnings:true,errors:true
+    };
+    // Start immediately. TA-Lib is attached only if it is already available.
+    if(talibModule)config.talib=talibModule;
+    chart=el;
+    el.start(config);
+    setLoading(false);
+    status('NEPSE FEED · '+resolutionLabel[resolution],true);
+    $('txpInfo').textContent=rows.length+' '+resolutionLabel[resolution].toLowerCase()+' candles · '+current+' · NEPSE Pulse';
+    requestAnimationFrame(()=>{try{el.resize?.(mount.clientWidth||window.innerWidth,mount.clientHeight||650);el.jumpToEnd?.(false);el.refresh?.()}catch(e){}});
+    // Indicators enhance after the candles are visible; they never delay first paint.
+    if(!talibModule)loadTalibBackground().then(t=>{if(t&&chart===el){try{chart.talib=t;chart.calcAllIndicators?.();chart.refresh?.()}catch(e){}}});
+  }catch(err){
+    console.error('TradeX NEPSE chart:',err);
+    setLoading(true,'TradeX could not load this symbol. '+(err?.message||'Unknown error'));
+    status('CHART ERROR',false);
+    $('txpInfo').textContent='NEPSE datafeed error · '+(err?.message||'Unknown error');
+  }
+}
+function addIndicator(type){
+  if(!chart){status('LOAD A CHART FIRST',false);return}
+  try{const name=type+'_'+Date.now();const ind=chart.addIndicator?.(type,name);if(ind){status(type+' ADDED',true);setTimeout(()=>{try{chart.calcAllIndicators?.();chart.refresh?.()}catch(e){}},60);return}status(type+' UNAVAILABLE',false)}catch(e){console.warn('TradeX indicator:',type,e);status(type+' UNAVAILABLE',false)}
+}
+function resetIndicators(){if(!chart)return;try{chart.resetIndicators?.();chart.refresh?.();status('INDICATORS RESET',true)}catch(e){console.warn('TradeX reset:',e)}}
 function populateSymbols(){const list=$('txpSymbols');if(!list)return;fetch(API+'/api/tv/search?query='+encodeURIComponent('')+'&limit=500',{cache:'no-store'}).then(r=>r.json()).then(d=>{const rows=Array.isArray(d)?d:(d.result||d.data||[]);list.innerHTML='';rows.slice(0,500).forEach(x=>{const s=x.symbol||x.ticker||x.code||x.full_name||'';if(s){const o=document.createElement('option');o.value=String(s).replace(/^NEPSE:/i,'');list.appendChild(o)}})}).catch(()=>{})}
-async function populateIndexes(){const sel=$('txpMarketIndex');if(!sel)return;try{const r=await fetch(API+'/api/tv/indexes?_='+Date.now(),{cache:'no-store'});const d=await r.json();const rows=Array.isArray(d)?d:(d.data||[]);sel.innerHTML='<option value="">Stocks / indices</option>';rows.forEach(x=>{const o=document.createElement('option');o.value=x.symbol;o.textContent=x.name||x.symbol;sel.appendChild(o)});}catch(e){console.warn('Index universe:',e)}}
+async function populateIndexes(){const sel=$('txpMarketIndex');if(!sel)return;try{const r=await fetch(API+'/api/tv/indexes?_='+Date.now(),{cache:'no-store'});const d=await r.json();const rows=Array.isArray(d)?d:(d.data||[]);sel.innerHTML='<option value="">Stocks / indices</option>';rows.forEach(x=>{const o=document.createElement('option');o.value=x.symbol;o.textContent=x.name||x.symbol;sel.appendChild(o)})}catch(e){console.warn('Index universe:',e)}}
 function isIndexSymbol(s){return /^INDEX:/i.test(String(s||''))}
-
-function setViewRange(mode){if(!chart)return;try{const data=chart.state?.ohlcv||chart.state?.data?.ohlcv||chart.allData?.ohlcv||[];const n=Array.isArray(data)?data.length:0;const r=chart.getRange?.();let end=n? n-1 : null;if(r&&typeof r==='object'){end=Number.isFinite(r.end)?r.end:(Number.isFinite(r[1])?r[1]:end)}if(end==null||!n)return;if(mode==='all'){chart.setRange?.(0,end);return}const currentStart=(r&&typeof r==='object'&&Number.isFinite(r.start))?r.start:(Number.isFinite(r?.[0])?r[0]:Math.max(0,end-80));let visible=Math.max(20,end-currentStart+1);if(mode==='out')visible=Math.min(n,Math.ceil(visible*1.6));if(mode==='in')visible=Math.max(20,Math.floor(visible/1.6));const start=Math.max(0,end-visible+1);chart.setRange?.(start,end);chart.refresh?.()}catch(e){console.warn('TradeX range:',e)}}
-function resizeTradeX(){try{if(!chart)return;const m=$('txpChartMount');if(m)chart.resize?.(m.clientWidth||window.innerWidth,m.clientHeight||window.innerHeight);chart.refresh?.()}catch(e){}}
-
+function setViewRange(mode){if(!chart)return;try{const data=chart.state?.ohlcv||chart.state?.data?.ohlcv||chart.allData?.ohlcv||[];const n=Array.isArray(data)?data.length:0;if(!n)return;const r=chart.getRange?.();let end=n-1;if(r&&typeof r==='object')end=Number.isFinite(r.end)?r.end:(Number.isFinite(r[1])?r[1]:end);if(mode==='all'){chart.setRange?.(0,end);return}const currentStart=(r&&typeof r==='object'&&Number.isFinite(r.start))?r.start:(Number.isFinite(r?.[0])?r[0]:Math.max(0,end-80));let visible=Math.max(20,end-currentStart+1);if(mode==='out')visible=Math.min(n,Math.ceil(visible*1.6));if(mode==='in')visible=Math.max(20,Math.floor(visible/1.6));chart.setRange?.(Math.max(0,end-visible+1),end);chart.refresh?.()}catch(e){console.warn('TradeX range:',e)}}
+function resizeTradeX(){try{if(!chart)return;const m=$('txpChartMount');chart.resize?.(m?.clientWidth||window.innerWidth,m?.clientHeight||window.innerHeight);chart.refresh?.()}catch(e){}}
 function bind(){
-$('txpLoad')?.addEventListener('click',()=>render($('txpSymbol').value,resolution));
-$('txpMarketIndex')?.addEventListener('change',e=>{const v=e.currentTarget.value;if(v){$('txpSymbol').value=v;render(v,resolution)}});
-$('txpSymbol')?.addEventListener('keydown',e=>{if(e.key==='Enter')render(e.currentTarget.value,resolution)});
-$('txpFullscreen')?.addEventListener('click',async()=>{const shell=$('txpShell');try{if(document.fullscreenElement)await document.exitFullscreen();else await shell?.requestFullscreen?.()}catch(e){console.warn('Fullscreen:',e)}setTimeout(resizeTradeX,80)});
-document.addEventListener('fullscreenchange',()=>setTimeout(resizeTradeX,120));
-$('txpReset')?.addEventListener('click',resetIndicators);
-$('txpZoomOut')?.addEventListener('click',()=>setViewRange('out'));
-$('txpZoomIn')?.addEventListener('click',()=>setViewRange('in'));
-$('txpFit')?.addEventListener('click',()=>setViewRange('all'));
-$('txpBack')?.addEventListener('click',()=>{try{chart?.jumpToEnd?.(false)}catch(e){}});
-document.querySelectorAll('[data-txp-res]').forEach(b=>b.addEventListener('click',()=>{resolution=b.dataset.txpRes;document.querySelectorAll('[data-txp-res]').forEach(x=>x.classList.toggle('active',x===b));render($('txpSymbol').value,resolution)}));
-document.querySelectorAll('[data-txp-ind]').forEach(b=>b.addEventListener('click',()=>addIndicator(b.dataset.txpInd)));
-window.addEventListener('resize',()=>setTimeout(resizeTradeX,60));
-window.openProfessionalChart=function(symbol){const s=String(symbol||$('txpSymbol')?.value||'NABIL').trim().toUpperCase();const root=$('professional-charting-v8');if(root){$('txpSymbol').value=s;const sel=$('txpMarketIndex');if(sel)sel.value=isIndexSymbol(s)?s:'';root.scrollIntoView({behavior:'smooth',block:'start'});render(s,resolution)}};
-const oldOpenFeature=window.openFeatureWorkspace;window.openFeatureWorkspace=function(id,title){if(/professional charting/i.test(String(id||''))||/professional charting/i.test(String(title||''))){window.openProfessionalChart($('txpSymbol')?.value||'NABIL');return}return typeof oldOpenFeature==='function'?oldOpenFeature.apply(this,arguments):undefined};
-const oldOpenModule=window.openModule;window.openModule=function(name){if(/professional charting/i.test(String(name||''))){window.openProfessionalChart($('txpSymbol')?.value||'NABIL');return}return typeof oldOpenModule==='function'?oldOpenModule.apply(this,arguments):undefined};
-window.PULSE_TA_TERMINAL={open:window.openProfessionalChart,close:()=>{},getWidget:()=>chart};populateSymbols();populateIndexes();render(current,'D')}
-
-if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bind,{once:true});else bind();})();
+  $('txpLoad')?.addEventListener('click',()=>render($('txpSymbol').value,resolution));
+  $('txpMarketIndex')?.addEventListener('change',e=>{const v=e.currentTarget.value;if(v){$('txpSymbol').value=v;render(v,resolution)}});
+  $('txpSymbol')?.addEventListener('keydown',e=>{if(e.key==='Enter')render(e.currentTarget.value,resolution)});
+  $('txpFullscreen')?.addEventListener('click',async()=>{const shell=$('txpShell');try{if(document.fullscreenElement)await document.exitFullscreen();else await shell?.requestFullscreen?.()}catch(e){console.warn('Fullscreen:',e)}setTimeout(resizeTradeX,80)});
+  document.addEventListener('fullscreenchange',()=>setTimeout(resizeTradeX,120));
+  $('txpReset')?.addEventListener('click',resetIndicators);
+  $('txpZoomOut')?.addEventListener('click',()=>setViewRange('out'));
+  $('txpZoomIn')?.addEventListener('click',()=>setViewRange('in'));
+  $('txpFit')?.addEventListener('click',()=>setViewRange('all'));
+  $('txpBack')?.addEventListener('click',()=>{try{chart?.jumpToEnd?.(false)}catch(e){}});
+  document.querySelectorAll('[data-txp-res]').forEach(b=>b.addEventListener('click',()=>{resolution=b.dataset.txpRes;document.querySelectorAll('[data-txp-res]').forEach(x=>x.classList.toggle('active',x===b));render($('txpSymbol').value,resolution)}));
+  document.querySelectorAll('[data-txp-ind]').forEach(b=>b.addEventListener('click',()=>addIndicator(b.dataset.txpInd)));
+  window.addEventListener('resize',()=>setTimeout(resizeTradeX,60));
+  window.openProfessionalChart=function(symbol){const s=String(symbol||$('txpSymbol')?.value||'NABIL').trim().toUpperCase();const root=$('professional-charting-v8');if(root){$('txpSymbol').value=s;const sel=$('txpMarketIndex');if(sel)sel.value=isIndexSymbol(s)?s:'';root.scrollIntoView({behavior:'smooth',block:'start'});render(s,resolution)}};
+  const oldOpenFeature=window.openFeatureWorkspace;window.openFeatureWorkspace=function(id,title){if(/professional charting/i.test(String(id||''))||/professional charting/i.test(String(title||''))){window.openProfessionalChart($('txpSymbol')?.value||'NABIL');return}return typeof oldOpenFeature==='function'?oldOpenFeature.apply(this,arguments):undefined};
+  const oldOpenModule=window.openModule;window.openModule=function(name){if(/professional charting/i.test(String(name||''))){window.openProfessionalChart($('txpSymbol')?.value||'NABIL');return}return typeof oldOpenModule==='function'?oldOpenModule.apply(this,arguments):undefined};
+  window.PULSE_TA_TERMINAL={open:window.openProfessionalChart,close:()=>{},getWidget:()=>chart};
+  // Start the chart immediately; symbol/index lists load independently.
+  render(current,'D');
+  populateSymbols();
+  populateIndexes();
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bind,{once:true});else bind();
+})();
 </script>
 
 <script id="nepse-pulse-professional-charting-router-fix">
