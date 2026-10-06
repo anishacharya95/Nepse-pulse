@@ -1772,7 +1772,16 @@ body{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",san
       const ret=(days)=>{if(closes.length<=days)return null;const a=closes[closes.length-1],b=closes[closes.length-1-days];return b?((a-b)/b*100):null};
       d={ok:true,companyName:pv(['companyName','securityName','name'],prof,company)||symbol,source:{market:'NEPSE live market feed / existing backend',history:histRaw?.source||'NEPSE verified price history'},market:{ltp,change:ch,changePercent:pct,open,high,low,previousClose:prev,turnover,volume,transactions,averagePrice:avg,listedShares:listed,marketCap:mcap},performance:{eps,pe,bookValue:book,pbv,roe,dividendYield:dy,cashDividend:cash,bonusDividend:bonus,high52:high52.length?Math.max(...high52):null,low52:low52.length?Math.min(...low52):null,return1W:ret(5),return1M:ret(21),return3M:ret(63),return6M:ret(126),return1Y:ret(252),historySessions:hist.length},history:hist,errors:['Normalized stock-overview endpoint unavailable; used verified legacy endpoints.']};
     }
-    if(!d?.ok) throw new Error('No verified Stock Info data is available for '+symbol);
+    // Final safety net: the Live NEPSE table already has a verified live row.
+    // If the normalized/enrichment endpoints are temporarily unavailable, still
+    // render the real market fields instead of showing a blank Stock Info page.
+    if(!d?.ok){
+      const lr=liveRow(symbol)||{};
+      const n=v=>{if(v===null||v===undefined||v==='')return null;const x=Number(String(v).replace(/,/g,''));return Number.isFinite(x)?x:null};
+      const ltp=n(lr.ltp), prev=n(lr.prev), pct=n(lr.pct);
+      const ch=ltp!=null&&prev!=null?ltp-prev:null;
+      d={ok:true,symbol,companyName:lr.company||symbol,source:{market:'NEPSE live market feed',history:'Unavailable'},market:{ltp,change:ch,changePercent:pct,open:n(lr.open),high:n(lr.high),low:n(lr.low),previousClose:prev,turnover:n(lr.turnover),volume:n(lr.volume),transactions:n(lr.transactions),averagePrice:null,listedShares:null,marketCap:null},performance:{eps:null,pe:null,bookValue:null,pbv:null,roe:null,cashDividend:null,bonusDividend:null,dividendYield:null,high52:null,low52:null,return1W:null,return1M:null,return3M:null,return6M:null,return1Y:null,historySessions:0},history:[],financials:[],dividends:[],corporateActions:[],errors:['Enrichment endpoints were unavailable; displaying verified live market fields only.']};
+    }
     const m=d.market||{}, p=d.performance||{};
     document.getElementById('npcoName').textContent=d.companyName||symbol;
     const f=(label,v,unit='')=>'<div class="npco-metric"><small>'+esc(label)+'</small><b>'+((v==null||v==='')?'—':num(v)+unit)+'</b></div>';
@@ -5993,8 +6002,39 @@ header.topbar, header.topbar .toprow, .mobile-exact-topbar {
 
 <script id="np-all-market-controller">
 (function(){let allRows=[];const $=id=>document.getElementById(id);const escv=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));const pick=(o,keys)=>{for(const k of keys){if(o&&o[k]!=null&&o[k]!=='')return o[k]}return null};const n=v=>{if(v==null||v==='')return null;const x=Number(String(v).replace(/,/g,''));return Number.isFinite(x)?x:null};const fmt=v=>{const x=n(v);return x==null?'—':x.toLocaleString(undefined,{maximumFractionDigits:2})};function rowsOf(v){if(Array.isArray(v))return v;if(!v||typeof v!=='object')return [];for(const k of ['live','companies','data','rows','result','results','content','records','items']){const x=v[k];if(Array.isArray(x)&&x.length)return x;if(x&&typeof x==='object'){const nested=rowsOf(x);if(nested.length)return nested}}return []}function norm(o){const sym=String(pick(o,['symbol','stockSymbol','securitySymbol','symbolName','companySymbol','scrip','ticker','code','security_code'])||'').toUpperCase();const ltp=n(pick(o,['ltp','lastTradedPrice','lastTradedPriceValue','closingPrice','closePrice','close','price']));const prev=n(pick(o,['previousClose','previousClosingPrice','prevClose','previousPrice']));let ch=n(pick(o,['change','pointChange','difference','changeAmount']));let pct=n(pick(o,['percentageChange','perChange','percentChange','changePercent','pChange','changePercentage']));if(pct==null&&ch!=null&&prev)pct=ch/prev*100;if(ch==null&&ltp!=null&&prev!=null)ch=ltp-prev;return {sym,company:pick(o,['companyName','securityName','name']),ltp,high:n(pick(o,['high','highPrice','maxPrice','dayHigh'])),low:n(pick(o,['low','lowPrice','minPrice','dayLow'])),ch,pct}}function render(){const q=($('npamSearch')?.value||'').trim().toUpperCase();const list=allRows.filter(r=>!q||r.sym.includes(q)||String(r.company||'').toUpperCase().includes(q));$('npamRows').innerHTML=list.map(r=>`<tr class="${(r.pct??0)>0?'up':(r.pct??0)<0?'down':'flat'}" data-symbol="${escv(r.sym)}"><td>${escv(r.sym)}</td><td>${fmt(r.ltp)}</td><td>${fmt(r.high)}</td><td>${fmt(r.low)}</td><td>${fmt(r.ch)}</td><td>${r.pct==null?'—':fmt(r.pct)+'%'}</td></tr>`).join('')||'<tr><td colspan="6" style="text-align:center;background:#073536">No company rows available</td></tr>';$('npamCount').textContent=`${list.length} companies`;}
-window.npOpenAllMarket=()=>{$('npAllMarket').classList.add('open');document.body.style.overflow='hidden';npLoadAllMarket()};window.npCloseAllMarket=()=>{$('npAllMarket').classList.remove('open');document.body.style.overflow=''};window.npFilterAllMarket=render;window.npLoadAllMarket=async()=>{const body=$('npamRows');body.innerHTML='<tr><td colspan="6" style="text-align:center;background:#073536">Loading live market…</td></tr>';try{const base=window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com';let res=await fetch(base+'/api/market?_all_market='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});if(!res.ok)throw Error('Market API returned '+res.status);let payload=await res.json();allRows=rowsOf(payload).map(norm).filter(r=>r.sym);if(!allRows.length&&Array.isArray(payload?.gainers))allRows=rowsOf(payload.gainers).concat(rowsOf(payload.losers)).map(norm).filter(r=>r.sym);if(!allRows.length)throw Error('The backend returned no company rows. Check its live feed.');$('npamUpdated').textContent=payload.updatedAt?'Updated '+new Date(payload.updatedAt).toLocaleString():'Live market snapshot';render();}catch(e){body.innerHTML=`<tr><td colspan="6" style="text-align:center;background:#073536">Could not load market data: ${escv(e.message)}</td></tr>`;$('npamCount').textContent='Feed unavailable'}};
-document.addEventListener('click',e=>{const tr=e.target.closest('#npamRows tr[data-symbol]');if(!tr)return;const symbol=tr.dataset.symbol;npCloseAllMarket();if(typeof window.npOpenCompany==='function')window.npOpenCompany(symbol);else if(typeof window.openCompanyPage==='function')window.openCompanyPage(symbol);});})();
+window.npOpenAllMarket=()=>{$('npAllMarket').classList.add('open');document.body.style.overflow='hidden';npLoadAllMarket()};window.npCloseAllMarket=()=>{$('npAllMarket').classList.remove('open');document.body.style.overflow=''};window.npFilterAllMarket=render;window.npLoadAllMarket=async()=>{const body=$('npamRows');body.innerHTML='<tr><td colspan="6" style="text-align:center;background:#073536">Loading live market…</td></tr>';const base=String(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');const endpoints=['/api/market','/api/production/market','/LiveMarket'];let lastError='Live market feed unavailable';try{for(const path of endpoints){try{const res=await fetch(base+path+(path.includes('?')?'&':'?')+'_all_market='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});if(!res.ok){lastError='Market API returned '+res.status+' at '+path;continue}const payload=await res.json();let raw=[];if(path==='/LiveMarket')raw=rowsOf(payload);else raw=rowsOf(payload?.live)||rowsOf(payload?.companies)||rowsOf(payload?.data)||rowsOf(payload);if(!raw.length&&Array.isArray(payload?.gainers))raw=rowsOf(payload.gainers).concat(rowsOf(payload.losers));const parsed=raw.map(norm).filter(r=>r.sym);if(parsed.length){allRows=parsed;$('npamUpdated').textContent=payload.updatedAt?'Updated '+new Date(payload.updatedAt).toLocaleString():'Live market snapshot';render();return}lastError='No company rows returned by '+path}catch(err){lastError=String(err?.message||err)}}throw Error(lastError)}catch(e){body.innerHTML=`<tr><td colspan="6" style="text-align:center;background:#073536">Could not load live NEPSE companies: ${escv(e.message)}</td></tr>`;$('npamCount').textContent='Feed unavailable'}};
+function openLiveNepseCompany(tr){
+  if(!tr)return;
+  const symbol=String(tr.dataset.symbol||'').trim().toUpperCase();
+  if(!symbol)return;
+  npCloseAllMarket();
+  if(typeof window.npOpenCompany==='function'){
+    Promise.resolve(window.npOpenCompany(symbol)).catch(err=>console.error('Company page:',err));
+  }else if(typeof window.openCompanyPage==='function'){
+    Promise.resolve(window.openCompanyPage(symbol)).catch(err=>console.error('Company page:',err));
+  }
+}
+function bindLiveNepseRows(){
+  const body=$('npamRows');
+  if(!body)return;
+  body.querySelectorAll('tr[data-symbol]').forEach(tr=>{
+    tr.style.cursor='pointer';
+    tr.style.touchAction='manipulation';
+    tr.setAttribute('role','button');
+    tr.tabIndex=0;
+    tr.onclick=function(e){e.preventDefault();openLiveNepseCompany(tr)};
+    tr.onpointerup=function(e){
+      if(e.pointerType==='mouse' && e.button!==0)return;
+      e.preventDefault();
+      openLiveNepseCompany(tr);
+    };
+    tr.onkeydown=function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();openLiveNepseCompany(tr)}};
+  });
+}
+const _npamRender=render;
+render=function(){_npamRender();bindLiveNepseRows()};
+window.npBindLiveNepseRows=bindLiveNepseRows;
+})();
 </script>
 
 

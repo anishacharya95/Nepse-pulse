@@ -133,11 +133,35 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _plain(v: Any) -> Any:
+    """Convert SDK/Pydantic/dataclass response objects into plain JSON-like values."""
+    if v is None or isinstance(v, (str, int, float, bool)):
+        return v
+    if isinstance(v, dict):
+        return {str(k): _plain(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple, set)):
+        return [_plain(x) for x in v]
+    for method in ("model_dump", "dict"):
+        fn = getattr(v, method, None)
+        if callable(fn):
+            try:
+                return _plain(fn())
+            except Exception:
+                pass
+    if hasattr(v, "__dict__"):
+        try:
+            return {str(k): _plain(x) for k, x in vars(v).items() if not str(k).startswith("_")}
+        except Exception:
+            pass
+    return v
+
+
 def arr(v: Any) -> list:
+    v = _plain(v)
     if isinstance(v, list):
         return v
     if isinstance(v, dict):
-        for k in ("data", "content", "results", "result", "items", "records", "rows"):
+        for k in ("data", "content", "results", "result", "items", "records", "rows", "live", "companies"):
             if isinstance(v.get(k), list):
                 return v[k]
         return [v]
@@ -145,10 +169,12 @@ def arr(v: Any) -> list:
 
 
 def deep_rows(v: Any, preferred_keys: tuple[str, ...] = ()) -> list[dict]:
-    """Extract the actual row list from NEPSE's nested response wrappers."""
+    """Extract actual NEPSE rows from dict/list or typed SDK responses."""
+    v = _plain(v)
     seen = set()
     def walk(x: Any, depth: int = 0):
-        if depth > 6:
+        x = _plain(x)
+        if depth > 8:
             return []
         if isinstance(x, list):
             rows = [r for r in x if isinstance(r, dict)]
