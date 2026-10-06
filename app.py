@@ -1753,7 +1753,21 @@ async def get_floorsheet(symbol: Optional[str] = None):
         # No verified trades: return empty rather than fabricated values.
         return []
 
-    return await cached(cache_key, load)
+    # Cache only verified non-empty floorsheet data.  A transient upstream
+    # failure must never be cached as "no data", otherwise the frontend can
+    # keep showing an empty floorsheet even after NEPSE becomes available.
+    hit = cache_get(cache_key)
+    if isinstance(hit, list) and hit:
+        return hit
+    lock = LOCKS.setdefault(cache_key, asyncio.Lock())
+    async with lock:
+        hit = cache_get(cache_key)
+        if isinstance(hit, list) and hit:
+            return hit
+        rows = await load()
+        if rows:
+            cache_set(cache_key, rows)
+        return rows
 
 
 # Preserve original implementations as explicit fallbacks.
