@@ -1611,9 +1611,9 @@ def _depth_rows(value: Any) -> list[dict]:
             side="buy"
         elif side in ("s","ask","sell","sellorder","sellorders","supply"):
             side="sell"
-        price=num(pick(v,["price","orderPrice","rate","buyPrice","sellPrice","bidPrice","askPrice"]))
+        price=num(pick(v,["price","orderPrice","orderBookOrderPrice","order_book_order_price","rate","buyPrice","sellPrice","bidPrice","askPrice"]))
         qty=num(pick(v,["quantity","qty","orderQuantity","tradedQuantity","totalQuantity","buyQuantity","sellQuantity","bidQuantity","askQuantity"]))
-        orders=num(pick(v,["orders","orderCount","noOfOrders","numberOfOrders","buyOrders","sellOrders","bidOrders","askOrders"]))
+        orders=num(pick(v,["orders","orderCount","order_count","noOfOrders","numberOfOrders","buyOrders","sellOrders","bidOrders","askOrders"]))
         if price is not None and (qty is not None or orders is not None):
             out.append({"side":side,"price":price,"quantity":qty or 0,"orders":orders or 0})
         for k,vv in v.items():
@@ -1663,8 +1663,8 @@ def _normalize_depth_payload(raw: Any, symbol: str) -> dict:
     sells=sorted([r for r in rows if r["side"]=="sell"], key=lambda r:r["price"])[:5]
     # Prefer exchange/feed totals when supplied. Falling back to the visible
     # top-5 sum is mathematically derived from real rows, never fabricated.
-    buy_qty=_first_nested_number(raw,["totalBuyQuantity","total_buy_quantity","totalBuyQty","buyQuantityTotal"])
-    sell_qty=_first_nested_number(raw,["totalSellQuantity","total_sell_quantity","totalSellQty","sellQuantityTotal"])
+    buy_qty=_first_nested_number(raw,["totalBuyQuantity","total_buy_quantity","totalBuyQty","totalBuyQty","buyQuantityTotal"])
+    sell_qty=_first_nested_number(raw,["totalSellQuantity","total_sell_quantity","totalSellQty","totalSellQty","sellQuantityTotal"])
     buy_orders=_first_nested_number(raw,["totalBuyOrders","total_buy_orders","buyOrdersTotal"])
     sell_orders=_first_nested_number(raw,["totalSellOrders","total_sell_orders","sellOrdersTotal"])
     return {
@@ -1683,16 +1683,20 @@ async def production_depth(symbol: str):
     symbol=symbol.upper().strip()
     errors=[]
     # Primary: nepse.py production SDK.
-    try:
-        raw=await production_call("depth", symbol)
-        normalized=_normalize_depth_payload(raw, symbol)
-        normalized["source"]="NEPSE production market-depth feed"
-        normalized["rawAvailable"]=raw is not None
-        if normalized["ok"]:
-            return normalized
-        errors.append("production SDK returned no usable levels")
-    except Exception as exc:
-        errors.append(f"production SDK: {exc}")
+    # Different NEPSE Python clients expose this same endpoint under different
+    # method names. Try the known market-depth names before using the HTTP
+    # compatibility endpoint. All of them return the exchange order book.
+    for method in ("getSymbolMarketDepth", "get_market_depth", "market_depth", "depth"):
+        try:
+            raw=await production_call(method, symbol)
+            normalized=_normalize_depth_payload(raw, symbol)
+            normalized["source"]="NEPSE production market-depth feed"
+            normalized["rawAvailable"]=raw is not None
+            if normalized["ok"]:
+                return normalized
+            errors.append(f"production SDK {method}: no usable levels")
+        except Exception as exc:
+            errors.append(f"production SDK {method}: {exc}")
 
     # Fallback: the public NEPSE-compatible marketDepth endpoint. This is
     # still live order-book data; do not substitute historical/derived prices.

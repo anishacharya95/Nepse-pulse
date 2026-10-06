@@ -6248,7 +6248,7 @@ input,select{background:#fff!important;color:var(--text)!important}
 (function(){
  const root=document.getElementById('npCompanyPage'), content=document.getElementById('npcoContent');let symbol='',cache={};
  const esc=v=>String(v??'—').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
- const arr=x=>Array.isArray(x)?x:(Array.isArray(x?.data)?x.data:Array.isArray(x?.content)?x.content:Array.isArray(x?.rows)?x.rows:Array.isArray(x?.result)?x.result:[]);
+ const arr=x=>{if(Array.isArray(x))return x;if(!x||typeof x!=='object')return [];for(const k of ['data','content','rows','result','results','items','records','live','liveMarket','market']){const v=x[k];if(Array.isArray(v))return v;if(v&&typeof v==='object'){const a=arr(v);if(a.length)return a}}return []};
  const num=x=>x==null||x===''?'—':(Number.isFinite(Number(x))?Number(x).toLocaleString(undefined,{maximumFractionDigits:2}):esc(x));
  const get=async path=>{if(cache[path])return cache[path];const v=await (window.PulseFeedEngine?.fetchJSON?PulseFeedEngine.fetchJSON(path):fetch(path).then(r=>{if(!r.ok)throw Error(r.status);return r.json()}));cache[path]=v;return v};
  function liveRow(sym){try{const st=window.PulseFeedEngine?.state?.()||{};const raw=st.live||st.market?.data||st.market||[];return arr(raw).map(x=>typeof normRow==='function'?normRow(x):x).find(x=>String(x.symbol||x.symbolName||x.securitySymbol||'').toUpperCase()===sym)}catch(e){return null}}
@@ -6264,7 +6264,8 @@ input,select{background:#fff!important;color:var(--text)!important}
     let d=null;
     try{d=await get('/api/stock-overview/'+encodeURIComponent(symbol));}catch(e){d=null;}
     if(!d?.ok){
-      const [liveRaw,companyRaw,fundRaw,publicRaw,histRaw]=await Promise.all([
+      const [marketRaw,liveRaw,companyRaw,fundRaw,publicRaw,histRaw]=await Promise.all([
+        get('/api/market').catch(()=>null),
         get('/LiveMarket').catch(()=>[]),
         get('/api/company/'+encodeURIComponent(symbol)).catch(()=>null),
         get('/api/fundamentals/'+encodeURIComponent(symbol)).catch(()=>null),
@@ -6272,7 +6273,9 @@ input,select{background:#fff!important;color:var(--text)!important}
         get('/PriceVolumeHistory?symbol='+encodeURIComponent(symbol)).catch(()=>null)
       ]);
       const liveRows=arr(liveRaw);
-      const live=liveRows.map(x=>typeof normRow==='function'?normRow(x):x).find(x=>String(x?.symbol||x?.ticker||x?.securitySymbol||'').toUpperCase()===symbol)||liveRows.find(x=>String(x?.symbol||x?.ticker||x?.securitySymbol||'').toUpperCase()===symbol)||{};
+      const marketRows=arr(marketRaw?.live||marketRaw?.data?.live||marketRaw);
+      const candidates=liveRows.concat(marketRows);
+      const live=candidates.map(x=>typeof normRow==='function'?normRow(x):x).find(x=>String(x?.symbol||x?.ticker||x?.securitySymbol||x?.symbolName||'').toUpperCase()===symbol)||candidates.find(x=>String(x?.symbol||x?.ticker||x?.securitySymbol||x?.symbolName||'').toUpperCase()===symbol)||{};
       const company=companyRaw?.details||companyRaw?.company||companyRaw?.profile||companyRaw||{};
       const pub=publicRaw||{};
       const fund=fundRaw||{};
@@ -6311,7 +6314,7 @@ input,select{background:#fff!important;color:var(--text)!important}
       const high52=slice252.map(x=>n(pv(['high','highPrice','close','ltp'],x))).filter(x=>x!=null);
       const low52=slice252.map(x=>n(pv(['low','lowPrice','close','ltp'],x))).filter(x=>x!=null);
       const ret=(days)=>{if(closes.length<=days)return null;const a=closes[closes.length-1],b=closes[closes.length-1-days];return b?((a-b)/b*100):null};
-      d={ok:true,companyName:pv(['companyName','securityName','name'],prof,company)||symbol,source:{market:'NEPSE live market feed / existing backend',history:histRaw?.source||'NEPSE verified price history'},market:{ltp,change:ch,changePercent:pct,open,high,low,previousClose:prev,turnover,volume,transactions,averagePrice:avg,listedShares,marketCap:mcap},performance:{eps,pe,bookValue:book,pbv,roe,dividendYield:dy,cashDividend:cash,bonusDividend:bonus,high52:high52.length?Math.max(...high52):null,low52:low52.length?Math.min(...low52):null,return1W:ret(5),return1M:ret(21),return3M:ret(63),return6M:ret(126),return1Y:ret(252),historySessions:hist.length},history:hist,errors:['Normalized stock-overview endpoint unavailable; used verified legacy endpoints.']};
+      d={ok:true,companyName:pv(['companyName','securityName','name'],prof,company)||symbol,source:{market:'NEPSE live market feed / existing backend',history:histRaw?.source||'NEPSE verified price history'},market:{ltp,change:ch,changePercent:pct,open,high,low,previousClose:prev,turnover,volume,transactions,averagePrice:avg,listedShares:listed,marketCap:mcap},performance:{eps,pe,bookValue:book,pbv,roe,dividendYield:dy,cashDividend:cash,bonusDividend:bonus,high52:high52.length?Math.max(...high52):null,low52:low52.length?Math.min(...low52):null,return1W:ret(5),return1M:ret(21),return3M:ret(63),return6M:ret(126),return1Y:ret(252),historySessions:hist.length},history:hist,errors:['Normalized stock-overview endpoint unavailable; used verified legacy endpoints.']};
     }
     if(!d?.ok) throw new Error('No verified Stock Info data is available for '+symbol);
     const m=d.market||{}, p=d.performance||{};
