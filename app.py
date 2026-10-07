@@ -1810,9 +1810,18 @@ async def get_floorsheet(symbol: Optional[str] = None):
             rows = [r for r in rows if str(r.get("symbol") or "").upper().strip() == wanted]
         return rows
 
-    # 1) Direct nepsepy floorsheet methods. These are the canonical live
-    # methods in the current public client and are tried before the older
-    # compatibility/production adapters.
+    # 1) Always try the explicit paginated daily loader first.  Some NEPSE
+    # client methods return only their default 20-row page even when a larger
+    # page size is requested; using the page walker prevents that first-page
+    # result from becoming the entire floorsheet.
+    try:
+        rows = await _complete_daily_floorsheet(wanted, page_size=500, max_pages=200)
+        if rows:
+            return rows
+    except Exception:
+        pass
+
+    # 2) Direct nepsepy floorsheet methods.
     try:
         rows = only_symbol(await _direct_nepse_floorsheet(wanted))
         if rows:
@@ -1820,7 +1829,7 @@ async def get_floorsheet(symbol: Optional[str] = None):
     except Exception:
         pass
 
-    # 2) Original NEPSE paginated loader. It understands the current
+    # 3) Original NEPSE paginated loader. It understands the current
     # {floorsheets:{content:[...]}} response and compatibility endpoints.
     try:
         rows = only_symbol(await legacy_get_floorsheet(wanted))
@@ -1879,16 +1888,7 @@ async def get_floorsheet(symbol: Optional[str] = None):
         except Exception:
             continue
 
-    # 5) Explicitly walk the live floorsheet pages.  This catches clients that
-    # ignore max_pages and otherwise return only the first 500 transactions.
-    try:
-        rows = await _complete_daily_floorsheet(wanted)
-        if rows:
-            return rows
-    except Exception:
-        pass
-
-    # 6) Latest real archived session. This is the important fallback when
+    # 5) Latest real archived session. This is the important fallback when
     # NEPSE's live broker/floorsheet endpoint is temporarily empty.
     rows = await _recent_archive_floorsheet(wanted, lookback_days=10)
     if rows:
