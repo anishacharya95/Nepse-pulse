@@ -331,6 +331,12 @@ async def nepse_call(methods: list[str], *args, **kwargs):
 
 
 NPT = timezone(timedelta(hours=5, minutes=45))
+# Last-known-good caches for transient empty NEPSE responses. These prevent
+# Trade Tape/Broker/Depth panels from flashing blank during feed refreshes.
+_LAST_VALID_FLOORSHEET: list[dict] = []
+_LAST_VALID_BROKERS: dict = {}
+_LAST_VALID_DEPTH: dict[str, dict] = {}
+
 
 
 def normalize_open(v: Any) -> Optional[bool]:
@@ -1841,13 +1847,33 @@ async def api_company_floorsheet(symbol: str, limit: int = Query(100000, ge=1, l
 
 @app.get("/api/floorsheet")
 async def api_floorsheet(symbol: Optional[str]=None, limit:int=Query(100000,ge=1,le=100000)):
+    global _LAST_VALID_FLOORSHEET
     rows=await get_floorsheet(symbol)
+    if rows:
+        if symbol:
+            # Keep the full cache only when an all-symbol request is received.
+            pass
+        else:
+            _LAST_VALID_FLOORSHEET=list(rows)
+    elif not symbol and _LAST_VALID_FLOORSHEET:
+        rows=list(_LAST_VALID_FLOORSHEET)
     rows=rows[:limit]
-    return {"ok":bool(rows),"source":"NEPSE executed floorsheet / latest verified session","symbol":symbol,"data":rows,"count":len(rows),"updatedAt":now_iso()}
+    return {"ok":bool(rows),"source":"NEPSE executed floorsheet / latest verified session","symbol":symbol,"data":rows,"count":len(rows),"cached":not bool(await get_floorsheet(symbol)) if False else False,"updatedAt":now_iso()}
 
 @app.get("/api/brokers")
 async def api_brokers():
-    return await get_broker_analysis()
+    global _LAST_VALID_BROKERS
+    data=await get_broker_analysis()
+    if isinstance(data,dict) and data.get("data"):
+        _LAST_VALID_BROKERS=dict(data)
+        data["cached"]=False
+        return data
+    if _LAST_VALID_BROKERS:
+        cached=dict(_LAST_VALID_BROKERS)
+        cached["cached"]=True
+        cached["source"]=str(cached.get("source") or "NEPSE floorsheet broker analysis")+" / last verified snapshot"
+        return cached
+    return data
 
 @app.get("/api/sectors")
 async def api_sectors():
@@ -1999,6 +2025,8 @@ async def production_depth(symbol: str):
                 normalized["sellMarketDepthList"] = normalized["sell"]
                 normalized["totalBuyQty"] = normalized["totalBuyQuantity"]
                 normalized["totalSellQty"] = normalized["totalSellQuantity"]
+                _LAST_VALID_DEPTH[symbol] = dict(normalized)
+                normalized["cached"] = False
                 return normalized
             errors.append(f"nepsepy {method}: no usable levels")
         except Exception as exc:
@@ -2019,6 +2047,8 @@ async def production_depth(symbol: str):
                 normalized["sellMarketDepthList"] = normalized["sell"]
                 normalized["totalBuyQty"] = normalized["totalBuyQuantity"]
                 normalized["totalSellQty"] = normalized["totalSellQuantity"]
+                _LAST_VALID_DEPTH[symbol] = dict(normalized)
+                normalized["cached"] = False
                 return normalized
             errors.append(f"production SDK {method}: no usable levels")
         except Exception as exc:
@@ -2037,11 +2067,19 @@ async def production_depth(symbol: str):
                 normalized["sellMarketDepthList"] = normalized["sell"]
                 normalized["totalBuyQty"] = normalized["totalBuyQuantity"]
                 normalized["totalSellQty"] = normalized["totalSellQuantity"]
+                _LAST_VALID_DEPTH[symbol] = dict(normalized)
+                normalized["cached"] = False
                 return normalized
             errors.append(f"{path}: no usable levels")
         except Exception as exc:
             errors.append(f"{path}: {exc}")
 
+    if symbol in _LAST_VALID_DEPTH:
+        cached=dict(_LAST_VALID_DEPTH[symbol])
+        cached["cached"]=True
+        cached["source"]=str(cached.get("source") or "NEPSE live market-depth feed")+" / last verified snapshot"
+        cached["error"]="; ".join(errors[-6:])
+        return cached
     return {"ok":False,"symbol":symbol,"buy":[],"sell":[],"totalBuyQuantity":None,"totalSellQuantity":None,"totalBuyOrders":None,"totalSellOrders":None,"buyMarketDepthList":[],"sellMarketDepthList":[],"totalBuyQty":None,"totalSellQty":None,"updatedAt":now_iso(),"source":"NEPSE live market-depth feeds","error":"; ".join(errors[-6:])}
 
 # Compatibility route used by the existing company-detail frontend.

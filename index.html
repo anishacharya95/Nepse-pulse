@@ -3406,6 +3406,19 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
   </div>
 </section>
 
+<style id="pulse-search-lock-loading">
+#npSearchLoadingLock{position:fixed;inset:0;z-index:200000;background:rgba(7,16,29,.48);backdrop-filter:blur(3px);display:none;align-items:center;justify-content:center;cursor:wait}
+#npSearchLoadingLock.open{display:flex}
+#npSearchLoadingLock .box{background:#fff;color:#172033;border-radius:16px;padding:18px 22px;min-width:210px;text-align:center;box-shadow:0 18px 55px rgba(0,0,0,.22);font-weight:800}
+#npSearchLoadingLock .spin{width:26px;height:26px;border:3px solid #d9e1ea;border-top-color:#1769aa;border-radius:50%;margin:0 auto 10px;animation:npSearchSpin .8s linear infinite}
+#npSearchLoadingLock small{display:block;margin-top:5px;font-weight:500;color:#667085}
+@keyframes npSearchSpin{to{transform:rotate(360deg)}}
+.search-suggestions .search-loading{padding:14px;text-align:center;color:#667085;font-size:12px}
+.search-suggestions .search-loading .spin{display:inline-block;width:16px;height:16px;border:2px solid #d9e1ea;border-top-color:#1769aa;border-radius:50%;vertical-align:-4px;margin-right:7px;animation:npSearchSpin .8s linear infinite}
+body.np-search-busy>*:not(#npSearchLoadingLock){pointer-events:none!important}
+</style>
+<div id="npSearchLoadingLock" aria-live="polite" aria-busy="false"><div class="box"><div class="spin"></div>Searching company…<small>Please wait — the rest of the app is locked.</small></div></div>
+
 <style id="pulse-v4-floorsheet-style">
 #floorsheet-broker-v4{margin:28px 0;font-family:inherit;border:1px solid rgba(127,127,127,.18);border-radius:24px;padding:20px;background:rgba(127,127,127,.045)}
 .pulse-fs-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:16px}.pulse-fs-kicker{font-size:10px;letter-spacing:.14em;font-weight:800;opacity:.62}.pulse-fs-head h2{margin:4px 0;font-size:25px}.pulse-fs-head p{margin:0;font-size:13px;opacity:.68}.pulse-fs-status{font-size:11px;display:flex;gap:7px;align-items:center;padding:8px 10px;border-radius:99px;background:rgba(127,127,127,.09);white-space:nowrap}.pulse-fs-status span:first-child{width:7px;height:7px;border-radius:50%;background:#999}
@@ -3485,7 +3498,10 @@ function renderBrokers(a){
 function renderUnusual(a){
  const vals=a.map(x=>x.value).filter(x=>x!==null).sort((x,y)=>x-y);
  const median=vals.length?vals[Math.floor(vals.length/2)]:null;
- const threshold=median!==null?Math.max(median*5,vals[vals.length-1]||0):null;
+ const p90=vals.length?vals[Math.floor((vals.length-1)*0.90)]:null;
+ // Flag genuinely large trades without requiring the single largest trade to be
+ // the only result. This keeps Unusual Trades populated on active sessions.
+ const threshold=median!==null&&p90!==null?Math.max(median*3,p90):p90;
  const top=a.filter(x=>x.value!==null&&threshold!==null&&x.value>=threshold).sort((x,y)=>y.value-x.value).slice(0,100);
  $('fsUnusualRows').innerHTML=top.length?top.map(x=>`<tr><td><b>${esc(x.symbol)}</b></td><td>${esc(x.buyer||'—')}</td><td>${esc(x.seller||'—')}</td><td>${fmt(x.price,2)}</td><td>${fmt(x.qty)}</td><td>${fmt(x.value)}</td><td><span class="fs-type">Large vs loaded tape</span></td></tr>`).join(''):'<tr><td colspan="7" class="fs-empty">No unusually large loaded transactions.</td></tr>';
 }
@@ -3502,15 +3518,31 @@ async function loadDirect(){
    if(!r.ok)throw new Error('Floorsheet HTTP '+r.status);
    const d=await r.json();
    const rows=Array.isArray(d?.data)?d.data:[];
-   if(rows.length){all=rows.map(normalize).filter(x=>x.symbol||x.buyer||x.seller);$('fsStatus').textContent='LIVE • '+new Date().toLocaleTimeString();$('fsDot').style.background='#20a464';render();return true;}
+   if(rows.length){
+     all=rows.map(normalize).filter(x=>x.symbol||x.buyer||x.seller);
+     window.__PULSE_LAST_VALID_FLOORSHEET=all.slice();
+     $('fsStatus').textContent='LIVE • '+new Date().toLocaleTimeString();
+     $('fsDot').style.background='#20a464';
+     render();return true;
+   }
+   // Empty response is a transient feed failure; keep the last verified tape.
+   if(all.length){$('fsStatus').textContent='CACHED • waiting for next verified update';$('fsDot').style.background='#d29b19';render();return true;}
  }catch(e){console.warn('Direct floorsheet feed:',e)}
  return false;
 }
 function sync(st){
- all=extract(st||{});
+ const incoming=extract(st||{});
  const status=String(st?.status||'OFFLINE').toUpperCase();
- $('fsStatus').textContent=status+(st?.updatedAt?' • '+new Date(st.updatedAt).toLocaleTimeString(): '');
- $('fsDot').style.background=status==='LIVE'?'#20a464':status==='CACHED'?'#d29b19':'#999';
+ // NEVER replace a valid tape with a transient empty websocket/central snapshot.
+ // The exchange can briefly return an empty payload while the next poll is loading.
+ if(incoming.length){
+   all=incoming;
+   window.__PULSE_LAST_VALID_FLOORSHEET=all;
+ }else if(!all.length && Array.isArray(window.__PULSE_LAST_VALID_FLOORSHEET)){
+   all=window.__PULSE_LAST_VALID_FLOORSHEET.slice();
+ }
+ $('fsStatus').textContent=(incoming.length?'LIVE':'CACHED')+(st?.updatedAt?' • '+new Date(st.updatedAt).toLocaleTimeString():'');
+ $('fsDot').style.background=incoming.length?'#20a464':all.length?'#d29b19':'#999';
  render();
  if(!all.length)loadDirect();
 }
@@ -5300,6 +5332,9 @@ header.topbar, header.topbar .toprow, .mobile-exact-topbar {
   }
   async function selectSymbol(sym){
     document.querySelectorAll('.search-suggestions').forEach(x=>x.classList.remove('open'));
+    const lock=document.getElementById('npSearchLoadingLock');
+    if(lock){lock.classList.add('open');lock.setAttribute('aria-busy','true');}
+    document.body.classList.add('np-search-busy');
     const a=document.getElementById('searchBox'),m=document.getElementById('mobileSearchBox');
     if(a)a.value=sym;if(m)m.value=sym;
     // Use the existing X-Ray workspace and feed it the selected symbol.
@@ -5473,12 +5508,17 @@ header.topbar, header.topbar .toprow, .mobile-exact-topbar {
     dd.classList.add('open');
   }
 
+  let __npSearchSeq=0;
   async function suggest(input){
     const q=String(input.value||'').trim().toUpperCase();
     const dd=document.getElementById(input.id+'Suggestions');
     if(!dd) return;
     if(!q){dd.classList.remove('open');dd.innerHTML='';return;}
+    const seq=++__npSearchSeq;
+    dd.innerHTML='<div class="search-loading"><span class="spin"></span>Searching companies…</div>';
+    dd.classList.add('open');
     const list=await loadCompanies();
+    if(seq!==__npSearchSeq || String(input.value||'').trim().toUpperCase()!==q)return;
     const starts=list.filter(c=>{
       const s=symbolOf(c), n=nameOf(c,s).toUpperCase();
       return s.startsWith(q)||n.startsWith(q);
@@ -5498,10 +5538,12 @@ header.topbar, header.topbar .toprow, .mobile-exact-topbar {
           const i=document.getElementById('v26FundInput')||document.getElementById('v26XrayInput');
           if(i){i.value=sym;i.dispatchEvent(new Event('input',{bubbles:true}));document.getElementById('v26FundGo')?.click();document.getElementById('v26XrayGo')?.click();}
         },120);
+        setTimeout(()=>{document.getElementById('npSearchLoadingLock')?.classList.remove('open');document.getElementById('npSearchLoadingLock')?.setAttribute('aria-busy','false');document.body.classList.remove('np-search-busy')},180);
         return;
       }
     }catch(e){}
     try{document.getElementById('xrSymbol').value=sym;openStockXRay();loadStockXRay()}catch(e){}
+    setTimeout(()=>{document.getElementById('npSearchLoadingLock')?.classList.remove('open');document.getElementById('npSearchLoadingLock')?.setAttribute('aria-busy','false');document.body.classList.remove('np-search-busy')},350);
   }
 
   function wireSearch(){
