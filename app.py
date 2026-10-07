@@ -1602,7 +1602,7 @@ async def get_broker_analysis():
         rows = await get_floorsheet(None)
         rows = floor_rows(rows)
         if not rows:
-            rows = await _recent_archive_floorsheet(None, 7)
+            rows = await _recent_archive_floorsheet(None, 10)
         if not rows:
             return {"ok": False, "updatedAt": now_iso(), "data": [],
                     "bySymbol": [], "sourceRows": 0,
@@ -1730,7 +1730,10 @@ async def _recent_archive_floorsheet(symbol: Optional[str] = None, lookback_days
     for offset in range(0, lookback_days + 1):
         day = today - timedelta(days=offset)
         try:
-            raw = await static_get(f"/floor_sheet/daily/{day.isoformat()}.json")
+            # YONEPSE is the maintained static floor-sheet archive. Use its
+            # dedicated helper (which tries both the published site and raw
+            # GitHub copy) rather than STATIC_API directly.
+            raw = await yonepse_get(f"floor_sheet/daily/{day.isoformat()}.json")
             rows = floor_rows(raw)
             if wanted:
                 rows = [r for r in rows if str(r.get("symbol") or "").upper().strip() == wanted]
@@ -1739,7 +1742,19 @@ async def _recent_archive_floorsheet(symbol: Optional[str] = None, lookback_days
                     r["businessDate"] = r.get("businessDate") or day.isoformat()
                 return rows
         except Exception:
-            continue
+            # Keep the older static endpoint as a secondary compatibility
+            # source in case the maintained archive layout changes.
+            try:
+                raw = await static_get(f"/floor_sheet/daily/{day.isoformat()}.json")
+                rows = floor_rows(raw)
+                if wanted:
+                    rows = [r for r in rows if str(r.get("symbol") or "").upper().strip() == wanted]
+                if rows:
+                    for r in rows:
+                        r["businessDate"] = r.get("businessDate") or day.isoformat()
+                    return rows
+            except Exception:
+                continue
     return []
 
 # One normalized path for company floorsheets.  Every source is treated as
@@ -1824,7 +1839,7 @@ async def get_floorsheet(symbol: Optional[str] = None):
 
     # 5) Latest real archived session. This is the important fallback when
     # NEPSE's live broker/floorsheet endpoint is temporarily empty.
-    rows = await _recent_archive_floorsheet(wanted)
+    rows = await _recent_archive_floorsheet(wanted, lookback_days=10)
     if rows:
         return rows
 
