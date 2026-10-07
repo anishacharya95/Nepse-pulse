@@ -3550,34 +3550,51 @@ async function loadDirect(){
     // Background hydration: fetch remaining pages without blocking the UI.
     let totalPages=Number(d?.totalPages)||null;
     let totalElements=Number(d?.totalElements)||null;
-    if(totalPages&&totalPages>1){
-      const startPage=Number(d?.page??0)===0?1:2;
-      const pages=[];
-      for(let pg=startPage;pg<totalPages;pg++)pages.push(pg);
-      const batchSize=6;
-      for(let i=0;i<pages.length;i+=batchSize){
-        const batch=pages.slice(i,i+batchSize);
-        const results=await Promise.all(batch.map(async pg=>{
-          try{
-            const rr=await fetch(base+'/api/floorsheet?limit=500&page='+pg+'&size='+pageSize+'&_fs='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});
-            if(!rr.ok)return [];
-            const dd=await rr.json();
-            return Array.isArray(dd?.data)?dd.data:[];
-          }catch(e){return []}
-        }));
-        const incoming=results.flat().map(normalize).filter(x=>x.symbol||x.buyer||x.seller);
-        if(incoming.length){
-          const seen=new Set(all.map(x=>x.id||[x.symbol,x.time,x.qty,x.price,x.buyer,x.seller].join('|')));
-          for(const x of incoming){const k=x.id||[x.symbol,x.time,x.qty,x.price,x.buyer,x.seller].join('|');if(!seen.has(k)){seen.add(k);all.push(x);}}
-          window.__PULSE_LAST_VALID_FLOORSHEET=all.slice();
-          $('fsStatus').textContent='LIVE • '+all.length.toLocaleString()+(totalElements?' / '+totalElements.toLocaleString():'')+' trades';
-          render();
-        }
-        // Yield between batches so the phone remains responsive.
-        await new Promise(resolve=>setTimeout(resolve,20));
+    // Do NOT trust totalPages/totalElements as the completion signal. Some
+    // NEPSE gateways report a capped page count (commonly 6 pages / 3,000
+    // rows) even though later pages are still available. Keep probing until
+    // several consecutive pages are genuinely empty.
+    const firstPage=Number(d?.page??0);
+    let nextPage=firstPage===0?1:2;
+    const maxProbePages=200;
+    const batchSize=6;
+    let emptyBatches=0;
+    let duplicateOnlyBatches=0;
+    let loadedPages=0;
+    while(nextPage<maxProbePages){
+      const batch=[];
+      for(let j=0;j<batchSize && nextPage+j<maxProbePages;j++)batch.push(nextPage+j);
+      nextPage+=batch.length;
+      const results=await Promise.all(batch.map(async pg=>{
+        try{
+          const rr=await fetch(base+'/api/floorsheet?limit=500&page='+pg+'&size='+pageSize+'&_fs='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});
+          if(!rr.ok)return [];
+          const dd=await rr.json();
+          return Array.isArray(dd?.data)?dd.data:[];
+        }catch(e){return []}
+      }));
+      let batchRows=0,added=0;
+      const seen=new Set(all.map(x=>x.id||[x.symbol,x.time,x.qty,x.price,x.buyer,x.seller].join('|')));
+      for(const raw of results.flat()){
+        batchRows++;
+        const x=normalize(raw); if(!(x.symbol||x.buyer||x.seller))continue;
+        const k=x.id||[x.symbol,x.time,x.qty,x.price,x.buyer,x.seller].join('|');
+        if(!seen.has(k)){seen.add(k);all.push(x);added++;}
       }
-      $('fsStatus').textContent='LIVE • '+all.length.toLocaleString()+' trades • complete';
+      loadedPages+=batch.length;
+      if(batchRows===0) emptyBatches++; else emptyBatches=0;
+      if(batchRows>0 && added===0) duplicateOnlyBatches++; else duplicateOnlyBatches=0;
+      if(added){
+        window.__PULSE_LAST_VALID_FLOORSHEET=all.slice();
+        $('fsStatus').textContent='LIVE • '+all.length.toLocaleString()+(totalElements?' / '+totalElements.toLocaleString():'')+' trades • loading…';
+        render();
+      }
+      // One empty batch can be a transient upstream miss. Stop only after two
+      // consecutive empty batches, or repeated pages containing no new rows.
+      if(emptyBatches>=2 || duplicateOnlyBatches>=3)break;
+      await new Promise(resolve=>setTimeout(resolve,20));
     }
+    $('fsStatus').textContent='LIVE • '+all.length.toLocaleString()+' trades • '+(nextPage>=maxProbePages?'probe limit reached':'complete');
     return true;
   }catch(e){console.warn('Direct floorsheet feed:',e);return false}
 }
