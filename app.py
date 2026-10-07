@@ -1737,12 +1737,13 @@ async def _direct_nepse_floorsheet(symbol: Optional[str] = None):
                 (["getFloorSheetOf"], (wanted,), {}),
             ])
 
-    # Full current-session feed.  This is also the required fallback because
-    # NEPSE has blocked some symbol-specific floorsheet routes.
+    # Prefer the SDK's complete-floor-sheet method.  Recent nepse SDKs
+    # implement getFloorSheet() as a full paginator; a single floorsheets()
+    # call can otherwise stop at a provider-side 5,000-row cap.
     attempts.extend([
+        (["getFloorSheet"], (), {}),
         (["floorsheets"], (), {"max_pages": 1000, "size": 500}),
         (["floorsheets"], (), {"page": 1, "size": 500}),
-        (["getFloorSheet"], (), {}),
     ])
 
     for methods, args, kwargs in attempts:
@@ -1797,13 +1798,15 @@ async def _recent_archive_floorsheet(symbol: Optional[str] = None, lookback_days
 
 # One normalized path for company floorsheets.  Every source is treated as
 # untrusted wrapper data until floor_rows() has flattened it.
-async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: int = 500, max_pages: int = 200):
-    """Fetch the complete current-day floorsheet across every NEPSE page.
+async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: int = 500, max_pages: int = 1000):
+    """Fetch the complete current-day floorsheet quickly.
 
-    NEPSE floor-sheet pagination is commonly zero-based. Some clients expose
-    one-based pagination, so we probe page 0 first and then continue using the
-    server's reported totalPages/totalElements when available. A transient
-    empty page never discards rows already collected.
+    NEPSE returns the floor sheet in paginated 500-row pages.  The old
+    implementation fetched pages strictly one-by-one, which was slow and
+    could fall back to the limited 5,000-row public table.  We now discover
+    the page count from the first response and fetch the remaining pages in
+    small concurrent batches, while preserving the zero/one-based pagination
+    compatibility.
     """
     wanted = symbol.upper().strip() if symbol else None
     rows=[]
@@ -1818,53 +1821,80 @@ async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: in
         total_elements=meta.get('totalElements') or meta.get('total_elements')
         return rr, total_pages, total_elements
 
-    # First probe zero-based pagination, then one-based if the first probe is empty.
-    first_pages=[0,1]
-    first_ok=None
-    total_pages=None
-    total_elements=None
-    for page in first_pages:
+    def add_rows(got):
+        for r in got:
+            key=str(r.get('trade') or r.get('contractId') or r.get('transactionNumber') or '') or f"{r.get('symbol')}|{r.get('businessDate')}|{r.get('tradeTime')}|{r.get('quantity')}|{r.get('rate')}|{r.get('buyerBroker')}|{r.get('sellerBroker')}"
+            if key not in seen:
+                seen.add(key); rows.append(r)
+
+    async def fetch_page(page):
         for kwargs in ({'page':page,'size':page_size},{'page':page,'limit':page_size},{'page':page,'page_size':page_size}):
             try:
                 raw=await nepse_call(['floorsheets'], **kwargs)
                 got,tp,te=unpack(raw)
                 if got:
-                    first_ok=page; total_pages=tp; total_elements=te
-                    for r in got:
-                        key=str(r.get('trade') or r.get('contractId') or '') or f"{r.get('symbol')}|{r.get('businessDate')}|{r.get('tradeTime')}|{r.get('quantity')}|{r.get('rate')}|{r.get('buyerBroker')}|{r.get('sellerBroker')}"
-                        if key not in seen: seen.add(key); rows.append(r)
-                    break
+                    return page,got,tp,te
             except Exception:
                 continue
-        if first_ok is not None: break
+        return page,[],None,None
 
-    if first_ok is None:
+    # Probe both bases because NEPSE clients differ: page=0 and page=1.
+    probes=[]
+    for page in (0,1):
+        probes.append(asyncio.create_task(fetch_page(page)))
+    results=await asyncio.gather(*probes, return_exceptions=True)
+    first=None
+    for result in results:
+        if isinstance(result,tuple) and len(result)>=4 and result[1]:
+            first=result
+            break
+    if first is None:
         return []
 
-    # Continue from the detected base. Do not stop merely because a page is
-    # shorter than 500: some providers cap/shape pages independently.
-    target = min(max_pages, int(total_pages)) if total_pages is not None else max_pages
-    for page in range(first_ok + 1, target + 1):
-        got=[]
-        tp=None
-        for kwargs in ({'page':page,'size':page_size},{'page':page,'limit':page_size},{'page':page,'page_size':page_size}):
-            try:
-                raw=await nepse_call(['floorsheets'], **kwargs)
-                got,tp,te=unpack(raw)
-                if got:
-                    if total_pages is None and tp is not None: target=min(max_pages,int(tp))
-                    break
-            except Exception:
+    first_page, first_rows, total_pages, total_elements=first
+    add_rows(first_rows)
+
+    if total_pages is not None:
+        try:
+            target=min(max_pages,int(total_pages))
+        except Exception:
+            target=max_pages
+        # totalPages is a count. For a zero-based first page, the last valid
+        # index is totalPages-1; for one-based pagination it is totalPages.
+        last_page=target-1 if first_page==0 else target
+        pages=list(range(first_page+1,last_page+1))
+    else:
+        pages=list(range(first_page+1,max_pages+1))
+
+    # Fetch in bounded concurrent batches. This is dramatically faster than
+    # waiting for ~80+ HTTP round trips sequentially, while avoiding a burst
+    # large enough to trigger upstream throttling.
+    batch_size=10
+    for i in range(0,len(pages),batch_size):
+        batch=pages[i:i+batch_size]
+        results=await asyncio.gather(*(fetch_page(p) for p in batch), return_exceptions=True)
+        empty=0
+        for result in results:
+            if not isinstance(result,tuple):
+                empty+=1; continue
+            page,got,tp,te=result
+            if not got:
+                empty+=1
                 continue
-        if not got:
-            # One empty page is not enough to invalidate collected data, but
-            # repeated empty pages indicate the provider has ended pagination.
-            if page >= first_ok + 2:
-                break
-            continue
-        for r in got:
-            key=str(r.get('trade') or r.get('contractId') or '') or f"{r.get('symbol')}|{r.get('businessDate')}|{r.get('tradeTime')}|{r.get('quantity')}|{r.get('rate')}|{r.get('buyerBroker')}|{r.get('sellerBroker')}"
-            if key not in seen: seen.add(key); rows.append(r)
+            add_rows(got)
+            if total_pages is None and tp is not None:
+                try:
+                    new_target=min(max_pages,int(tp))
+                    if first_page==0:
+                        pages=pages[:pages.index(page)+1] if page in pages else pages
+                    else:
+                        pages=pages[:pages.index(page)+1] if page in pages else pages
+                except Exception:
+                    pass
+        if total_elements is not None and len(rows)>=int(total_elements):
+            break
+        if total_pages is None and empty==len(batch):
+            break
 
     if wanted:
         rows=[r for r in rows if str(r.get('symbol') or '').upper().strip()==wanted]
