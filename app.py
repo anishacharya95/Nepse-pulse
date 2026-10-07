@@ -767,7 +767,10 @@ def normalize_index_history_rows(raw: Any, wanted_id: int = 58) -> list[dict]:
 
     dict_rows=[r for r in rows if isinstance(r,dict)]
     labelled=[r for r in dict_rows if any(pick(r,[k]) is not None for k in ["id","indexId","index","indexName","name"])]
-    candidates=[r for r in labelled if matches(r)] if any(matches(r) for r in labelled) else dict_rows
+    # If the payload is labelled with index ids/names, require the requested
+    # series to match. This prevents a failed sector lookup from silently
+    # displaying the headline NEPSE index instead.
+    candidates=[r for r in labelled if matches(r)] if labelled else dict_rows
     out=[]
     for r in candidates:
         date=pick(r,["date","businessDate","publishedDate","generatedTime","tradingDate","tradeDate","timestamp","time","datetime","dateTime"])
@@ -1025,12 +1028,7 @@ async def get_fundamentals(symbol: str):
             "updatedAt": now_iso(),
         }
 
-    # Floorsheet-only cache rule: NEVER cache an empty response.
-    # A temporary NEPSE/API empty response must be retried on the next request.
-    rows = await load()
-    if rows:
-        cache_set(key, rows)
-    return rows
+    return await cached(key, load)
 
 
 async def get_floorsheet(symbol: Optional[str] = None):
@@ -1262,6 +1260,9 @@ async def get_sectors():
             out.append({
                 "sector": name,
                 "name": name,
+                # Preserve the NEPSE sub-index id so Professional Charting can
+                # request the correct historical OHLC series without guessing.
+                "indexId": num(pick(x, ["id", "subIndexId", "sub_index_id", "indexId", "index_id", "exchangeIndexId"])),
                 "change": num(pick(x, ["pointChange", "difference", "change"])) or 0 if change is None else change,
                 "changePercent": change,
                 "indexValue": index_value,
@@ -1663,78 +1664,117 @@ async def get_fundamentals(symbol: str):
     return await legacy_get_fundamentals(symbol)
 
 # FINAL VERIFIED TRADE LOADER
-# One normalized path for company floorsheets.  Every source is treated as
+# One normalized path for company floorsheets. Every source is treated as
 # untrusted wrapper data until floor_rows() has flattened it.
 async def get_floorsheet(symbol: Optional[str] = None):
     wanted = symbol.upper().strip() if symbol else None
+    today = datetime.now(NPT).date()
+    cache_key = f"floorsheet:{today.isoformat()}:{wanted or 'all'}"
 
     def only_symbol(rows):
         rows = floor_rows(rows)
         if wanted:
             rows = [r for r in rows if str(r.get("symbol") or "").upper().strip() == wanted]
+        # This endpoint is for the current trading day. If the upstream payload
+        # contains dates, never let an older session leak into today's feed.
+        dated = []
+        for r in rows:
+            rd = _row_date(r)
+            if rd:
+                dated.append((r, rd))
+        if dated:
+            rows = [r for r, rd in dated if rd == today.isoformat()]
         return rows
 
-    # 1) Original NEPSE paginated loader. It understands the current
-    # {floorsheets:{content:[...]}} response and compatibility endpoints.
-    try:
-        rows = only_symbol(await legacy_get_floorsheet(wanted))
-        if rows:
-            return rows
-    except Exception:
-        pass
-
-    # 2) Production trades adapter. Try company-specific forms, but NEVER
-    # stop just because a valid call returned an empty wrapper. If it is empty,
-    # request the full live trades feed and filter locally.
-    attempts = []
-    if wanted:
+    async def load():
+        # 1) Original NEPSE paginated loader. It understands the current
+        # {floorsheets:{content:[...]}} response and compatibility endpoints.
         try:
-            company = await resolve_company(wanted)
-            cid = pick(company, ["id", "securityId", "security_id", "stockId"])
-            if cid is not None:
-                attempts.extend([
-                    ("trades", {"stock_id": int(cid), "max_pages": 1000, "size": 500}),
-                    ("trades", {"stockId": int(cid), "max_pages": 1000, "size": 500}),
-                ])
+            rows = only_symbol(await legacy_get_floorsheet(wanted))
+            if rows:
+                return rows
         except Exception:
             pass
+
+        # 2) Production trades adapter. Try company-specific forms, but NEVER
+        # stop just because a valid call returned an empty wrapper. If it is empty,
+        # request the full live trades feed and filter locally.
+        attempts = []
+        if wanted:
+            try:
+                company = await resolve_company(wanted)
+                cid = pick(company, ["id", "securityId", "security_id", "stockId"])
+                if cid is not None:
+                    attempts.extend([
+                        ("trades", {"stock_id": int(cid), "max_pages": 1000, "size": 500}),
+                        ("trades", {"stockId": int(cid), "max_pages": 1000, "size": 500}),
+                    ])
+            except Exception:
+                pass
+            attempts.extend([
+                ("trades", {"symbol": wanted, "max_pages": 1000, "size": 500}),
+                ("trades", {"symbol": wanted, "page": 1, "size": 500}),
+            ])
         attempts.extend([
-            ("trades", {"symbol": wanted, "max_pages": 1000, "size": 500}),
-            ("trades", {"symbol": wanted, "page": 1, "size": 500}),
+            ("trades", {"max_pages": 1000, "size": 500}),
+            ("trades", {"page": 1, "size": 500}),
         ])
-    attempts.extend([
-        ("trades", {"max_pages": 1000, "size": 500}),
-        ("trades", {"page": 1, "size": 500}),
-    ])
 
-    for method, kwargs in attempts:
+        for method, kwargs in attempts:
+            try:
+                raw = await production_call(method, **kwargs)
+                rows = only_symbol(raw)
+                if rows:
+                    return rows
+            except TypeError:
+                continue
+            except Exception:
+                continue
+
+        # 3) Explicit compatibility/public endpoint fallback.
+        for path, params in (
+            ("/FloorsheetOf", {"symbol": wanted} if wanted else None),
+            ("/Floorsheet", None),
+        ):
+            if not wanted and path == "/FloorsheetOf":
+                continue
+            try:
+                raw = await public_get(path, params)
+                rows = only_symbol(raw)
+                if rows:
+                    return rows
+            except Exception:
+                continue
+
+        # 4) YONEPSE publishes a complete post-close daily floor-sheet snapshot.
+        # Use today's NPT date only; never silently substitute yesterday's data.
         try:
-            raw = await production_call(method, **kwargs)
+            raw = await static_get(f"/floor_sheet/daily/{today.isoformat()}.json")
             rows = only_symbol(raw)
             if rows:
                 return rows
-        except TypeError:
-            continue
         except Exception:
-            continue
+            pass
 
-    # 3) Explicit compatibility/public endpoint fallback.
-    for path, params in (
-        ("/FloorsheetOf", {"symbol": wanted} if wanted else None),
-        ("/Floorsheet", None),
-    ):
-        if not wanted and path == "/FloorsheetOf":
-            continue
-        try:
-            raw = await public_get(path, params)
-            rows = only_symbol(raw)
-            if rows:
-                return rows
-        except Exception:
-            continue
+        # No verified trades: return empty rather than fabricated values.
+        return []
 
-    # No verified trades: return empty rather than fabricated values.
-    return []
+    # Cache only verified non-empty floorsheet data.  A transient upstream
+    # failure must never be cached as "no data", otherwise the frontend can
+    # keep showing an empty floorsheet even after NEPSE becomes available.
+    hit = cache_get(cache_key)
+    if isinstance(hit, list) and hit:
+        return hit
+    lock = LOCKS.setdefault(cache_key, asyncio.Lock())
+    async with lock:
+        hit = cache_get(cache_key)
+        if isinstance(hit, list) and hit:
+            return hit
+        rows = await load()
+        if rows:
+            cache_set(cache_key, rows)
+        return rows
+
 
 # Preserve original implementations as explicit fallbacks.
 @app.get("/api/company-floorsheet/{symbol}")
