@@ -1990,7 +1990,10 @@ async def api_company_floorsheet(symbol: str, limit: int = Query(100000, ge=1, l
 @app.get("/api/floorsheet")
 async def api_floorsheet(symbol: Optional[str]=None, limit:int=Query(100000,ge=1,le=100000)):
     global _LAST_VALID_FLOORSHEET, _LAST_VALID_FLOORSHEET_AT
-    rows=await get_floorsheet(symbol)
+    try:
+        rows=await get_floorsheet(symbol)
+    except Exception:
+        rows=[]
     cached=False
     if rows and not symbol:
         _LAST_VALID_FLOORSHEET=list(rows)

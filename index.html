@@ -3529,7 +3529,16 @@ async function loadDirect(){
    const r=await fetch((window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'')+'/api/floorsheet?limit=100000&_fs='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});
    if(!r.ok)throw new Error('Floorsheet HTTP '+r.status);
    const d=await r.json();
-   const rows=Array.isArray(d?.data)?d.data:[];
+   // Accept all backend envelopes used by the floorsheet engine.
+   // Do not require the top-level payload to be an array.
+   let rows=[];
+   if(Array.isArray(d?.data)) rows=d.data;
+   else if(Array.isArray(d?.floorsheet)) rows=d.floorsheet;
+   else if(Array.isArray(d?.floorSheet)) rows=d.floorSheet;
+   else if(Array.isArray(d?.data?.content)) rows=d.data.content;
+   else if(Array.isArray(d?.data?.floorsheets)) rows=d.data.floorsheets;
+   else if(Array.isArray(d?.data?.floorsheets?.content)) rows=d.data.floorsheets.content;
+   else if(d?.data?.floorsheets?.content && Array.isArray(d.data.floorsheets.content)) rows=d.data.floorsheets.content;
    if(rows.length){
      all=rows.map(normalize).filter(x=>x.symbol||x.buyer||x.seller);
      window.__PULSE_LAST_VALID_FLOORSHEET=all.slice();
@@ -3572,6 +3581,9 @@ document.addEventListener('DOMContentLoaded',()=>{
  window.addEventListener('pulse-central-snapshot',e=>sync(e.detail));
  window.addEventListener('pulse-feed-update',()=>{const st=window.PULSE_FEED_ENGINE?.state?.();if(st)sync(st)});
  const st=window.PULSE_FEED_ENGINE?.state?.();if(st)sync(st);
+ // Keep retrying the explicit Trade Tape endpoint until a verified payload
+ // arrives. A single empty response must never leave the tape permanently blank.
+ setInterval(()=>{if(!all.length)loadDirect()},5000);
 });
 })();
 </script>
