@@ -13,7 +13,12 @@ from fastapi.responses import JSONResponse
 try:
     from nepsepy import AsyncNepseClient
 except Exception:
-    AsyncNepseClient = None
+    try:
+        # Compatibility with the older package name used by several NEPSE
+        # deployments.  The data adapter below supports both method styles.
+        from nepse_client import AsyncNepseClient
+    except Exception:
+        AsyncNepseClient = None
 
 # Production NEPSE data layer.  Keep the existing FastAPI surface, but route
 # core data operations through the reusable production SDK below.
@@ -1660,6 +1665,54 @@ async def get_fundamentals(symbol: str):
     return await legacy_get_fundamentals(symbol)
 
 # FINAL VERIFIED TRADE LOADER
+async def _direct_nepse_floorsheet(symbol: Optional[str] = None):
+    """Use the current nepsepy client directly for executed trades.
+
+    This is deliberately separate from the optional ``nepse`` production
+    adapter above: recent nepsepy releases expose floorsheets as
+    ``floorsheets(...)`` while older clients expose ``getFloorSheet(...)``.
+    The previous implementation only tried a non-standard ``trades`` method,
+    which can silently leave Floorsheet/Broker Analysis empty even though the
+    NEPSE session is working.
+    """
+    wanted = symbol.upper().strip() if symbol else None
+    attempts = []
+
+    company_id = None
+    if wanted:
+        try:
+            company = await resolve_company(wanted)
+            company_id = pick(company, ["id", "securityId", "security_id", "stockId"])
+        except Exception:
+            company_id = None
+
+        if company_id is not None:
+            attempts.extend([
+                (["floorsheets"], (), {"stock_id": int(company_id), "max_pages": 1000, "size": 500}),
+                (["floorsheets"], (), {"stock_id": int(company_id), "page": 1, "size": 500}),
+                (["getFloorSheetOf"], (wanted,), {}),
+            ])
+
+    # Full current-session feed.  This is also the required fallback because
+    # NEPSE has blocked some symbol-specific floorsheet routes.
+    attempts.extend([
+        (["floorsheets"], (), {"max_pages": 1000, "size": 500}),
+        (["floorsheets"], (), {"page": 1, "size": 500}),
+        (["getFloorSheet"], (), {}),
+    ])
+
+    for methods, args, kwargs in attempts:
+        try:
+            raw = await nepse_call(methods, *args, **kwargs)
+            rows = floor_rows(raw)
+            if wanted:
+                rows = [r for r in rows if str(r.get("symbol") or "").upper().strip() == wanted]
+            if rows:
+                return rows
+        except Exception:
+            continue
+    return []
+
 async def _recent_archive_floorsheet(symbol: Optional[str] = None, lookback_days: int = 7):
     """Return the newest real archived floorsheet when the live endpoint is empty.
 
@@ -1694,7 +1747,17 @@ async def get_floorsheet(symbol: Optional[str] = None):
             rows = [r for r in rows if str(r.get("symbol") or "").upper().strip() == wanted]
         return rows
 
-    # 1) Original NEPSE paginated loader. It understands the current
+    # 1) Direct nepsepy floorsheet methods. These are the canonical live
+    # methods in the current public client and are tried before the older
+    # compatibility/production adapters.
+    try:
+        rows = only_symbol(await _direct_nepse_floorsheet(wanted))
+        if rows:
+            return rows
+    except Exception:
+        pass
+
+    # 2) Original NEPSE paginated loader. It understands the current
     # {floorsheets:{content:[...]}} response and compatibility endpoints.
     try:
         rows = only_symbol(await legacy_get_floorsheet(wanted))
@@ -1703,7 +1766,7 @@ async def get_floorsheet(symbol: Optional[str] = None):
     except Exception:
         pass
 
-    # 2) Production trades adapter. Try company-specific forms, but NEVER
+    # 3) Production trades adapter. Try company-specific forms, but NEVER
     # stop just because a valid call returned an empty wrapper. If it is empty,
     # request the full live trades feed and filter locally.
     attempts = []
@@ -1738,7 +1801,7 @@ async def get_floorsheet(symbol: Optional[str] = None):
         except Exception:
             continue
 
-    # 3) Explicit compatibility/public endpoint fallback.
+    # 4) Explicit compatibility/public endpoint fallback.
     for path, params in (
         ("/FloorsheetOf", {"symbol": wanted} if wanted else None),
         ("/Floorsheet", None),
@@ -1753,7 +1816,7 @@ async def get_floorsheet(symbol: Optional[str] = None):
         except Exception:
             continue
 
-    # 4) Latest real archived session. This is the important fallback when
+    # 5) Latest real archived session. This is the important fallback when
     # NEPSE's live broker/floorsheet endpoint is temporarily empty.
     rows = await _recent_archive_floorsheet(wanted)
     if rows:
@@ -1920,7 +1983,28 @@ def _normalize_depth_payload(raw: Any, symbol: str) -> dict:
 async def production_depth(symbol: str):
     symbol=symbol.upper().strip()
     errors=[]
-    # Primary: nepse.py production SDK.
+
+    # Primary live path: current nepsepy client. It resolves the security id
+    # internally and calls NEPSE's market-depth endpoint with the live session.
+    for method in ("getSymbolMarketDepth", "get_market_depth", "market_depth", "depth"):
+        try:
+            raw = await nepse_call([method], symbol)
+            normalized = _normalize_depth_payload(raw, symbol)
+            normalized["source"] = "NEPSE live market-depth feed"
+            normalized["rawAvailable"] = raw is not None
+            if normalized["ok"]:
+                # Frontend compatibility: expose NEPSE's original field names
+                # alongside our normalized buy/sell arrays.
+                normalized["buyMarketDepthList"] = normalized["buy"]
+                normalized["sellMarketDepthList"] = normalized["sell"]
+                normalized["totalBuyQty"] = normalized["totalBuyQuantity"]
+                normalized["totalSellQty"] = normalized["totalSellQuantity"]
+                return normalized
+            errors.append(f"nepsepy {method}: no usable levels")
+        except Exception as exc:
+            errors.append(f"nepsepy {method}: {exc}")
+
+    # Secondary: nepse.py production SDK.
     # Different NEPSE Python clients expose this same endpoint under different
     # method names. Try the known market-depth names before using the HTTP
     # compatibility endpoint. All of them return the exchange order book.
@@ -1931,6 +2015,10 @@ async def production_depth(symbol: str):
             normalized["source"]="NEPSE production market-depth feed"
             normalized["rawAvailable"]=raw is not None
             if normalized["ok"]:
+                normalized["buyMarketDepthList"] = normalized["buy"]
+                normalized["sellMarketDepthList"] = normalized["sell"]
+                normalized["totalBuyQty"] = normalized["totalBuyQuantity"]
+                normalized["totalSellQty"] = normalized["totalSellQuantity"]
                 return normalized
             errors.append(f"production SDK {method}: no usable levels")
         except Exception as exc:
@@ -1945,12 +2033,21 @@ async def production_depth(symbol: str):
             normalized["source"]="NEPSE market-depth public feed"
             normalized["rawAvailable"]=raw is not None
             if normalized["ok"]:
+                normalized["buyMarketDepthList"] = normalized["buy"]
+                normalized["sellMarketDepthList"] = normalized["sell"]
+                normalized["totalBuyQty"] = normalized["totalBuyQuantity"]
+                normalized["totalSellQty"] = normalized["totalSellQuantity"]
                 return normalized
             errors.append(f"{path}: no usable levels")
         except Exception as exc:
             errors.append(f"{path}: {exc}")
 
-    return {"ok":False,"symbol":symbol,"buy":[],"sell":[],"totalBuyQuantity":None,"totalSellQuantity":None,"totalBuyOrders":None,"totalSellOrders":None,"updatedAt":now_iso(),"source":"NEPSE live market-depth feeds","error":"; ".join(errors[-4:])}
+    return {"ok":False,"symbol":symbol,"buy":[],"sell":[],"totalBuyQuantity":None,"totalSellQuantity":None,"totalBuyOrders":None,"totalSellOrders":None,"buyMarketDepthList":[],"sellMarketDepthList":[],"totalBuyQty":None,"totalSellQty":None,"updatedAt":now_iso(),"source":"NEPSE live market-depth feeds","error":"; ".join(errors[-6:])}
+
+# Compatibility route used by the existing company-detail frontend.
+@app.get("/MarketDepth")
+async def compat_market_depth(symbol: str):
+    return await production_depth(symbol)
 
 @app.get("/api/production/technical/{symbol}")
 async def production_technical(symbol: str):
