@@ -2019,50 +2019,79 @@ async def api_company_floorsheet(symbol: str, limit: int = Query(100000, ge=1, l
 
 @app.get("/api/floorsheet")
 async def api_floorsheet(symbol: Optional[str]=None, limit:int=Query(100000,ge=1,le=100000), page:int=Query(0,ge=0,le=2000), size:int=Query(500,ge=1,le=500)):
-    """Fast paged floorsheet endpoint.
+    """Return exactly one real NEPSE floorsheet page.
 
-    The browser gets the first page immediately and downloads the remaining
-    pages in the background.  The old endpoint waited for the entire session
-    before returning anything, which made the Trade Tape feel very slow.
+    This endpoint is deliberately page-only. It never falls back to an
+    unpaged request, because doing that can return the same first page for
+    every browser request and make the Trade Tape stop growing.
     """
     global _LAST_VALID_FLOORSHEET, _LAST_VALID_FLOORSHEET_AT
     wanted = symbol.upper().strip() if symbol else None
 
-    async def fetch_page(pg:int):
-        # IMPORTANT: never fall back to an unpaged floorsheet call here.
-        # Some nepsepy versions accept page/size, while others use page_size;
-        # an unpaged fallback silently returns the same default page and makes
-        # the browser appear to stop growing.
-        client = await get_nepse_client()
-        for kwargs in ({"page":pg,"size":size},{"page":pg,"limit":size},{"page":pg,"page_size":size}):
+    def unpack(raw):
+        rows = floor_rows(raw)
+        if wanted:
+            rows = [r for r in rows if str(r.get("symbol") or "").upper().strip() == wanted]
+        meta = raw.get("floorsheets") if isinstance(raw, dict) else None
+        if not isinstance(meta, dict):
+            meta = raw if isinstance(raw, dict) else {}
+        return rows[:limit], meta.get("totalPages") or meta.get("total_pages"), meta.get("totalElements") or meta.get("total_elements")
+
+    async def call_paged(pg):
+        # Current nepse.py / nepseman style.
+        for method, kwargs in (
+            ("floor_sheet", {"page": pg, "size": size}),
+            ("floor_sheet", {"page": pg, "limit": size}),
+            ("getFloorSheet", {"page": pg}),
+            ("getFloorSheet", {"page": pg, "size": size}),
+            ("floorsheets", {"page": pg, "size": size}),
+            ("floorsheets", {"page": pg, "limit": size}),
+        ):
             try:
-                fn=getattr(client,"floorsheets",None)
-                if fn is None: break
-                raw=await fn(**kwargs)
-                rows=floor_rows(raw)
-                if wanted:
-                    rows=[r for r in rows if str(r.get("symbol") or "").upper().strip()==wanted]
-                meta=raw.get("floorsheets") if isinstance(raw,dict) else None
-                if isinstance(meta,dict):
-                    total_pages=meta.get("totalPages") or meta.get("total_pages")
-                    total_elements=meta.get("totalElements") or meta.get("total_elements")
-                else:
-                    total_pages=raw.get("totalPages") if isinstance(raw,dict) else None
-                    total_elements=raw.get("totalElements") if isinstance(raw,dict) else None
-                return rows,total_pages,total_elements
+                raw = await production_call(method, **kwargs)
+                rows, tp, te = unpack(raw)
+                if rows:
+                    return rows, tp, te
             except Exception:
                 continue
-        return [],None,None
+        # Older async clients.
+        try:
+            client = await get_nepse_client()
+            for method, kwargs in (
+                ("floor_sheet", {"page": pg, "size": size}),
+                ("getFloorSheet", {"page": pg}),
+                ("floorsheets", {"page": pg, "size": size}),
+            ):
+                fn = getattr(client, method, None)
+                if fn is None:
+                    continue
+                try:
+                    raw = await fn(**kwargs)
+                    rows, tp, te = unpack(raw)
+                    if rows:
+                        return rows, tp, te
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        return [], None, None
 
-    rows,tp,te=await fetch_page(page)
-    if rows and not symbol and page==0:
-        _LAST_VALID_FLOORSHEET=list(rows)
-        _LAST_VALID_FLOORSHEET_AT=time.time()
+    rows, tp, te = await call_paged(page)
+    actual_page = page
+    # Some older wrappers are one-based. Only page 0 gets this compatibility probe.
+    if not rows and page == 0:
+        rows, tp, te = await call_paged(1)
+        actual_page = 1
+
+    if rows and not symbol and actual_page == 0:
+        _LAST_VALID_FLOORSHEET = list(rows)
+        _LAST_VALID_FLOORSHEET_AT = time.time()
+
     return {
-        "ok":bool(rows), "source":"NEPSE executed floorsheet / paged daily session",
-        "symbol":symbol, "data":rows[:limit], "floorsheet":rows[:limit],
-        "count":len(rows), "page":page, "pageSize":size,
-        "totalPages":tp, "totalElements":te, "updatedAt":now_iso()
+        "ok": bool(rows), "source": "NEPSE executed floorsheet / paged daily session",
+        "symbol": symbol, "data": rows, "floorsheet": rows,
+        "count": len(rows), "page": actual_page, "pageSize": size,
+        "totalPages": tp, "totalElements": te, "updatedAt": now_iso()
     }
 
 @app.get("/api/brokers")
