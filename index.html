@@ -3525,32 +3525,63 @@ function renderBulk(a){
 function render(){const a=filtered();setMetrics(a);renderTrades(a);renderBrokers(a);renderUnusual(a);renderBulk(a)}
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 async function loadDirect(){
- try{
-   const r=await fetch((window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'')+'/api/floorsheet?limit=100000&_fs='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});
-   if(!r.ok)throw new Error('Floorsheet HTTP '+r.status);
-   const d=await r.json();
-   // Accept all backend envelopes used by the floorsheet engine.
-   // Do not require the top-level payload to be an array.
-   let rows=[];
-   if(Array.isArray(d?.data)) rows=d.data;
-   else if(Array.isArray(d?.floorsheet)) rows=d.floorsheet;
-   else if(Array.isArray(d?.floorSheet)) rows=d.floorSheet;
-   else if(Array.isArray(d?.data?.content)) rows=d.data.content;
-   else if(Array.isArray(d?.data?.floorsheets)) rows=d.data.floorsheets;
-   else if(Array.isArray(d?.data?.floorsheets?.content)) rows=d.data.floorsheets.content;
-   else if(d?.data?.floorsheets?.content && Array.isArray(d.data.floorsheets.content)) rows=d.data.floorsheets.content;
-   if(rows.length){
-     all=rows.map(normalize).filter(x=>x.symbol||x.buyer||x.seller);
-     window.__PULSE_LAST_VALID_FLOORSHEET=all.slice();
-     $('fsStatus').textContent='LIVE • '+new Date().toLocaleTimeString();
-     $('fsDot').style.background='#20a464';
-     render();return true;
-   }
-   // Empty response is a transient feed failure; keep the last verified tape.
-   if(all.length){$('fsStatus').textContent='CACHED • waiting for next verified update';$('fsDot').style.background='#d29b19';render();return true;}
- }catch(e){console.warn('Direct floorsheet feed:',e)}
- return false;
+  const base=(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
+  const pageSize=500;
+  try{
+    // First paint: fetch only page 0 so the Trade Tape appears immediately.
+    const firstUrl=base+'/api/floorsheet?limit=500&page=0&size='+pageSize+'&_fs='+Date.now();
+    const r=await fetch(firstUrl,{cache:'no-store',headers:{Accept:'application/json'}});
+    if(!r.ok)throw new Error('Floorsheet HTTP '+r.status);
+    const d=await r.json();
+    let rows=Array.isArray(d?.data)?d.data:(Array.isArray(d?.floorsheet)?d.floorsheet:[]);
+    if(!rows.length){
+      // Compatibility with one-based upstream pagination.
+      const r1=await fetch(base+'/api/floorsheet?limit=500&page=1&size='+pageSize+'&_fs='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});
+      if(r1.ok){const d1=await r1.json();rows=Array.isArray(d1?.data)?d1.data:[];}
+    }
+    if(!rows.length)return false;
+
+    all=rows.map(normalize).filter(x=>x.symbol||x.buyer||x.seller);
+    window.__PULSE_LAST_VALID_FLOORSHEET=all.slice();
+    $('fsStatus').textContent='LIVE • '+all.length.toLocaleString()+' loaded • '+new Date().toLocaleTimeString();
+    $('fsDot').style.background='#20a464';
+    render();
+
+    // Background hydration: fetch remaining pages without blocking the UI.
+    let totalPages=Number(d?.totalPages)||null;
+    let totalElements=Number(d?.totalElements)||null;
+    if(totalPages&&totalPages>1){
+      const startPage=Number(d?.page??0)===0?1:2;
+      const pages=[];
+      for(let pg=startPage;pg<totalPages;pg++)pages.push(pg);
+      const batchSize=6;
+      for(let i=0;i<pages.length;i+=batchSize){
+        const batch=pages.slice(i,i+batchSize);
+        const results=await Promise.all(batch.map(async pg=>{
+          try{
+            const rr=await fetch(base+'/api/floorsheet?limit=500&page='+pg+'&size='+pageSize+'&_fs='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});
+            if(!rr.ok)return [];
+            const dd=await rr.json();
+            return Array.isArray(dd?.data)?dd.data:[];
+          }catch(e){return []}
+        }));
+        const incoming=results.flat().map(normalize).filter(x=>x.symbol||x.buyer||x.seller);
+        if(incoming.length){
+          const seen=new Set(all.map(x=>x.id||[x.symbol,x.time,x.qty,x.price,x.buyer,x.seller].join('|')));
+          for(const x of incoming){const k=x.id||[x.symbol,x.time,x.qty,x.price,x.buyer,x.seller].join('|');if(!seen.has(k)){seen.add(k);all.push(x);}}
+          window.__PULSE_LAST_VALID_FLOORSHEET=all.slice();
+          $('fsStatus').textContent='LIVE • '+all.length.toLocaleString()+(totalElements?' / '+totalElements.toLocaleString():'')+' trades';
+          render();
+        }
+        // Yield between batches so the phone remains responsive.
+        await new Promise(resolve=>setTimeout(resolve,20));
+      }
+      $('fsStatus').textContent='LIVE • '+all.length.toLocaleString()+' trades • complete';
+    }
+    return true;
+  }catch(e){console.warn('Direct floorsheet feed:',e);return false}
 }
+
 function sync(st){
  const incoming=extract(st||{});
  const status=String(st?.status||'OFFLINE').toUpperCase();

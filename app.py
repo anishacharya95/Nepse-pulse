@@ -2018,21 +2018,45 @@ async def api_company_floorsheet(symbol: str, limit: int = Query(100000, ge=1, l
     }
 
 @app.get("/api/floorsheet")
-async def api_floorsheet(symbol: Optional[str]=None, limit:int=Query(100000,ge=1,le=100000)):
+async def api_floorsheet(symbol: Optional[str]=None, limit:int=Query(100000,ge=1,le=100000), page:int=Query(0,ge=0,le=2000), size:int=Query(500,ge=1,le=500)):
+    """Fast paged floorsheet endpoint.
+
+    The browser gets the first page immediately and downloads the remaining
+    pages in the background.  The old endpoint waited for the entire session
+    before returning anything, which made the Trade Tape feel very slow.
+    """
     global _LAST_VALID_FLOORSHEET, _LAST_VALID_FLOORSHEET_AT
-    try:
-        rows=await get_floorsheet(symbol)
-    except Exception:
-        rows=[]
-    cached=False
-    if rows and not symbol:
+    wanted = symbol.upper().strip() if symbol else None
+
+    async def fetch_page(pg:int):
+        for kwargs in ({"page":pg,"size":size},{"page":pg,"limit":size},{"page":pg,"page_size":size}):
+            try:
+                raw=await nepse_call(["floorsheets"], **kwargs)
+                rows=floor_rows(raw)
+                if wanted:
+                    rows=[r for r in rows if str(r.get("symbol") or "").upper().strip()==wanted]
+                meta=raw.get("floorsheets") if isinstance(raw,dict) else None
+                if isinstance(meta,dict):
+                    total_pages=meta.get("totalPages") or meta.get("total_pages")
+                    total_elements=meta.get("totalElements") or meta.get("total_elements")
+                else:
+                    total_pages=raw.get("totalPages") if isinstance(raw,dict) else None
+                    total_elements=raw.get("totalElements") if isinstance(raw,dict) else None
+                return rows,total_pages,total_elements
+            except Exception:
+                continue
+        return [],None,None
+
+    rows,tp,te=await fetch_page(page)
+    if rows and not symbol and page==0:
         _LAST_VALID_FLOORSHEET=list(rows)
         _LAST_VALID_FLOORSHEET_AT=time.time()
-    elif not rows and not symbol and _LAST_VALID_FLOORSHEET:
-        rows=list(_LAST_VALID_FLOORSHEET)
-        cached=True
-    rows=rows[:limit]
-    return {"ok":bool(rows),"source":"NEPSE executed floorsheet / complete daily session","symbol":symbol,"data":rows,"floorsheet":rows,"count":len(rows),"cached":cached,"updatedAt":now_iso()}
+    return {
+        "ok":bool(rows), "source":"NEPSE executed floorsheet / paged daily session",
+        "symbol":symbol, "data":rows[:limit], "floorsheet":rows[:limit],
+        "count":len(rows), "page":page, "pageSize":size,
+        "totalPages":tp, "totalElements":te, "updatedAt":now_iso()
+    }
 
 @app.get("/api/brokers")
 async def api_brokers():
