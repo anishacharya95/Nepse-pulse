@@ -1761,44 +1761,76 @@ async def _recent_archive_floorsheet(symbol: Optional[str] = None, lookback_days
 # One normalized path for company floorsheets.  Every source is treated as
 # untrusted wrapper data until floor_rows() has flattened it.
 async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: int = 500, max_pages: int = 200):
-    """Fetch the complete current-day floorsheet, not just the first page.
+    """Fetch the complete current-day floorsheet across every NEPSE page.
 
-    Some NEPSE clients honor max_pages, while others silently return only one
-    page.  This fallback explicitly walks pages so the app gets every executed
-    trade across every traded company for the session.
+    NEPSE floor-sheet pagination is commonly zero-based. Some clients expose
+    one-based pagination, so we probe page 0 first and then continue using the
+    server's reported totalPages/totalElements when available. A transient
+    empty page never discards rows already collected.
     """
     wanted = symbol.upper().strip() if symbol else None
     rows=[]
     seen=set()
-    for page in range(1, max_pages+1):
-        got=[]
-        for kwargs in (
-            {"page": page, "size": page_size},
-            {"page": page, "page_size": page_size},
-        ):
+
+    def unpack(raw):
+        rr=floor_rows(raw)
+        meta=raw if isinstance(raw,dict) else {}
+        nested=meta.get('floorsheets') if isinstance(meta,dict) else None
+        if isinstance(nested,dict): meta=nested
+        total_pages=meta.get('totalPages') or meta.get('total_pages')
+        total_elements=meta.get('totalElements') or meta.get('total_elements')
+        return rr, total_pages, total_elements
+
+    # First probe zero-based pagination, then one-based if the first probe is empty.
+    first_pages=[0,1]
+    first_ok=None
+    total_pages=None
+    total_elements=None
+    for page in first_pages:
+        for kwargs in ({'page':page,'size':page_size},{'page':page,'limit':page_size},{'page':page,'page_size':page_size}):
             try:
-                raw=await nepse_call(["floorsheets"], **kwargs)
-                got=floor_rows(raw)
+                raw=await nepse_call(['floorsheets'], **kwargs)
+                got,tp,te=unpack(raw)
                 if got:
+                    first_ok=page; total_pages=tp; total_elements=te
+                    for r in got:
+                        key=str(r.get('trade') or r.get('contractId') or '') or f"{r.get('symbol')}|{r.get('businessDate')}|{r.get('tradeTime')}|{r.get('quantity')}|{r.get('rate')}|{r.get('buyerBroker')}|{r.get('sellerBroker')}"
+                        if key not in seen: seen.add(key); rows.append(r)
+                    break
+            except Exception:
+                continue
+        if first_ok is not None: break
+
+    if first_ok is None:
+        return []
+
+    # Continue from the detected base. Do not stop merely because a page is
+    # shorter than 500: some providers cap/shape pages independently.
+    target = min(max_pages, int(total_pages)) if total_pages is not None else max_pages
+    for page in range(first_ok + 1, target + 1):
+        got=[]
+        tp=None
+        for kwargs in ({'page':page,'size':page_size},{'page':page,'limit':page_size},{'page':page,'page_size':page_size}):
+            try:
+                raw=await nepse_call(['floorsheets'], **kwargs)
+                got,tp,te=unpack(raw)
+                if got:
+                    if total_pages is None and tp is not None: target=min(max_pages,int(tp))
                     break
             except Exception:
                 continue
         if not got:
-            break
-        before=len(rows)
+            # One empty page is not enough to invalidate collected data, but
+            # repeated empty pages indicate the provider has ended pagination.
+            if page >= first_ok + 2:
+                break
+            continue
         for r in got:
-            key=str(r.get("trade") or r.get("contractId") or "")
-            if not key:
-                key=f"{r.get('symbol')}|{r.get('businessDate')}|{r.get('tradeTime')}|{r.get('quantity')}|{r.get('rate')}|{r.get('buyerBroker')}|{r.get('sellerBroker')}"
-            if key not in seen:
-                seen.add(key); rows.append(r)
-        if wanted:
-            # Keep walking pages because the requested symbol can occur later.
-            pass
-        if len(got) < page_size or len(rows)==before:
-            break
+            key=str(r.get('trade') or r.get('contractId') or '') or f"{r.get('symbol')}|{r.get('businessDate')}|{r.get('tradeTime')}|{r.get('quantity')}|{r.get('rate')}|{r.get('buyerBroker')}|{r.get('sellerBroker')}"
+            if key not in seen: seen.add(key); rows.append(r)
+
     if wanted:
-        rows=[r for r in rows if str(r.get("symbol") or "").upper().strip()==wanted]
+        rows=[r for r in rows if str(r.get('symbol') or '').upper().strip()==wanted]
     return rows
 
 async def get_floorsheet(symbol: Optional[str] = None):
