@@ -334,6 +334,7 @@ NPT = timezone(timedelta(hours=5, minutes=45))
 # Last-known-good caches for transient empty NEPSE responses. These prevent
 # Trade Tape/Broker/Depth panels from flashing blank during feed refreshes.
 _LAST_VALID_FLOORSHEET: list[dict] = []
+_LAST_VALID_FLOORSHEET_AT: float = 0.0
 _LAST_VALID_BROKERS: dict = {}
 _LAST_VALID_DEPTH: dict[str, dict] = {}
 
@@ -1759,6 +1760,47 @@ async def _recent_archive_floorsheet(symbol: Optional[str] = None, lookback_days
 
 # One normalized path for company floorsheets.  Every source is treated as
 # untrusted wrapper data until floor_rows() has flattened it.
+async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: int = 500, max_pages: int = 200):
+    """Fetch the complete current-day floorsheet, not just the first page.
+
+    Some NEPSE clients honor max_pages, while others silently return only one
+    page.  This fallback explicitly walks pages so the app gets every executed
+    trade across every traded company for the session.
+    """
+    wanted = symbol.upper().strip() if symbol else None
+    rows=[]
+    seen=set()
+    for page in range(1, max_pages+1):
+        got=[]
+        for kwargs in (
+            {"page": page, "size": page_size},
+            {"page": page, "page_size": page_size},
+        ):
+            try:
+                raw=await nepse_call(["floorsheets"], **kwargs)
+                got=floor_rows(raw)
+                if got:
+                    break
+            except Exception:
+                continue
+        if not got:
+            break
+        before=len(rows)
+        for r in got:
+            key=str(r.get("trade") or r.get("contractId") or "")
+            if not key:
+                key=f"{r.get('symbol')}|{r.get('businessDate')}|{r.get('tradeTime')}|{r.get('quantity')}|{r.get('rate')}|{r.get('buyerBroker')}|{r.get('sellerBroker')}"
+            if key not in seen:
+                seen.add(key); rows.append(r)
+        if wanted:
+            # Keep walking pages because the requested symbol can occur later.
+            pass
+        if len(got) < page_size or len(rows)==before:
+            break
+    if wanted:
+        rows=[r for r in rows if str(r.get("symbol") or "").upper().strip()==wanted]
+    return rows
+
 async def get_floorsheet(symbol: Optional[str] = None):
     wanted = symbol.upper().strip() if symbol else None
 
@@ -1837,7 +1879,16 @@ async def get_floorsheet(symbol: Optional[str] = None):
         except Exception:
             continue
 
-    # 5) Latest real archived session. This is the important fallback when
+    # 5) Explicitly walk the live floorsheet pages.  This catches clients that
+    # ignore max_pages and otherwise return only the first 500 transactions.
+    try:
+        rows = await _complete_daily_floorsheet(wanted)
+        if rows:
+            return rows
+    except Exception:
+        pass
+
+    # 6) Latest real archived session. This is the important fallback when
     # NEPSE's live broker/floorsheet endpoint is temporarily empty.
     rows = await _recent_archive_floorsheet(wanted, lookback_days=10)
     if rows:
@@ -1862,18 +1913,17 @@ async def api_company_floorsheet(symbol: str, limit: int = Query(100000, ge=1, l
 
 @app.get("/api/floorsheet")
 async def api_floorsheet(symbol: Optional[str]=None, limit:int=Query(100000,ge=1,le=100000)):
-    global _LAST_VALID_FLOORSHEET
+    global _LAST_VALID_FLOORSHEET, _LAST_VALID_FLOORSHEET_AT
     rows=await get_floorsheet(symbol)
-    if rows:
-        if symbol:
-            # Keep the full cache only when an all-symbol request is received.
-            pass
-        else:
-            _LAST_VALID_FLOORSHEET=list(rows)
-    elif not symbol and _LAST_VALID_FLOORSHEET:
+    cached=False
+    if rows and not symbol:
+        _LAST_VALID_FLOORSHEET=list(rows)
+        _LAST_VALID_FLOORSHEET_AT=time.time()
+    elif not rows and not symbol and _LAST_VALID_FLOORSHEET:
         rows=list(_LAST_VALID_FLOORSHEET)
+        cached=True
     rows=rows[:limit]
-    return {"ok":bool(rows),"source":"NEPSE executed floorsheet / latest verified session","symbol":symbol,"data":rows,"count":len(rows),"cached":not bool(await get_floorsheet(symbol)) if False else False,"updatedAt":now_iso()}
+    return {"ok":bool(rows),"source":"NEPSE executed floorsheet / complete daily session","symbol":symbol,"data":rows,"count":len(rows),"cached":cached,"updatedAt":now_iso()}
 
 @app.get("/api/brokers")
 async def api_brokers():

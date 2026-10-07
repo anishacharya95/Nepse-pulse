@@ -3374,6 +3374,7 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
         <tbody id="fsTradeRows"><tr><td colspan="8" class="fs-empty">Connect the Central Feed to populate floorsheet data.</td></tr></tbody>
       </table>
     </div>
+    <div id="fsPager" class="fs-pager" aria-label="Floorsheet pages"></div>
   </div>
 
   <div id="fsBrokersView" class="fs-view" hidden>
@@ -3426,7 +3427,7 @@ body.np-search-busy>*:not(#npSearchLoadingLock){pointer-events:none!important}
 .pulse-fs-controls{display:grid;grid-template-columns:2fr 1fr 1fr 1fr .7fr auto auto;gap:9px;align-items:end;margin-bottom:14px}.pulse-fs-controls label{font-size:10px;opacity:.75}.pulse-fs-controls input,.pulse-fs-controls select{display:block;width:100%;box-sizing:border-box;margin-top:5px;padding:9px;border-radius:9px;border:1px solid rgba(127,127,127,.22);background:transparent;color:inherit}.pulse-fs-controls button{height:36px;border:1px solid rgba(127,127,127,.2);background:transparent;color:inherit;border-radius:9px;padding:0 11px;cursor:pointer}.pulse-fs-controls .fs-primary{font-weight:800}
 .pulse-fs-metrics{display:grid;grid-template-columns:repeat(5,1fr);gap:9px;margin-bottom:14px}.pulse-fs-metrics div{padding:12px;border-radius:13px;background:rgba(127,127,127,.07)}.pulse-fs-metrics b{display:block;font-size:18px}.pulse-fs-metrics span{font-size:10px;opacity:.6}
 .fs-table-wrap{overflow:auto}.fs-table{width:100%;border-collapse:collapse;min-width:760px;font-size:12px}.fs-table th,.fs-table td{text-align:left;padding:10px;border-bottom:1px solid rgba(127,127,127,.12);white-space:nowrap}.fs-table th{font-size:10px;opacity:.6}.fs-empty{padding:20px!important;text-align:center!important;opacity:.6}.fs-up{font-weight:800}.fs-down{font-weight:800}.fs-type{font-size:10px;padding:4px 7px;border-radius:99px;background:rgba(127,127,127,.1)}
-.fs-broker-grid{display:grid;grid-template-columns:2fr 1fr;gap:14px}.fs-card{border:1px solid rgba(127,127,127,.14);border-radius:16px;padding:14px;background:rgba(127,127,127,.035)}.fs-card-title{font-size:12px;font-weight:800;margin-bottom:10px}.fs-rank-list{display:flex;flex-direction:column;gap:8px}.fs-rank{display:flex;justify-content:space-between;gap:8px;padding:10px;border-radius:10px;background:rgba(127,127,127,.07);font-size:11px}.fs-hint{font-size:11px;opacity:.6;line-height:1.45}
+.fs-broker-grid{display:grid;grid-template-columns:2fr 1fr;gap:14px}.fs-card{border:1px solid rgba(127,127,127,.14);border-radius:16px;padding:14px;background:rgba(127,127,127,.035)}.fs-card-title{font-size:12px;font-weight:800;margin-bottom:10px}.fs-rank-list{display:flex;flex-direction:column;gap:8px}.fs-rank{display:flex;justify-content:space-between;gap:8px;padding:10px;border-radius:10px;background:rgba(127,127,127,.07);font-size:11px}.fs-hint{font-size:11px;opacity:.6;line-height:1.45}.fs-pager{display:flex;align-items:center;justify-content:center;gap:8px;padding:12px 0;flex-wrap:wrap}.fs-pager button{border:1px solid rgba(127,127,127,.25);background:rgba(127,127,127,.07);border-radius:8px;padding:7px 11px;font-size:11px;font-weight:700;cursor:pointer}.fs-pager button:disabled{opacity:.4;cursor:not-allowed}.fs-pager .fs-page-info{font-size:11px;opacity:.7;min-width:130px;text-align:center}
 @media(max-width:900px){.pulse-fs-controls{grid-template-columns:repeat(3,1fr)}.fs-broker-grid{grid-template-columns:1fr}}
 @media(max-width:600px){#floorsheet-broker-v4{padding:14px;border-radius:18px}.pulse-fs-head{display:block}.pulse-fs-status{display:inline-flex;margin-top:10px}.pulse-fs-controls{grid-template-columns:1fr 1fr}.pulse-fs-controls label:first-child{grid-column:1/-1}.pulse-fs-metrics{grid-template-columns:repeat(2,1fr)}}
 </style>
@@ -3438,6 +3439,7 @@ const $=id=>document.getElementById(id);
 const num=v=>{const x=Number(String(v??'').replace(/,/g,''));return Number.isFinite(x)?x:null};
 const str=v=>String(v??'').trim();
 let all=[];
+let fsPage=1;
 
 function pick(o,ks){for(const k of ks){if(o&&o[k]!==undefined&&o[k]!==null&&o[k]!=='')return o[k]}return null}
 function normalize(x){
@@ -3447,7 +3449,7 @@ function normalize(x){
   const price=num(pick(x,['price','Price','tradePrice','rate','Rate']));
   const qty=num(pick(x,['quantity','Quantity','tradeQuantity','qty','Qty']));
   const value=num(pick(x,['amount','Amount','value','Value','turnover','Turnover'])) ?? (price!==null&&qty!==null?price*qty:null);
-  const time=str(pick(x,['time','Time','tradeTime','TradeTime','timestamp','Timestamp','date','Date']));
+  const time=str(pick(x,['time','Time','tradeTime','TradeTime','timestamp','Timestamp','date','Date','businessDate']));
   const id=str(pick(x,['contractId','ContractId','tradeId','TradeId','id','Id']));
   const type=str(pick(x,['tradeType','TradeType','type','Type']));
   return {raw:x,buyer,seller,symbol,price,qty,value,time,id,type};
@@ -3482,7 +3484,17 @@ function setMetrics(a){
  const bs=new Set(a.flatMap(x=>[x.buyer,x.seller]).filter(Boolean)); $('fsBrokers').textContent=bs.size;
 }
 function renderTrades(a){
- $('fsTradeRows').innerHTML=a.length?a.slice(0,Number($('fsLimit').value)).map(x=>`<tr><td>${esc(x.time||'—')}</td><td><b>${esc(x.symbol||'—')}</b></td><td>${esc(x.buyer||'—')}</td><td>${esc(x.seller||'—')}</td><td>${fmt(x.price,2)}</td><td>${fmt(x.qty)}</td><td>${fmt(x.value)}</td><td><span class="fs-type">${esc(x.type||'Trade')}</span></td></tr>`).join(''):'<tr><td colspan="8" class="fs-empty">No trades match the current filters.</td></tr>';
+ const pageSize=Math.max(1,Number($('fsLimit').value)||50);
+ const pages=Math.max(1,Math.ceil(a.length/pageSize));
+ fsPage=Math.min(Math.max(1,fsPage),pages);
+ const start=(fsPage-1)*pageSize;
+ const visible=a.slice(start,start+pageSize);
+ $('fsTradeRows').innerHTML=visible.length?visible.map(x=>`<tr><td>${esc(x.time||'—')}</td><td><b>${esc(x.symbol||'—')}</b></td><td>${esc(x.buyer||'—')}</td><td>${esc(x.seller||'—')}</td><td>${fmt(x.price,2)}</td><td>${fmt(x.qty)}</td><td>${fmt(x.value)}</td><td><span class="fs-type">${esc(x.type||'Trade')}</span></td></tr>`).join(''):'<tr><td colspan="8" class="fs-empty">No trades match the current filters.</td></tr>';
+ const pager=$('fsPager');
+ if(!pager)return;
+ pager.innerHTML=`<button id="fsPrev" ${fsPage<=1?'disabled':''}>‹ Prev</button><span class="fs-page-info">Page ${fsPage} of ${pages} · ${a.length.toLocaleString()} trades</span><button id="fsNext" ${fsPage>=pages?'disabled':''}>Next ›</button>`;
+ $('fsPrev')?.addEventListener('click',()=>{if(fsPage>1){fsPage--;renderTrades(filtered())}});
+ $('fsNext')?.addEventListener('click',()=>{if(fsPage<pages){fsPage++;renderTrades(filtered())}});
 }
 function renderBrokers(a){
  const m={};let total=a.reduce((s,x)=>s+(x.value||0),0);
@@ -3553,9 +3565,9 @@ document.addEventListener('DOMContentLoaded',()=>{
    const target='fs'+b.dataset.fsTab[0].toUpperCase()+b.dataset.fsTab.slice(1)+'View';
    $(target).hidden=false;
  }));
- $('fsApply').addEventListener('click',render);
+ $('fsApply').addEventListener('click',()=>{fsPage=1;render()});
  $('fsRefresh').addEventListener('click',async()=>{await window.PULSE_FEED?.refresh?.();await loadDirect()});
- ['fsSearch','fsMinQty','fsMinValue','fsSide','fsLimit'].forEach(id=>$(id).addEventListener('change',render));
+ ['fsSearch','fsMinQty','fsMinValue','fsSide','fsLimit'].forEach(id=>$(id).addEventListener('change',()=>{fsPage=1;render()}));
  loadDirect();
  window.addEventListener('pulse-central-snapshot',e=>sync(e.detail));
  window.addEventListener('pulse-feed-update',()=>{const st=window.PULSE_FEED_ENGINE?.state?.();if(st)sync(st)});
