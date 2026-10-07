@@ -2,6 +2,7 @@ import asyncio
 import time
 import csv
 import io
+from html.parser import HTMLParser
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -1196,6 +1197,42 @@ def floor_rows(raw: Any) -> list[dict]:
     return out
 
 
+class _MeroLaganiFloorParser(HTMLParser):
+    def __init__(self):
+        super().__init__(); self.in_tr=False; self.in_cell=False; self.cells=[]; self.buf=[]; self.rows=[]
+    def handle_starttag(self, tag, attrs):
+        tag=tag.lower()
+        if tag == "tr": self.in_tr=True; self.cells=[]
+        elif self.in_tr and tag in ("td","th"): self.in_cell=True; self.buf=[]
+    def handle_data(self, data):
+        if self.in_cell: self.buf.append(data)
+    def handle_endtag(self, tag):
+        tag=tag.lower()
+        if self.in_tr and tag in ("td","th") and self.in_cell:
+            self.cells.append(" ".join("".join(self.buf).split())); self.in_cell=False; self.buf=[]
+        elif tag == "tr" and self.in_tr:
+            if self.cells: self.rows.append(self.cells)
+            self.in_tr=False
+
+async def _merolagani_floorsheet_fallback(symbol: Optional[str] = None):
+    """Last-resort real executed-trade feed for Trade Tape only."""
+    wanted=symbol.upper().strip() if symbol else None
+    for url in ("https://cdn.merolagani.com/Floorsheet.aspx","https://merolagani.com/Floorsheet.aspx"):
+        try:
+            async with httpx.AsyncClient(timeout=20, follow_redirects=True, headers={"User-Agent":"Mozilla/5.0"}) as c:
+                r=await c.get(url); r.raise_for_status()
+            parser=_MeroLaganiFloorParser(); parser.feed(r.text); out=[]
+            for cells in parser.rows:
+                if len(cells)<8 or cells[0].lower() in ("#","s.no","s.no."): continue
+                tx,sym,buy,sell,qty,rate,amount=cells[1:8]
+                if not tx.isdigit() or not sym: continue
+                if wanted and sym.upper().strip()!=wanted: continue
+                q=num(qty.replace(',','')); rt=num(rate.replace(',','')); amt=num(amount.replace(',',''))
+                out.append({"symbol":sym.upper().strip(),"buyerBroker":buy,"sellerBroker":sell,"buyerBrokerId":buy,"sellerBrokerId":sell,"quantity":q,"rate":rt,"amount":amt if amt is not None else (rt or 0)*(q or 0),"trade":tx,"businessDate":tx[:8],"tradeTime":"","securityName":"","raw":{}})
+            if out: return out
+        except Exception: continue
+    return []
+
 async def get_broker_analysis():
     async def load():
         raw = await get_floorsheet()
@@ -1926,7 +1963,14 @@ async def get_floorsheet(symbol: Optional[str] = None):
     if rows:
         return rows
 
-    # No verified trades: return empty rather than fabricated values.
+    # Final real-data fallback. Never fabricate trades.
+    try:
+        rows = await _merolagani_floorsheet_fallback(wanted)
+        if rows:
+            return rows
+    except Exception:
+        pass
+
     return []
 
 # Preserve original implementations as explicit fallbacks.
@@ -1955,7 +1999,7 @@ async def api_floorsheet(symbol: Optional[str]=None, limit:int=Query(100000,ge=1
         rows=list(_LAST_VALID_FLOORSHEET)
         cached=True
     rows=rows[:limit]
-    return {"ok":bool(rows),"source":"NEPSE executed floorsheet / complete daily session","symbol":symbol,"data":rows,"count":len(rows),"cached":cached,"updatedAt":now_iso()}
+    return {"ok":bool(rows),"source":"NEPSE executed floorsheet / complete daily session","symbol":symbol,"data":rows,"floorsheet":rows,"count":len(rows),"cached":cached,"updatedAt":now_iso()}
 
 @app.get("/api/brokers")
 async def api_brokers():

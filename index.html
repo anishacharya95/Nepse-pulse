@@ -3455,7 +3455,7 @@ function normalize(x){
   return {raw:x,buyer,seller,symbol,price,qty,value,time,id,type};
 }
 function extract(st){
-  const c=[st?.floorsheet,st?.data?.floorsheet,st?.data?.Floorsheet,st?.floorSheet,st?.data?.floorSheet];
+  const c=[st?.floorsheet,st?.data,st?.data?.floorsheet,st?.data?.Floorsheet,st?.floorSheet,st?.data?.floorSheet,st];
   let a=c.find(Array.isArray)||[];
   if(!a.length && st?.data && typeof st.data==='object'){
     const vals=Object.values(st.data).find(v=>Array.isArray(v)&&v.some(x=>x&&typeof x==='object'&&('buyerBroker' in x||'buyer' in x||'quantity' in x)));
