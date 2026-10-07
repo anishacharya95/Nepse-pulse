@@ -767,10 +767,7 @@ def normalize_index_history_rows(raw: Any, wanted_id: int = 58) -> list[dict]:
 
     dict_rows=[r for r in rows if isinstance(r,dict)]
     labelled=[r for r in dict_rows if any(pick(r,[k]) is not None for k in ["id","indexId","index","indexName","name"])]
-    # If the payload is labelled with index ids/names, require the requested
-    # series to match. This prevents a failed sector lookup from silently
-    # displaying the headline NEPSE index instead.
-    candidates=[r for r in labelled if matches(r)] if labelled else dict_rows
+    candidates=[r for r in labelled if matches(r)] if any(matches(r) for r in labelled) else dict_rows
     out=[]
     for r in candidates:
         date=pick(r,["date","businessDate","publishedDate","generatedTime","tradingDate","tradeDate","timestamp","time","datetime","dateTime"])
@@ -1260,9 +1257,6 @@ async def get_sectors():
             out.append({
                 "sector": name,
                 "name": name,
-                # Preserve the NEPSE sub-index id so Professional Charting can
-                # request the correct historical OHLC series without guessing.
-                "indexId": num(pick(x, ["id", "subIndexId", "sub_index_id", "indexId", "index_id", "exchangeIndexId"])),
                 "change": num(pick(x, ["pointChange", "difference", "change"])) or 0 if change is None else change,
                 "changePercent": change,
                 "indexValue": index_value,
@@ -1597,6 +1591,8 @@ async def get_broker_analysis():
         rows = await get_floorsheet(None)
         rows = floor_rows(rows)
         if not rows:
+            rows = await _recent_archive_floorsheet(None, 7)
+        if not rows:
             return {"ok": False, "updatedAt": now_iso(), "data": [],
                     "bySymbol": [], "sourceRows": 0,
                     "source": "NEPSE verified floorsheet",
@@ -1664,117 +1660,107 @@ async def get_fundamentals(symbol: str):
     return await legacy_get_fundamentals(symbol)
 
 # FINAL VERIFIED TRADE LOADER
-# One normalized path for company floorsheets. Every source is treated as
+async def _recent_archive_floorsheet(symbol: Optional[str] = None, lookback_days: int = 7):
+    """Return the newest real archived floorsheet when the live endpoint is empty.
+
+    This is intentionally a fallback only. It never invents trades and it keeps
+    Floorsheet/Broker Analysis useful outside the short live-publish window.
+    """
+    wanted = symbol.upper().strip() if symbol else None
+    today = datetime.now(NPT).date()
+    for offset in range(0, lookback_days + 1):
+        day = today - timedelta(days=offset)
+        try:
+            raw = await static_get(f"/floor_sheet/daily/{day.isoformat()}.json")
+            rows = floor_rows(raw)
+            if wanted:
+                rows = [r for r in rows if str(r.get("symbol") or "").upper().strip() == wanted]
+            if rows:
+                for r in rows:
+                    r["businessDate"] = r.get("businessDate") or day.isoformat()
+                return rows
+        except Exception:
+            continue
+    return []
+
+# One normalized path for company floorsheets.  Every source is treated as
 # untrusted wrapper data until floor_rows() has flattened it.
 async def get_floorsheet(symbol: Optional[str] = None):
     wanted = symbol.upper().strip() if symbol else None
-    today = datetime.now(NPT).date()
-    cache_key = f"floorsheet:{today.isoformat()}:{wanted or 'all'}"
 
     def only_symbol(rows):
         rows = floor_rows(rows)
         if wanted:
             rows = [r for r in rows if str(r.get("symbol") or "").upper().strip() == wanted]
-        # This endpoint is for the current trading day. If the upstream payload
-        # contains dates, never let an older session leak into today's feed.
-        dated = []
-        for r in rows:
-            rd = _row_date(r)
-            if rd:
-                dated.append((r, rd))
-        if dated:
-            rows = [r for r, rd in dated if rd == today.isoformat()]
         return rows
 
-    async def load():
-        # 1) Original NEPSE paginated loader. It understands the current
-        # {floorsheets:{content:[...]}} response and compatibility endpoints.
+    # 1) Original NEPSE paginated loader. It understands the current
+    # {floorsheets:{content:[...]}} response and compatibility endpoints.
+    try:
+        rows = only_symbol(await legacy_get_floorsheet(wanted))
+        if rows:
+            return rows
+    except Exception:
+        pass
+
+    # 2) Production trades adapter. Try company-specific forms, but NEVER
+    # stop just because a valid call returned an empty wrapper. If it is empty,
+    # request the full live trades feed and filter locally.
+    attempts = []
+    if wanted:
         try:
-            rows = only_symbol(await legacy_get_floorsheet(wanted))
-            if rows:
-                return rows
+            company = await resolve_company(wanted)
+            cid = pick(company, ["id", "securityId", "security_id", "stockId"])
+            if cid is not None:
+                attempts.extend([
+                    ("trades", {"stock_id": int(cid), "max_pages": 1000, "size": 500}),
+                    ("trades", {"stockId": int(cid), "max_pages": 1000, "size": 500}),
+                ])
         except Exception:
             pass
-
-        # 2) Production trades adapter. Try company-specific forms, but NEVER
-        # stop just because a valid call returned an empty wrapper. If it is empty,
-        # request the full live trades feed and filter locally.
-        attempts = []
-        if wanted:
-            try:
-                company = await resolve_company(wanted)
-                cid = pick(company, ["id", "securityId", "security_id", "stockId"])
-                if cid is not None:
-                    attempts.extend([
-                        ("trades", {"stock_id": int(cid), "max_pages": 1000, "size": 500}),
-                        ("trades", {"stockId": int(cid), "max_pages": 1000, "size": 500}),
-                    ])
-            except Exception:
-                pass
-            attempts.extend([
-                ("trades", {"symbol": wanted, "max_pages": 1000, "size": 500}),
-                ("trades", {"symbol": wanted, "page": 1, "size": 500}),
-            ])
         attempts.extend([
-            ("trades", {"max_pages": 1000, "size": 500}),
-            ("trades", {"page": 1, "size": 500}),
+            ("trades", {"symbol": wanted, "max_pages": 1000, "size": 500}),
+            ("trades", {"symbol": wanted, "page": 1, "size": 500}),
         ])
+    attempts.extend([
+        ("trades", {"max_pages": 1000, "size": 500}),
+        ("trades", {"page": 1, "size": 500}),
+    ])
 
-        for method, kwargs in attempts:
-            try:
-                raw = await production_call(method, **kwargs)
-                rows = only_symbol(raw)
-                if rows:
-                    return rows
-            except TypeError:
-                continue
-            except Exception:
-                continue
-
-        # 3) Explicit compatibility/public endpoint fallback.
-        for path, params in (
-            ("/FloorsheetOf", {"symbol": wanted} if wanted else None),
-            ("/Floorsheet", None),
-        ):
-            if not wanted and path == "/FloorsheetOf":
-                continue
-            try:
-                raw = await public_get(path, params)
-                rows = only_symbol(raw)
-                if rows:
-                    return rows
-            except Exception:
-                continue
-
-        # 4) YONEPSE publishes a complete post-close daily floor-sheet snapshot.
-        # Use today's NPT date only; never silently substitute yesterday's data.
+    for method, kwargs in attempts:
         try:
-            raw = await static_get(f"/floor_sheet/daily/{today.isoformat()}.json")
+            raw = await production_call(method, **kwargs)
+            rows = only_symbol(raw)
+            if rows:
+                return rows
+        except TypeError:
+            continue
+        except Exception:
+            continue
+
+    # 3) Explicit compatibility/public endpoint fallback.
+    for path, params in (
+        ("/FloorsheetOf", {"symbol": wanted} if wanted else None),
+        ("/Floorsheet", None),
+    ):
+        if not wanted and path == "/FloorsheetOf":
+            continue
+        try:
+            raw = await public_get(path, params)
             rows = only_symbol(raw)
             if rows:
                 return rows
         except Exception:
-            pass
+            continue
 
-        # No verified trades: return empty rather than fabricated values.
-        return []
-
-    # Cache only verified non-empty floorsheet data.  A transient upstream
-    # failure must never be cached as "no data", otherwise the frontend can
-    # keep showing an empty floorsheet even after NEPSE becomes available.
-    hit = cache_get(cache_key)
-    if isinstance(hit, list) and hit:
-        return hit
-    lock = LOCKS.setdefault(cache_key, asyncio.Lock())
-    async with lock:
-        hit = cache_get(cache_key)
-        if isinstance(hit, list) and hit:
-            return hit
-        rows = await load()
-        if rows:
-            cache_set(cache_key, rows)
+    # 4) Latest real archived session. This is the important fallback when
+    # NEPSE's live broker/floorsheet endpoint is temporarily empty.
+    rows = await _recent_archive_floorsheet(wanted)
+    if rows:
         return rows
 
+    # No verified trades: return empty rather than fabricated values.
+    return []
 
 # Preserve original implementations as explicit fallbacks.
 @app.get("/api/company-floorsheet/{symbol}")
@@ -1794,7 +1780,7 @@ async def api_company_floorsheet(symbol: str, limit: int = Query(100000, ge=1, l
 async def api_floorsheet(symbol: Optional[str]=None, limit:int=Query(100000,ge=1,le=100000)):
     rows=await get_floorsheet(symbol)
     rows=rows[:limit]
-    return {"ok":bool(rows),"source":"NEPSE floorsheet","symbol":symbol,"data":rows,"count":len(rows),"updatedAt":now_iso()}
+    return {"ok":bool(rows),"source":"NEPSE executed floorsheet / latest verified session","symbol":symbol,"data":rows,"count":len(rows),"updatedAt":now_iso()}
 
 @app.get("/api/brokers")
 async def api_brokers():
@@ -1864,8 +1850,8 @@ def _depth_rows(value: Any) -> list[dict]:
         elif side in ("s","ask","sell","sellorder","sellorders","supply"):
             side="sell"
         price=num(pick(v,["price","orderPrice","orderBookOrderPrice","order_book_order_price","rate","buyPrice","sellPrice","bidPrice","askPrice"]))
-        qty=num(pick(v,["quantity","qty","orderQuantity","tradedQuantity","totalQuantity","buyQuantity","sellQuantity","bidQuantity","askQuantity"]))
-        orders=num(pick(v,["orders","orderCount","order_count","noOfOrders","numberOfOrders","buyOrders","sellOrders","bidOrders","askOrders"]))
+        qty=num(pick(v,["quantity","qty","orderQuantity","orderBookOrderQuantity","order_book_order_quantity","tradedQuantity","totalQuantity","buyQuantity","sellQuantity","bidQuantity","askQuantity"]))
+        orders=num(pick(v,["orders","orderCount","order_count","orderBookOrderCount","order_book_order_count","noOfOrders","numberOfOrders","buyOrders","sellOrders","bidOrders","askOrders"]))
         if price is not None and (qty is not None or orders is not None):
             out.append({"side":side,"price":price,"quantity":qty or 0,"orders":orders or 0})
         for k,vv in v.items():
@@ -1915,10 +1901,10 @@ def _normalize_depth_payload(raw: Any, symbol: str) -> dict:
     sells=sorted([r for r in rows if r["side"]=="sell"], key=lambda r:r["price"])[:5]
     # Prefer exchange/feed totals when supplied. Falling back to the visible
     # top-5 sum is mathematically derived from real rows, never fabricated.
-    buy_qty=_first_nested_number(raw,["totalBuyQuantity","total_buy_quantity","totalBuyQty","totalBuyQty","buyQuantityTotal"])
-    sell_qty=_first_nested_number(raw,["totalSellQuantity","total_sell_quantity","totalSellQty","totalSellQty","sellQuantityTotal"])
-    buy_orders=_first_nested_number(raw,["totalBuyOrders","total_buy_orders","buyOrdersTotal"])
-    sell_orders=_first_nested_number(raw,["totalSellOrders","total_sell_orders","sellOrdersTotal"])
+    buy_qty=_first_nested_number(raw,["totalBuyQuantity","total_buy_quantity","totalBuyQty","buyQuantityTotal","totalBuyOrderQuantity"])
+    sell_qty=_first_nested_number(raw,["totalSellQuantity","total_sell_quantity","totalSellQty","sellQuantityTotal","totalSellOrderQuantity"])
+    buy_orders=_first_nested_number(raw,["totalBuyOrders","total_buy_orders","buyOrdersTotal","totalBuyOrderCount"])
+    sell_orders=_first_nested_number(raw,["totalSellOrders","total_sell_orders","sellOrdersTotal","totalSellOrderCount"])
     return {
         "ok": bool(buys or sells),
         "symbol": symbol.upper(),
