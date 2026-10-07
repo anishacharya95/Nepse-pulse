@@ -3557,7 +3557,7 @@ async function loadDirect(){
     const firstPage=Number(d?.page??0);
     let nextPage=firstPage===0?1:2;
     const maxProbePages=200;
-    const batchSize=6;
+    const batchSize=3;
     let emptyBatches=0;
     let duplicateOnlyBatches=0;
     let loadedPages=0;
@@ -3567,11 +3567,17 @@ async function loadDirect(){
       nextPage+=batch.length;
       const results=await Promise.all(batch.map(async pg=>{
         try{
-          const rr=await fetch(base+'/api/floorsheet?limit=500&page='+pg+'&size='+pageSize+'&_fs='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});
-          if(!rr.ok)return [];
-          const dd=await rr.json();
-          return Array.isArray(dd?.data)?dd.data:[];
-        }catch(e){return []}
+          for(let attempt=0;attempt<4;attempt++){
+            try{
+              const rr=await fetch(base+'/api/floorsheet?limit=500&page='+pg+'&size='+pageSize+'&_fs='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});
+              if(!rr.ok){await new Promise(r=>setTimeout(r,250*(attempt+1)));continue}
+              const dd=await rr.json();
+              const data=Array.isArray(dd?.data)?dd.data:[];
+              if(data.length)return data;
+              await new Promise(r=>setTimeout(r,200*(attempt+1)));
+            }catch(e){await new Promise(r=>setTimeout(r,300*(attempt+1)))}
+          }
+          return []
       }));
       let batchRows=0,added=0;
       const seen=new Set(all.map(x=>x.id||[x.symbol,x.time,x.qty,x.price,x.buyer,x.seller].join('|')));
@@ -3591,7 +3597,7 @@ async function loadDirect(){
       }
       // One empty batch can be a transient upstream miss. Stop only after two
       // consecutive empty batches, or repeated pages containing no new rows.
-      if(emptyBatches>=2 || duplicateOnlyBatches>=3)break;
+      if(emptyBatches>=4)break;
       await new Promise(resolve=>setTimeout(resolve,20));
     }
     $('fsStatus').textContent='LIVE • '+all.length.toLocaleString()+' trades • '+(nextPage>=maxProbePages?'probe limit reached':'complete');

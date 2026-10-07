@@ -2029,9 +2029,16 @@ async def api_floorsheet(symbol: Optional[str]=None, limit:int=Query(100000,ge=1
     wanted = symbol.upper().strip() if symbol else None
 
     async def fetch_page(pg:int):
+        # IMPORTANT: never fall back to an unpaged floorsheet call here.
+        # Some nepsepy versions accept page/size, while others use page_size;
+        # an unpaged fallback silently returns the same default page and makes
+        # the browser appear to stop growing.
+        client = await get_nepse_client()
         for kwargs in ({"page":pg,"size":size},{"page":pg,"limit":size},{"page":pg,"page_size":size}):
             try:
-                raw=await nepse_call(["floorsheets"], **kwargs)
+                fn=getattr(client,"floorsheets",None)
+                if fn is None: break
+                raw=await fn(**kwargs)
                 rows=floor_rows(raw)
                 if wanted:
                     rows=[r for r in rows if str(r.get("symbol") or "").upper().strip()==wanted]
