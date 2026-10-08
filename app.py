@@ -112,6 +112,11 @@ async def _floor_collector_loop():
     while not FLOOR_COLLECTOR_STOP.is_set():
         try:
             today = datetime.now(NPT).date().isoformat()
+            FLOOR_DIAG["progress"] = "starting"
+            FLOOR_DIAG["lastAttemptAt"] = now_iso()
+            FLOOR_DIAG["currentPage"] = 0
+            FLOOR_DIAG["targetPages"] = 0
+            FLOOR_DIAG["targetRows"] = None
             rows = []
             last_error = None
             # A temporary empty response is common while the NEPSE session is
@@ -139,12 +144,14 @@ async def _floor_collector_loop():
                 FLOOR_DIAG["lastStoreCount"] = stored
                 FLOOR_DIAG["lastStoreSkipped"] = max(0, len(rows)-stored)
                 FLOOR_DIAG["lastCollectorError"] = None
+                FLOOR_DIAG["progress"] = "stored"
                 FLOOR_DIAG["lastSampleDate"] = sample_date
                 FLOOR_DIAG["displayDate"] = sample_date
                 FLOOR_DIAG["usingPreviousDay"] = sample_date != today
                 # Rebuild broker rollups for the actual date returned by NEPSE.
                 _rebuild_broker_rollups(sample_date)
             elif last_error:
+                FLOOR_DIAG["progress"] = "error"
                 # Keep the previously cached/displayed trading day intact.
                 FLOOR_DIAG["lastCollectorError"] = last_error
         except Exception as exc:
@@ -422,7 +429,7 @@ NPT = timezone(timedelta(hours=5, minutes=45))
 FLOOR_CACHE_DB = Path(os.getenv("FLOOR_CACHE_DB", "nepse_pulse_floorsheet.sqlite3"))
 FLOOR_COLLECTOR_TASK = None
 FLOOR_COLLECTOR_STOP = asyncio.Event()
-FLOOR_DIAG = {"lastFetchCount": 0, "lastFetchedPages": 0, "lastStoreCount": 0, "lastStoreSkipped": 0, "lastCollectorError": None, "lastSampleDate": None, "displayDate": None, "usingPreviousDay": False}
+FLOOR_DIAG = {"lastFetchCount": 0, "lastFetchedPages": 0, "lastStoreCount": 0, "lastStoreSkipped": 0, "lastCollectorError": None, "lastSampleDate": None, "displayDate": None, "usingPreviousDay": False, "currentPage": 0, "targetPages": 0, "targetRows": None, "progress": "idle", "lastAttemptAt": None}
 
 def _floor_db_init():
     FLOOR_CACHE_DB.parent.mkdir(parents=True, exist_ok=True)
@@ -2014,6 +2021,9 @@ async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: in
     while page <= max_pages:
         got = []
         tp = te = None
+        FLOOR_DIAG["currentPage"] = page
+        FLOOR_DIAG["progress"] = f"fetching page {page}"
+        FLOOR_DIAG["lastAttemptAt"] = now_iso()
         # Upstream empties are transient. Retry the SAME page, but keep the
         # retry budget short enough that a broken page cannot hang Render.
         for attempt in range(6):
@@ -2038,6 +2048,11 @@ async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: in
         if te is not None:
             try: target_rows = int(te)
             except Exception: pass
+
+        FLOOR_DIAG["targetPages"] = target_pages
+        FLOOR_DIAG["targetRows"] = target_rows
+        FLOOR_DIAG["lastFetchCount"] = len(rows)
+        FLOOR_DIAG["lastFetchedPages"] = max(0, page - 1)
 
         if not got:
             # If metadata says more pages exist, make one bounded second pass
@@ -2077,12 +2092,19 @@ async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: in
             raise RuntimeError(f"floorsheets page {page} repeated previous data")
 
         page += 1
+        FLOOR_DIAG["lastFetchCount"] = len(rows)
+        FLOOR_DIAG["lastFetchedPages"] = page - 1
+        FLOOR_DIAG["progress"] = f"fetched {page - 1}/{target_pages} pages ({len(rows)} rows)"
         # Once we've reached the known target, require one additional page
         # probe only when the collected count is still below totalElements.
         if page > target_pages and (target_rows is None or len(rows) >= target_rows):
             break
         await asyncio.sleep(0.25)
 
+    FLOOR_DIAG["progress"] = "complete"
+    FLOOR_DIAG["currentPage"] = page - 1
+    FLOOR_DIAG["lastFetchCount"] = len(rows)
+    FLOOR_DIAG["lastFetchedPages"] = max(0, page - 1)
     if target_rows is not None and len(rows) < target_rows:
         raise RuntimeError(f"incomplete floorsheet: got {len(rows)} of {target_rows}")
     if wanted:
