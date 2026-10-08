@@ -2,6 +2,10 @@ import asyncio
 import time
 import csv
 import io
+import json
+import os
+import sqlite3
+from pathlib import Path
 from html.parser import HTMLParser
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -103,6 +107,23 @@ NEPSE_CLIENT_INIT_LOCK = asyncio.Lock()
 NEPSE_CALL_LOCK = asyncio.Lock()
 
 
+async def _floor_collector_loop():
+    while not FLOOR_COLLECTOR_STOP.is_set():
+        try:
+            day=datetime.now(NPT).date().isoformat()
+            rows=await _complete_daily_floorsheet(None,page_size=500,max_pages=200)
+            if rows:
+                _store_floorsheet_rows(rows); _rebuild_broker_rollups(day)
+        except Exception: pass
+        try: await asyncio.wait_for(FLOOR_COLLECTOR_STOP.wait(),timeout=20)
+        except asyncio.TimeoutError: pass
+
+@app.on_event("startup")
+async def start_floor_collector():
+    global FLOOR_COLLECTOR_TASK
+    FLOOR_COLLECTOR_STOP.clear()
+    if FLOOR_COLLECTOR_TASK is None or FLOOR_COLLECTOR_TASK.done(): FLOOR_COLLECTOR_TASK=asyncio.create_task(_floor_collector_loop())
+
 async def get_nepse_client() -> AsyncNepseClient:
     global NEPSE_CLIENT
     if AsyncNepseClient is None:
@@ -113,6 +134,15 @@ async def get_nepse_client() -> AsyncNepseClient:
                 NEPSE_CLIENT = AsyncNepseClient()
     return NEPSE_CLIENT
 
+
+@app.on_event("shutdown")
+async def stop_floor_collector():
+    global FLOOR_COLLECTOR_TASK
+    FLOOR_COLLECTOR_STOP.set()
+    if FLOOR_COLLECTOR_TASK is not None:
+        try: await asyncio.wait_for(FLOOR_COLLECTOR_TASK,timeout=3)
+        except Exception: FLOOR_COLLECTOR_TASK.cancel()
+        FLOOR_COLLECTOR_TASK=None
 
 @app.on_event("shutdown")
 async def close_nepse_client():
@@ -332,6 +362,102 @@ async def nepse_call(methods: list[str], *args, **kwargs):
 
 
 NPT = timezone(timedelta(hours=5, minutes=45))
+
+# Fast local floorsheet store: collect once, index once, serve many times.
+FLOOR_CACHE_DB = Path(os.getenv("FLOOR_CACHE_DB", "nepse_pulse_floorsheet.sqlite3"))
+FLOOR_COLLECTOR_TASK = None
+FLOOR_COLLECTOR_STOP = asyncio.Event()
+
+def _floor_db_init():
+    FLOOR_CACHE_DB.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(FLOOR_CACHE_DB) as db:
+        db.execute("PRAGMA journal_mode=WAL")
+        db.execute("""CREATE TABLE IF NOT EXISTS floorsheet_raw (
+            trade_key TEXT PRIMARY KEY, business_date TEXT, symbol TEXT,
+            buyer_broker TEXT, seller_broker TEXT, quantity REAL, rate REAL,
+            amount REAL, trade_time TEXT, payload TEXT NOT NULL
+        )""")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_floor_date ON floorsheet_raw(business_date)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_floor_symbol_date ON floorsheet_raw(symbol,business_date)")
+        db.execute("""CREATE TABLE IF NOT EXISTS broker_daily (
+            business_date TEXT, broker TEXT, buy_value REAL, sell_value REAL,
+            buy_qty REAL, sell_qty REAL, buy_trades INTEGER, sell_trades INTEGER,
+            PRIMARY KEY (business_date, broker)
+        )""")
+        db.execute("""CREATE TABLE IF NOT EXISTS broker_stock_daily (
+            business_date TEXT, broker TEXT, symbol TEXT, buy_value REAL, sell_value REAL,
+            buy_qty REAL, sell_qty REAL, trades INTEGER,
+            PRIMARY KEY (business_date, broker, symbol)
+        )""")
+
+def _floor_key(r):
+    return str(r.get("trade") or r.get("contractId") or r.get("transactionNumber") or
+               f"{r.get('symbol')}|{r.get('businessDate')}|{r.get('tradeTime')}|{r.get('quantity')}|{r.get('rate')}|{r.get('buyerBroker')}|{r.get('sellerBroker')}")
+
+def _floor_date(r):
+    return str(r.get("businessDate") or datetime.now(NPT).date().isoformat())[:10]
+
+def _store_floorsheet_rows(rows):
+    if not rows: return 0
+    _floor_db_init()
+    with sqlite3.connect(FLOOR_CACHE_DB) as db:
+        for r in rows:
+            db.execute("""INSERT OR REPLACE INTO floorsheet_raw
+                (trade_key,business_date,symbol,buyer_broker,seller_broker,quantity,rate,amount,trade_time,payload)
+                VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (_floor_key(r), _floor_date(r), str(r.get("symbol") or "").upper(),
+                 str(r.get("buyerBroker") or r.get("buyerBrokerName") or ""),
+                 str(r.get("sellerBroker") or r.get("sellerBrokerName") or ""),
+                 float(r.get("quantity") or 0), float(r.get("rate") or 0),
+                 float(r.get("amount") or 0), str(r.get("tradeTime") or ""),
+                 json.dumps(r, separators=(",",":"), default=str)))
+        db.commit()
+    return len(rows)
+
+def _read_floor_rows(business_date=None, symbol=None, limit=None, offset=0):
+    _floor_db_init(); sql="SELECT payload FROM floorsheet_raw WHERE 1=1"; args=[]
+    if business_date: sql += " AND business_date=?"; args.append(str(business_date)[:10])
+    if symbol: sql += " AND symbol=?"; args.append(str(symbol).upper().strip())
+    sql += " ORDER BY rowid DESC"
+    if limit is not None: sql += " LIMIT ? OFFSET ?"; args.extend([int(limit),int(offset)])
+    with sqlite3.connect(FLOOR_CACHE_DB) as db: return [json.loads(x[0]) for x in db.execute(sql,args).fetchall()]
+
+def _floor_count(business_date=None, symbol=None):
+    _floor_db_init(); sql="SELECT COUNT(*) FROM floorsheet_raw WHERE 1=1"; args=[]
+    if business_date: sql += " AND business_date=?"; args.append(str(business_date)[:10])
+    if symbol: sql += " AND symbol=?"; args.append(str(symbol).upper().strip())
+    with sqlite3.connect(FLOOR_CACHE_DB) as db: return int(db.execute(sql,args).fetchone()[0])
+
+def _rebuild_broker_rollups(business_date):
+    _floor_db_init(); day=str(business_date)[:10]
+    with sqlite3.connect(FLOOR_CACHE_DB) as db:
+        db.execute("DELETE FROM broker_daily WHERE business_date=?",(day,)); db.execute("DELETE FROM broker_stock_daily WHERE business_date=?",(day,))
+        rows=db.execute("SELECT symbol,buyer_broker,seller_broker,quantity,amount FROM floorsheet_raw WHERE business_date=?",(day,)).fetchall()
+        bd={}; bs={}
+        for sym,buy,sell,q,amt in rows:
+            q=float(q or 0); amt=float(amt or 0)
+            for broker,side in ((buy,'buy'),(sell,'sell')):
+                if not broker: continue
+                b=bd.setdefault(str(broker),[0,0,0,0,0,0]); z=bs.setdefault((str(broker),str(sym or '').upper()),[0,0,0,0,0])
+                if side=='buy': b[0]+=amt; b[2]+=q; b[4]+=1; z[0]+=amt; z[2]+=q
+                else: b[1]+=amt; b[3]+=q; b[5]+=1; z[1]+=amt; z[3]+=q
+                z[4]+=1
+        db.executemany("INSERT INTO broker_daily VALUES (?,?,?,?,?,?,?,?)",[(day,k,*v) for k,v in bd.items()])
+        db.executemany("INSERT INTO broker_stock_daily VALUES (?,?,?,?,?,?,?,?)",[(day,k[0],k[1],*v) for k,v in bs.items()]); db.commit()
+
+def _cached_broker_rollup(business_date):
+    _rebuild_broker_rollups(business_date); day=str(business_date)[:10]
+    with sqlite3.connect(FLOOR_CACHE_DB) as db:
+        rows=db.execute("SELECT broker,buy_value,sell_value,buy_qty,sell_qty,buy_trades,sell_trades FROM broker_daily WHERE business_date=? ORDER BY ABS(buy_value-sell_value) DESC",(day,)).fetchall()
+        bysym=db.execute("SELECT broker,symbol,buy_value,sell_value,buy_qty,sell_qty,trades FROM broker_stock_daily WHERE business_date=?",(day,)).fetchall()
+    total=sum(float(r[1])+float(r[2]) for r in rows) or 1; data=[]
+    for r in rows:
+        b={"broker":r[0],"buyValue":r[1],"sellValue":r[2],"buyQty":r[3],"sellQty":r[4],"buyTrades":r[5],"sellTrades":r[6]}
+        b["net"]=b["buyValue"]-b["sellValue"]; b["netValue"]=b["net"]; b["trades"]=b["buyTrades"]+b["sellTrades"]; b["share"]=(b["buyValue"]+b["sellValue"])/total; data.append(b)
+    symbol_rows=[{"broker":r[0],"symbol":r[1],"buyValue":r[2],"sellValue":r[3],"buyQty":r[4],"sellQty":r[5],"trades":r[6],"net":r[2]-r[3]} for r in bysym]
+    return data,symbol_rows
+
+_floor_db_init()
 # Last-known-good caches for transient empty NEPSE responses. These prevent
 # Trade Tape/Broker/Depth panels from flashing blank during feed refreshes.
 _LAST_VALID_FLOORSHEET: list[dict] = []
@@ -1659,56 +1785,20 @@ async def get_floorsheet(symbol: Optional[str] = None):
     return []
 
 async def get_broker_analysis():
-    # Always analyze the same normalized real floorsheet rows used by the
-    # company detail page. This avoids SDK wrapper/shape differences.
+    day=datetime.now(NPT).date().isoformat()
     try:
-        rows = await get_floorsheet(None)
-        rows = floor_rows(rows)
-        if not rows:
-            rows = await _recent_archive_floorsheet(None, 10)
-        if not rows:
-            return {"ok": False, "updatedAt": now_iso(), "data": [],
-                    "bySymbol": [], "sourceRows": 0,
-                    "source": "NEPSE verified floorsheet",
-                    "error": "No verified floorsheet rows returned"}
-
-        brokers = {}
-        by_symbol = {}
-        for r in rows:
-            q = float(r.get("quantity") or 0)
-            rate = float(r.get("rate") or 0)
-            amount = float(r.get("amount") or (q * rate))
-            buy = str(r.get("buyerBroker") or r.get("buyerBrokerName") or "").strip()
-            sell = str(r.get("sellerBroker") or r.get("sellerBrokerName") or "").strip()
-            sym = str(r.get("symbol") or "").upper().strip()
-
-            def ensure(label):
-                return brokers.setdefault(label, {"broker": label, "buyValue": 0, "sellValue": 0, "buyQty": 0, "sellQty": 0, "buyTrades": 0, "sellTrades": 0})
-            if buy:
-                b=ensure(buy); b["buyValue"]+=amount; b["buyQty"]+=q; b["buyTrades"]+=1
-            if sell:
-                b=ensure(sell); b["sellValue"]+=amount; b["sellQty"]+=q; b["sellTrades"]+=1
-
-            if sym:
-                z=by_symbol.setdefault(sym,{})
-                for label,side in ((buy,"buy"),(sell,"sell")):
-                    if not label: continue
-                    x=z.setdefault(label,{"broker":label,"symbol":sym,"buyValue":0,"sellValue":0,"buyQty":0,"sellQty":0,"trades":0})
-                    x[side+"Value"] += amount; x[side+"Qty"] += q; x["trades"] += 1
-
-        out=[]
-        for b in brokers.values():
-            b["net"] = b["buyValue"] - b["sellValue"]
-            b["trades"] = b["buyTrades"] + b["sellTrades"]
-            b["netValue"] = b["net"]
-            out.append(b)
-        out.sort(key=lambda x: abs(x["net"]), reverse=True)
-        symbol_rows=[x for z in by_symbol.values() for x in z.values()]
-        return {"ok": True, "updatedAt": now_iso(), "data": out,
-                "bySymbol": symbol_rows, "sourceRows": len(rows),
-                "source": "NEPSE verified floorsheet"}
-    except Exception:
-        return await legacy_get_broker_analysis()
+        count=_floor_count(day)
+        if count:
+            data,symbol_rows=_cached_broker_rollup(day)
+            return {"ok":True,"updatedAt":now_iso(),"data":data,"bySymbol":symbol_rows,"sourceRows":count,"source":"local indexed floorsheet cache"}
+    except Exception: pass
+    try:
+        rows=await get_floorsheet(None)
+        if rows:
+            _store_floorsheet_rows(rows); data,symbol_rows=_cached_broker_rollup(day)
+            return {"ok":True,"updatedAt":now_iso(),"data":data,"bySymbol":symbol_rows,"sourceRows":len(rows),"source":"local indexed floorsheet cache"}
+    except Exception: pass
+    return {"ok":False,"updatedAt":now_iso(),"data":[],"bySymbol":[],"sourceRows":0,"source":"NEPSE verified floorsheet","error":"No verified floorsheet rows returned"}
 
 async def get_history(symbol: str):
     try:
@@ -2101,6 +2191,14 @@ async def api_floorsheet(symbol: Optional[str]=None, limit:int=Query(100000,ge=1
             pass
         return [], None, None
 
+    day=datetime.now(NPT).date().isoformat()
+    cached_count=_floor_count(day,wanted)
+    if cached_count > page*size:
+        cached_rows=_read_floor_rows(day,wanted,size,page*size)
+        if cached_rows:
+            return {"ok":True,"page":page,"size":size,"totalPages":(cached_count+size-1)//size,
+                    "totalElements":cached_count,"data":cached_rows,"source":"local floorsheet cache","updatedAt":now_iso()}
+
     rows, tp, te = await call_paged(page)
     actual_page = page
     # Some older wrappers are one-based. Only page 0 gets this compatibility probe.
@@ -2121,6 +2219,10 @@ async def api_floorsheet(symbol: Optional[str]=None, limit:int=Query(100000,ge=1
         except Exception:
             pass
 
+    if rows:
+        _store_floorsheet_rows(rows)
+        try: _rebuild_broker_rollups(_floor_date(rows[0]))
+        except Exception: pass
     if rows and not symbol and actual_page == 0:
         _LAST_VALID_FLOORSHEET = list(rows)
         _LAST_VALID_FLOORSHEET_AT = time.time()

@@ -3673,7 +3673,8 @@ async function loadDirect(){
     // several consecutive pages are genuinely empty.
     const firstPage=Number(d?.page??0);
     let nextPage=firstPage===0?1:2;
-    const maxProbePages=200;
+    const cacheComplete=String(d?.source||'').includes('local floorsheet cache') && !!totalPages;
+    const maxProbePages=cacheComplete ? totalPages : 200;
     const batchSize=3;
     let emptyBatches=0;
     let duplicateOnlyBatches=0;
@@ -3719,6 +3720,7 @@ async function loadDirect(){
       }
       // One empty batch can be a transient upstream miss. Stop only after two
       // consecutive empty batches, or repeated pages containing no new rows.
+      if(cacheComplete && nextPage>=maxProbePages)break;
       if(emptyBatches>=4)break;
       await new Promise(resolve=>setTimeout(resolve,20));
     }
