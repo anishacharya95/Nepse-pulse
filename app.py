@@ -122,19 +122,16 @@ async def _floor_collector_loop():
             # A temporary empty response is common while the NEPSE session is
             # bootstrapping or being rate-limited. Retry before declaring the
             # collector empty, and never erase the last successful diagnostics.
-            for attempt in range(3):
-                try:
-                    candidate = await _complete_daily_floorsheet(None, page_size=500, max_pages=200)
-                    if candidate:
-                        rows = candidate
-                        break
+            # The page walker owns transient-page retries. Do not restart the
+            # entire 88-page collection if a later page is temporarily empty.
+            try:
+                candidate = await _complete_daily_floorsheet(None, page_size=500, max_pages=200)
+                if candidate:
+                    rows = candidate
+                else:
                     last_error = "floorsheets returned 0 rows"
-                except Exception as exc:
-                    last_error = f"{type(exc).__name__}: {exc}"
-                if attempt < 2:
-                    try: await asyncio.wait_for(FLOOR_COLLECTOR_STOP.wait(), timeout=2)
-                    except asyncio.TimeoutError: pass
-                    if FLOOR_COLLECTOR_STOP.is_set(): break
+            except Exception as exc:
+                last_error = f"{type(exc).__name__}: {exc}"
 
             if rows:
                 sample_date = _floor_date(rows[0])
@@ -2074,6 +2071,12 @@ async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: in
                         if got: recovered = True; break
                     except Exception: pass
                 if not recovered:
+                    # IMPORTANT: do NOT raise here. Raising discards every row
+                    # fetched so far and the outer collector starts again at
+                    # page 1. NEPSE has been observed to transiently return an
+                    # empty page around the 60-70 range even though the page
+                    # is valid. Keep the accumulated rows and retry THIS SAME
+                    # page in-place.
                     raw_hint = "no response"
                     try:
                         if isinstance(raw, dict):
@@ -2082,7 +2085,10 @@ async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: in
                             raw_hint = f"raw_type={type(raw).__name__}"
                     except Exception:
                         pass
-                    raise RuntimeError(f"floorsheets page {page} remained empty after retries (target={target_pages}; {raw_hint})")
+                    FLOOR_DIAG["progress"] = f"page {page} temporarily empty; retrying same page ({raw_hint})"
+                    FLOOR_DIAG["lastCollectorError"] = f"page {page} temporarily empty; accumulated {len(rows)} rows"
+                    await asyncio.sleep(5.0)
+                    continue
             else:
                 break
 
