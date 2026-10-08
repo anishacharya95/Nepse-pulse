@@ -4075,3 +4075,28 @@ async def api_floorsheet_intelligence(
         })
         return report
     return await cached(key, load)
+
+# TEMPORARY FLOORSHEET SDK DIAGNOSTIC
+@app.get('/api/floorsheet-debug')
+async def floorsheet_debug():
+    import inspect as _inspect
+    client = await get_nepse_client()
+    fn = getattr(client, 'floorsheets', None)
+    out = {'ok': callable(fn), 'method':'floorsheets', 'signature':None, 'tests':[]}
+    if not callable(fn):
+        out['error'] = 'AsyncNepseClient.floorsheets is not callable'
+        return out
+    try: out['signature'] = str(_inspect.signature(fn))
+    except Exception as exc: out['signature'] = f'unavailable: {type(exc).__name__}: {exc}'
+    async def test(label, kwargs):
+        item={'label':label,'kwargs':kwargs}
+        try:
+            raw=await fn(**kwargs); rows=floor_rows(raw)
+            meta=raw.get('floorsheets') if isinstance(raw,dict) else None
+            if not isinstance(meta,dict): meta=raw if isinstance(raw,dict) else {}
+            item.update({'ok':True,'rowCount':len(rows),'topLevelKeys':list(raw.keys())[:30] if isinstance(raw,dict) else [],'metaKeys':list(meta.keys())[:30] if isinstance(meta,dict) else [],'totalPages':meta.get('totalPages') if isinstance(meta,dict) else None,'totalElements':meta.get('totalElements') if isinstance(meta,dict) else None,'firstDate':_floor_date(rows[0]) if rows else None,'lastDate':_floor_date(rows[-1]) if rows else None,'firstTradeKey':_floor_key(rows[0]) if rows else None,'lastTradeKey':_floor_key(rows[-1]) if rows else None})
+        except Exception as exc: item.update({'ok':False,'errorType':type(exc).__name__,'error':str(exc)})
+        out['tests'].append(item)
+    for label,kwargs in [('page1_size500',{'page':1,'size':500}),('page2_size500',{'page':2,'size':500}),('page1_limit500',{'page':1,'limit':500}),('page2_limit500',{'page':2,'limit':500}),('page1_page_size500',{'page':1,'page_size':500}),('page2_page_size500',{'page':2,'page_size':500})]:
+        await test(label,kwargs)
+    return out
