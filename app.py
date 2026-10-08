@@ -4,6 +4,7 @@ import csv
 import io
 import json
 import os
+import re
 import sqlite3
 from pathlib import Path
 from html.parser import HTMLParser
@@ -111,20 +112,38 @@ async def _floor_collector_loop():
     while not FLOOR_COLLECTOR_STOP.is_set():
         try:
             day=datetime.now(NPT).date().isoformat()
-            rows=await _complete_daily_floorsheet(None,page_size=500,max_pages=200)
-            FLOOR_DIAG["lastFetchCount"] = len(rows)
-            FLOOR_DIAG["lastCollectorError"] = None
-            FLOOR_DIAG["lastSampleDate"] = _floor_date(rows[0]) if rows else None
+            rows=[]
+            last_error=None
+            # A temporary empty response is common while the NEPSE session is
+            # bootstrapping or being rate-limited. Retry before declaring the
+            # collector empty, and never erase the last successful diagnostics.
+            for attempt in range(3):
+                try:
+                    candidate=await _complete_daily_floorsheet(None,page_size=500,max_pages=200)
+                    if candidate:
+                        rows=candidate
+                        break
+                    last_error="floorsheets returned 0 rows"
+                except Exception as exc:
+                    last_error=f"{type(exc).__name__}: {exc}"
+                if attempt < 2:
+                    try: await asyncio.wait_for(FLOOR_COLLECTOR_STOP.wait(),timeout=2)
+                    except asyncio.TimeoutError: pass
+                    if FLOOR_COLLECTOR_STOP.is_set(): break
+
             if rows:
                 stored=_store_floorsheet_rows(rows)
+                FLOOR_DIAG["lastFetchCount"] = len(rows)
+                FLOOR_DIAG["lastFetchedPages"] = max(1, (len(rows)+499)//500)
                 FLOOR_DIAG["lastStoreCount"] = stored
                 FLOOR_DIAG["lastStoreSkipped"] = max(0, len(rows)-stored)
+                FLOOR_DIAG["lastCollectorError"] = None
+                FLOOR_DIAG["lastSampleDate"] = _floor_date(rows[0])
                 _rebuild_broker_rollups(day)
-            else:
-                FLOOR_DIAG["lastStoreCount"] = 0
-                FLOOR_DIAG["lastStoreSkipped"] = 0
+            elif last_error:
+                FLOOR_DIAG["lastCollectorError"] = last_error
         except Exception as exc:
-            FLOOR_DIAG["lastCollectorError"] = str(exc)
+            FLOOR_DIAG["lastCollectorError"] = f"{type(exc).__name__}: {exc}"
         try: await asyncio.wait_for(FLOOR_COLLECTOR_STOP.wait(),timeout=20)
         except asyncio.TimeoutError: pass
 
