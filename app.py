@@ -70,7 +70,7 @@ async def production_call(method: str, *args, **kwargs):
     return await asyncio.to_thread(fn, *args, **kwargs)
 
 
-APP_VERSION = "V35-FLOORSHEET-COLLECTOR-FIX"
+APP_VERSION = "V36-FLOORSHEET-PAGINATION-FINAL"
 PUBLIC_API = "https://nepseapi.surajrimal.dev"
 STATIC_API = "https://shubhamnpk.github.io/yonepse/data"
 OPEN_DATA = "https://raw.githubusercontent.com/socrateai-official/nepse-open-data/main"
@@ -114,9 +114,9 @@ async def _floor_collector_loop():
             today = datetime.now(NPT).date().isoformat()
             rows = []
             last_error = None
-            # Use the stable sequential page walker. NEPSE can throttle or
-            # silently drop concurrent page requests, which can make page 1
-            # look like the complete sheet.
+            # A temporary empty response is common while the NEPSE session is
+            # bootstrapping or being rate-limited. Retry before declaring the
+            # collector empty, and never erase the last successful diagnostics.
             for attempt in range(3):
                 try:
                     candidate = await _complete_daily_floorsheet(None, page_size=500, max_pages=200)
@@ -142,16 +142,14 @@ async def _floor_collector_loop():
                 FLOOR_DIAG["lastSampleDate"] = sample_date
                 FLOOR_DIAG["displayDate"] = sample_date
                 FLOOR_DIAG["usingPreviousDay"] = sample_date != today
-                # Rollups must use the date actually contained in the
-                # floorsheet, not today's calendar date.
+                # Rebuild broker rollups for the actual date returned by NEPSE.
                 _rebuild_broker_rollups(sample_date)
             elif last_error:
-                # Empty data can be normal outside trading hours. Do not erase
-                # a previously successful cache/diagnostic state.
+                # Keep the previously cached/displayed trading day intact.
                 FLOOR_DIAG["lastCollectorError"] = last_error
         except Exception as exc:
             FLOOR_DIAG["lastCollectorError"] = f"{type(exc).__name__}: {exc}"
-        try: await asyncio.wait_for(FLOOR_COLLECTOR_STOP.wait(), timeout=20)
+        try: await asyncio.wait_for(FLOOR_COLLECTOR_STOP.wait(),timeout=20)
         except asyncio.TimeoutError: pass
 
 @app.on_event("startup")
@@ -1962,75 +1960,61 @@ async def _recent_archive_floorsheet(symbol: Optional[str] = None, lookback_days
 # One normalized path for company floorsheets.  Every source is treated as
 # untrusted wrapper data until floor_rows() has flattened it.
 async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: int = 500, max_pages: int = 1000):
-    """Fetch the complete available daily floorsheet using stable 1-based paging.
+    """Fetch every page from NEPSE's paginated floorsheets endpoint.
 
-    We intentionally fetch sequentially: NEPSE may throttle concurrent page
-    requests and return only page 1. An empty page after rows is normal end of
-    pagination, not an error. The returned rows retain their actual trading date.
+    The installed nepsepy client accepts exactly ``page`` and ``size``.
+    NEPSE reports the authoritative ``totalPages``/``totalElements`` in the
+    response, so we walk pages sequentially and never guess another API
+    signature or use concurrent requests that can trigger throttling.
     """
     wanted = symbol.upper().strip() if symbol else None
-    rows=[]; seen=set()
+    rows, seen = [], set()
+    client = await get_nepse_client()
+    fn = getattr(client, "floorsheets", None)
+    if not callable(fn):
+        raise RuntimeError("AsyncNepseClient.floorsheets is not callable")
 
     def unpack(raw):
-        rr=floor_rows(raw)
-        meta=raw if isinstance(raw,dict) else {}
-        nested=meta.get('floorsheets') if isinstance(meta,dict) else None
-        if isinstance(nested,dict): meta=nested
-        total_pages=meta.get('totalPages') or meta.get('total_pages')
-        total_elements=meta.get('totalElements') or meta.get('total_elements')
-        return rr,total_pages,total_elements
+        got = floor_rows(raw)
+        meta = raw.get("floorsheets") if isinstance(raw, dict) else None
+        if not isinstance(meta, dict):
+            meta = raw if isinstance(raw, dict) else {}
+        return got, meta.get("totalPages") or meta.get("total_pages"), meta.get("totalElements") or meta.get("total_elements")
 
     def add_rows(got):
         for r in got:
-            key=str(r.get('trade') or r.get('contractId') or r.get('transactionNumber') or '') or f"{r.get('symbol')}|{r.get('businessDate')}|{r.get('tradeTime')}|{r.get('quantity')}|{r.get('rate')}|{r.get('buyerBroker')}|{r.get('sellerBroker')}"
+            key = str(r.get("trade") or r.get("contractId") or r.get("transactionNumber") or "")
+            if not key:
+                key = f"{r.get('symbol')}|{r.get('businessDate')}|{r.get('tradeTime')}|{r.get('quantity')}|{r.get('rate')}|{r.get('buyerBroker')}|{r.get('sellerBroker')}"
             if key not in seen:
-                seen.add(key); rows.append(r)
+                seen.add(key)
+                rows.append(r)
 
-    async def fetch_page(page):
-        client=await get_nepse_client()
-        fn=getattr(client,'floorsheets',None)
-        if not callable(fn): return [],None,None
-        attempts=(({'page':page,'size':page_size}),({'page':page,'limit':page_size}),({'page':page,'page_size':page_size}))
-        for kwargs in attempts:
-            try:
-                raw=await fn(**kwargs)
-                got,tp,te=unpack(raw)
-                if got or page==1: return got,tp,te
-            except TypeError:
-                try:
-                    raw=await fn(page,page_size)
-                    got,tp,te=unpack(raw)
-                    if got or page==1: return got,tp,te
-                except Exception: pass
+    page = 1
+    total_pages = None
+    total_elements = None
+    while page <= max_pages:
+        raw = await fn(page=page, size=page_size)
+        got, tp, te = unpack(raw)
+        if page == 1 and not got:
+            return []
+        if tp is not None:
+            try: total_pages = int(tp)
             except Exception: pass
-        return [],None,None
-
-    first,tp,te=await fetch_page(1)
-    if not first:
-        return []
-    add_rows(first)
-    try: target=min(max_pages,int(tp)) if tp is not None else max_pages
-    except Exception: target=max_pages
-
-    for page in range(2,target+1):
-        got,tp2,te2=await fetch_page(page)
+        if te is not None:
+            try: total_elements = int(te)
+            except Exception: pass
         if not got:
-            # Empty page after successful pages is the normal end.
             break
         add_rows(got)
-        if te2 is not None:
-            try:
-                if len(rows) >= int(te2): break
-            except Exception: pass
-        if tp2 is not None:
-            try:
-                if page >= int(tp2): break
-            except Exception: pass
-        if len(got) < page_size and tp is None and tp2 is None:
+        if total_elements is not None and len(rows) >= total_elements:
             break
+        if total_pages is not None and page >= total_pages:
+            break
+        page += 1
 
     if wanted:
-        rows=[r for r in rows if str(r.get('symbol') or '').upper().strip()==wanted]
+        rows = [r for r in rows if str(r.get("symbol") or "").upper().strip() == wanted]
     return rows
 
 async def get_floorsheet(symbol: Optional[str] = None):
@@ -2293,22 +2277,24 @@ async def api_floorsheet(symbol: Optional[str]=None, limit:int=Query(100000,ge=1
 
 @app.get("/api/floorsheet-status")
 async def api_floorsheet_status():
-    today=datetime.now(NPT).date().isoformat()
-    display_date=FLOOR_DIAG.get("displayDate")
+    today = datetime.now(NPT).date().isoformat()
+    display_date = FLOOR_DIAG.get("displayDate")
     if not display_date:
-        # Prefer today; outside trading hours fall back to the newest cached day.
+        # Outside trading hours, report the newest cached trading day.
         with sqlite3.connect(FLOOR_CACHE_DB) as db:
-            row=db.execute("SELECT business_date, COUNT(*) FROM floorsheet_raw GROUP BY business_date ORDER BY business_date DESC LIMIT 1").fetchone()
-        display_date=row[0] if row else today
-    try: count=_floor_count(display_date)
-    except Exception: count=0
-    methods={}
+            row = db.execute("SELECT business_date, COUNT(*) FROM floorsheet_raw GROUP BY business_date ORDER BY business_date DESC LIMIT 1").fetchone()
+        display_date = row[0] if row else today
     try:
-        client=await get_nepse_client()
-        for name in ("floor_sheet","floorsheets","getFloorSheet","get_floorsheet","getFloorSheetOf"):
-            methods[name]=callable(getattr(client,name,None))
+        count = _floor_count(display_date)
+    except Exception:
+        count = 0
+    methods = {}
+    try:
+        client = await get_nepse_client()
+        for name in ("floor_sheet", "floorsheets", "getFloorSheet", "get_floorsheet", "getFloorSheetOf"):
+            methods[name] = callable(getattr(client, name, None))
     except Exception as exc:
-        methods["clientError"]=str(exc)
+        methods["clientError"] = str(exc)
     return {
         "ok": count > 0,
         "today": today,
@@ -2319,7 +2305,6 @@ async def api_floorsheet_status():
         "sdkMethods": methods,
         "collectorRunning": bool(FLOOR_COLLECTOR_TASK and not FLOOR_COLLECTOR_TASK.done()),
         **FLOOR_DIAG,
-        "updatedAt": now_iso(),
     }
 
 @app.get("/api/brokers")
@@ -4075,28 +4060,3 @@ async def api_floorsheet_intelligence(
         })
         return report
     return await cached(key, load)
-
-# TEMPORARY FLOORSHEET SDK DIAGNOSTIC
-@app.get('/api/floorsheet-debug')
-async def floorsheet_debug():
-    import inspect as _inspect
-    client = await get_nepse_client()
-    fn = getattr(client, 'floorsheets', None)
-    out = {'ok': callable(fn), 'method':'floorsheets', 'signature':None, 'tests':[]}
-    if not callable(fn):
-        out['error'] = 'AsyncNepseClient.floorsheets is not callable'
-        return out
-    try: out['signature'] = str(_inspect.signature(fn))
-    except Exception as exc: out['signature'] = f'unavailable: {type(exc).__name__}: {exc}'
-    async def test(label, kwargs):
-        item={'label':label,'kwargs':kwargs}
-        try:
-            raw=await fn(**kwargs); rows=floor_rows(raw)
-            meta=raw.get('floorsheets') if isinstance(raw,dict) else None
-            if not isinstance(meta,dict): meta=raw if isinstance(raw,dict) else {}
-            item.update({'ok':True,'rowCount':len(rows),'topLevelKeys':list(raw.keys())[:30] if isinstance(raw,dict) else [],'metaKeys':list(meta.keys())[:30] if isinstance(meta,dict) else [],'totalPages':meta.get('totalPages') if isinstance(meta,dict) else None,'totalElements':meta.get('totalElements') if isinstance(meta,dict) else None,'firstDate':_floor_date(rows[0]) if rows else None,'lastDate':_floor_date(rows[-1]) if rows else None,'firstTradeKey':_floor_key(rows[0]) if rows else None,'lastTradeKey':_floor_key(rows[-1]) if rows else None})
-        except Exception as exc: item.update({'ok':False,'errorType':type(exc).__name__,'error':str(exc)})
-        out['tests'].append(item)
-    for label,kwargs in [('page1_size500',{'page':1,'size':500}),('page2_size500',{'page':2,'size':500}),('page1_limit500',{'page':1,'limit':500}),('page2_limit500',{'page':2,'limit':500}),('page1_page_size500',{'page':1,'page_size':500}),('page2_page_size500',{'page':2,'page_size':500})]:
-        await test(label,kwargs)
-    return out
