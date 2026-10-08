@@ -2021,6 +2021,14 @@ async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: in
         FLOOR_DIAG["currentPage"] = page
         FLOOR_DIAG["progress"] = f"fetching page {page}"
         FLOOR_DIAG["lastAttemptAt"] = now_iso()
+        # Refresh the SDK session at the known long-run failure boundary.
+        # This preserves all accumulated rows while avoiding a stale HTTP
+        # session carrying the collector into page 65 with empty responses.
+        if page == 65:
+            try:
+                await reset_nepse_client()
+            except Exception:
+                pass
         # Upstream empties are transient. Retry the SAME page, but keep the
         # retry budget short enough that a broken page cannot hang Render.
         for attempt in range(6):
@@ -2036,6 +2044,16 @@ async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: in
                         pass
             except Exception:
                 pass
+            # NEPSE can keep returning an empty page after a long sequence of
+            # successful requests.  This is especially reproducible around
+            # page 65 even though independent diagnostics show page 65/66 are
+            # valid.  Refresh the SDK session before retrying the same page;
+            # NEVER discard the rows already accumulated.
+            if not got and attempt in (1, 3) and page >= 65:
+                try:
+                    await reset_nepse_client()
+                except Exception:
+                    pass
             if attempt < 5:
                 await asyncio.sleep(1.0 + attempt * 0.5)
 
