@@ -69,7 +69,7 @@ async def production_call(method: str, *args, **kwargs):
     return await asyncio.to_thread(fn, *args, **kwargs)
 
 
-APP_VERSION = "V34-PREMIUM-NORMALIZED-STOCK-DATA"
+APP_VERSION = "V35-FLOORSHEET-COLLECTOR-FIX"
 PUBLIC_API = "https://nepseapi.surajrimal.dev"
 STATIC_API = "https://shubhamnpk.github.io/yonepse/data"
 OPEN_DATA = "https://raw.githubusercontent.com/socrateai-official/nepse-open-data/main"
@@ -1856,7 +1856,10 @@ async def _direct_nepse_floorsheet(symbol: Optional[str] = None):
     # implement getFloorSheet() as a full paginator; a single floorsheets()
     # call can otherwise stop at a provider-side 5,000-row cap.
     attempts.extend([
+        (["floor_sheet"], (), {"page": 0, "size": 500}),
+        (["floorsheets"], (), {"page": 0, "size": 500}),
         (["getFloorSheet"], (), {}),
+        (["get_floorsheet"], (), {}),
         (["floorsheets"], (), {"max_pages": 1000, "size": 500}),
         (["floorsheets"], (), {"page": 1, "size": 500}),
     ])
@@ -1945,7 +1948,7 @@ async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: in
     async def fetch_page(page):
         for kwargs in ({'page':page,'size':page_size},{'page':page,'limit':page_size},{'page':page,'page_size':page_size}):
             try:
-                raw=await nepse_call(['floorsheets'], **kwargs)
+                raw=await nepse_call(['floor_sheet','floorsheets','getFloorSheet','get_floorsheet'], **kwargs)
                 got,tp,te=unpack(raw)
                 if got:
                     return page,got,tp,te
@@ -2157,7 +2160,10 @@ async def api_floorsheet(symbol: Optional[str]=None, limit:int=Query(100000,ge=1
         for method, kwargs in (
             ("floor_sheet", {"page": pg, "size": size}),
             ("floor_sheet", {"page": pg, "limit": size}),
+            ("floorsheets", {"page": pg, "size": size}),
+            ("floorsheets", {"page": pg, "limit": size}),
             ("getFloorSheet", {"page": pg}),
+            ("get_floorsheet", {"page": pg, "size": size}),
             ("getFloorSheet", {"page": pg, "size": size}),
             ("floorsheets", {"page": pg, "size": size}),
             ("floorsheets", {"page": pg, "limit": size}),
@@ -2210,6 +2216,42 @@ async def api_floorsheet(symbol: Optional[str]=None, limit:int=Query(100000,ge=1
     # stuck on "waiting for feed".
     if not rows and page == 0:
         try:
+            # Last-resort direct SDK full-floor-sheet call.  Several current
+            # clients expose this as getFloorSheet()/floor_sheet() rather than
+            # the older paginated wrapper. Cache it immediately so subsequent
+            # pages are served locally.
+            full_rows = await _direct_nepse_floorsheet(symbol)
+            if full_rows:
+                _store_floorsheet_rows(full_rows)
+                try: _rebuild_broker_rollups(_floor_date(full_rows[0]))
+                except Exception: pass
+                start = page * size
+                rows = full_rows[start:start + size]
+                actual_page = page
+                tp = (len(full_rows) + size - 1) // size
+                te = len(full_rows)
+        except Exception:
+            pass
+    if not rows and page == 0:
+        try:
+            # Outside trading hours NEPSE can legitimately return an empty
+            # live floorsheet. Use the maintained real daily archive so the
+            # dashboard still shows the latest completed session instead of
+            # displaying an empty Trade Tape.
+            archive_rows = await _recent_archive_floorsheet(symbol, lookback_days=10)
+            if archive_rows:
+                _store_floorsheet_rows(archive_rows)
+                try: _rebuild_broker_rollups(_floor_date(archive_rows[0]))
+                except Exception: pass
+                start = page * size
+                rows = archive_rows[start:start + size]
+                actual_page = page
+                tp = (len(archive_rows) + size - 1) // size
+                te = len(archive_rows)
+        except Exception:
+            pass
+    if not rows and page == 0:
+        try:
             fallback_rows = await _merolagani_floorsheet_fallback(symbol)
             if fallback_rows:
                 rows = fallback_rows[:size]
@@ -2232,6 +2274,29 @@ async def api_floorsheet(symbol: Optional[str]=None, limit:int=Query(100000,ge=1
         "symbol": symbol, "data": rows, "floorsheet": rows,
         "count": len(rows), "page": actual_page, "pageSize": size,
         "totalPages": tp, "totalElements": te, "updatedAt": now_iso()
+    }
+
+@app.get("/api/floorsheet-status")
+async def api_floorsheet_status():
+    day = datetime.now(NPT).date().isoformat()
+    try:
+        count = _floor_count(day)
+    except Exception:
+        count = 0
+    methods = {}
+    try:
+        client = await get_nepse_client()
+        for name in ("floor_sheet", "floorsheets", "getFloorSheet", "get_floorsheet", "getFloorSheetOf"):
+            methods[name] = callable(getattr(client, name, None))
+    except Exception as exc:
+        methods["clientError"] = str(exc)
+    return {
+        "ok": count > 0,
+        "today": day,
+        "cachedTradesToday": count,
+        "sdkMethods": methods,
+        "collectorRunning": bool(FLOOR_COLLECTOR_TASK and not FLOOR_COLLECTOR_TASK.done()),
+        "updatedAt": now_iso(),
     }
 
 @app.get("/api/brokers")
