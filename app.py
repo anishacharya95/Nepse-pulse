@@ -1959,19 +1959,12 @@ async def _recent_archive_floorsheet(symbol: Optional[str] = None, lookback_days
 
 # One normalized path for company floorsheets.  Every source is treated as
 # untrusted wrapper data until floor_rows() has flattened it.
-async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: int = 500, max_pages: int = 1000):
-    """Fetch the complete current-day floorsheet using the verified nepsepy API.
+async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: int = 500, max_pages: int = 100):
+    """Fetch the full current floorsheet using the verified 500-row API.
 
-    Verified behavior of the installed SDK:
-      * floorsheets(page=..., size=500) is the supported call.
-      * page numbers are accepted as 1-based (page=1 is the first page).
-      * size values above 500 currently return an empty response.
-      * the response reports totalPages/totalElements, but we still walk every
-        page up to the reported total and never assume page 64 is the end.
-
-    Empty pages are treated as transient failures and retried with a pause,
-    because the live NEPSE session can briefly return an empty wrapper while
-    throttling/bootstrap work is happening.
+    The live endpoint has occasionally returned stale/truncated pagination
+    metadata, so this routine uses metadata only as a target and retries empty
+    pages instead of treating the first empty response as end-of-data.
     """
     wanted = symbol.upper().strip() if symbol else None
     rows, seen = [], set()
@@ -1983,9 +1976,8 @@ async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: in
     def unpack(raw):
         got = floor_rows(raw)
         meta = raw.get("floorsheets") if isinstance(raw, dict) else None
-        if not isinstance(meta, dict):
-            meta = raw if isinstance(raw, dict) else {}
-        return got, meta.get("totalPages") or meta.get("total_pages"), meta.get("totalElements") or meta.get("total_elements"), meta.get("last")
+        if not isinstance(meta, dict): meta = raw if isinstance(raw, dict) else {}
+        return got, meta.get("totalPages") or meta.get("total_pages"), meta.get("totalElements") or meta.get("total_elements")
 
     def add_rows(got):
         for r in got:
@@ -1993,109 +1985,76 @@ async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: in
             if not key:
                 key = f"{r.get('symbol')}|{r.get('businessDate')}|{r.get('tradeTime')}|{r.get('quantity')}|{r.get('rate')}|{r.get('buyerBroker')}|{r.get('sellerBroker')}"
             if key not in seen:
-                seen.add(key)
-                rows.append(r)
+                seen.add(key); rows.append(r)
 
     page = 1
-    total_pages = None
-    expected_elements = None
-    missing_pages = []
-
+    target_pages = 1
+    target_rows = None
     while page <= max_pages:
         got = []
         tp = te = None
-        is_last = False
-
-        # Empty responses can be transient. Keep the same authenticated client,
-        # serialize the call with other NEPSE calls, and give the upstream time
-        # to recover before declaring the page unavailable.
-        for attempt in range(8):
+        # Upstream empties are transient. Retry the SAME page, but keep the
+        # retry budget short enough that a broken page cannot hang Render.
+        for attempt in range(6):
             try:
                 async with NEPSE_CALL_LOCK:
                     raw = await fn(page=page, size=500)
-                got, tp, te, is_last = unpack(raw)
-                if got:
-                    break
+                got, tp, te = unpack(raw)
+                if got: break
             except Exception:
                 pass
-            if attempt < 7:
-                try:
-                    await asyncio.sleep(min(3.0, 1.0 + attempt * 0.35))
-                except Exception:
-                    pass
+            if attempt < 5:
+                await asyncio.sleep(1.0 + attempt * 0.5)
 
         if tp is not None:
-            try:
-                total_pages = max(1, int(tp))
-            except Exception:
-                pass
+            try: target_pages = max(target_pages, min(max_pages, int(tp)))
+            except Exception: pass
         if te is not None:
-            try:
-                expected_elements = int(te)
-            except Exception:
-                pass
+            try: target_rows = int(te)
+            except Exception: pass
 
-        # Page 1 must succeed; otherwise there is no current-day snapshot.
-        if page == 1 and not got:
-            return []
-
-        # An empty page can be transient even when later pages are available.
-        # If NEPSE supplied the expected element count, keep walking through
-        # the expected page range instead of truncating the day at that page.
         if not got:
-            expected_pages = None
-            if expected_elements:
-                expected_pages = max(1, (int(expected_elements) + 499) // 500)
-            elif total_pages:
-                expected_pages = max(1, int(total_pages))
-            if expected_pages and page < expected_pages:
-                missing_pages.append(page)
-                page += 1
-                continue
-            break
-
-        before_count = len(rows)
-        add_rows(got)
-        if page > 1 and len(rows) == before_count:
-            # Protect against an upstream endpoint repeating the same page.
-            break
-
-        # Do NOT trust `last` or totalPages as the stopping condition.  We
-        # have verified that the live endpoint can report a truncated page
-        # count during a collector run.  Keep walking until a page remains
-        # empty after all retries.  This is what lets the collector pass the
-        # old 64-page boundary and reach pages 65-88.
-
-        # If metadata was absent, or even if it was stale, continue until a
-        # genuine empty page.
-        page += 1
-        try:
-            await asyncio.sleep(0.50)
-        except Exception:
-            pass
-
-    # Revisit only pages that were empty during the main walk.
-    if missing_pages:
-        for missing_page in missing_pages:
-            got_missing = []
-            for attempt in range(6):
-                try:
-                    async with NEPSE_CALL_LOCK:
-                        raw = await fn(page=missing_page, size=500)
-                    got_missing, _, _, _ = unpack(raw)
-                    if got_missing:
-                        break
-                except Exception:
-                    pass
-                if attempt < 5:
-                    try: await asyncio.sleep(min(3.0, 1.0 + attempt * 0.4))
+            # If metadata says more pages exist, make one bounded second pass
+            # over this page rather than terminating the whole collection.
+            if page <= target_pages:
+                recovered = False
+                for attempt in range(3):
+                    await asyncio.sleep(2.0)
+                    try:
+                        async with NEPSE_CALL_LOCK:
+                            raw = await fn(page=page, size=500)
+                        got, tp2, te2 = unpack(raw)
+                        if tp2:
+                            try: target_pages = max(target_pages, min(max_pages, int(tp2)))
+                            except Exception: pass
+                        if te2:
+                            try: target_rows = int(te2)
+                            except Exception: pass
+                        if got: recovered = True; break
                     except Exception: pass
-            if got_missing:
-                add_rows(got_missing)
+                if not recovered:
+                    raise RuntimeError(f"floorsheets page {page} remained empty after retries (target={target_pages})")
+            else:
+                break
 
+        before = len(rows)
+        add_rows(got)
+        if page > 1 and len(rows) == before:
+            raise RuntimeError(f"floorsheets page {page} repeated previous data")
+
+        page += 1
+        # Once we've reached the known target, require one additional page
+        # probe only when the collected count is still below totalElements.
+        if page > target_pages and (target_rows is None or len(rows) >= target_rows):
+            break
+        await asyncio.sleep(0.25)
+
+    if target_rows is not None and len(rows) < target_rows:
+        raise RuntimeError(f"incomplete floorsheet: got {len(rows)} of {target_rows}")
     if wanted:
         rows = [r for r in rows if str(r.get("symbol") or "").upper().strip() == wanted]
     return rows
+
 
 async def get_floorsheet(symbol: Optional[str] = None):
     wanted = symbol.upper().strip() if symbol else None
