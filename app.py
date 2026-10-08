@@ -2307,6 +2307,42 @@ async def api_floorsheet(symbol: Optional[str]=None, limit:int=Query(100000,ge=1
         "totalPages": tp, "totalElements": te, "updatedAt": now_iso()
     }
 
+@app.get("/api/floorsheet-page-diagnostic")
+async def api_floorsheet_page_diagnostic():
+    """Test the exact NEPSE pagination boundary without touching the cache."""
+    result = {"ok": False, "pages": [], "sdkMethod": "floorsheets(page=..., size=500)"}
+    try:
+        client = await get_nepse_client()
+        fn = getattr(client, "floorsheets", None)
+        if not callable(fn):
+            return {**result, "error": "AsyncNepseClient.floorsheets is not callable"}
+        for page in (60, 61, 62, 63, 64, 65, 66):
+            item = {"page": page}
+            try:
+                raw = await fn(page=page, size=500)
+                rows = floor_rows(raw)
+                meta = raw.get("floorsheets") if isinstance(raw, dict) else None
+                if not isinstance(meta, dict):
+                    meta = raw if isinstance(raw, dict) else {}
+                item.update({
+                    "ok": True, "rowCount": len(rows),
+                    "totalPages": meta.get("totalPages"),
+                    "totalElements": meta.get("totalElements"),
+                    "number": meta.get("number"),
+                    "last": meta.get("last"),
+                    "firstTradeKey": str(rows[0].get("trade") or rows[0].get("contractId") or rows[0].get("transactionNumber") or "") if rows else None,
+                    "lastTradeKey": str(rows[-1].get("trade") or rows[-1].get("contractId") or rows[-1].get("transactionNumber") or "") if rows else None,
+                })
+            except Exception as exc:
+                item.update({"ok": False, "errorType": type(exc).__name__, "error": str(exc)})
+            result["pages"].append(item)
+            await asyncio.sleep(0.5)
+        result["ok"] = any(x.get("ok") and x.get("rowCount", 0) > 0 for x in result["pages"])
+    except Exception as exc:
+        result["errorType"] = type(exc).__name__
+        result["error"] = str(exc)
+    return result
+
 @app.get("/api/floorsheet-status")
 async def api_floorsheet_status():
     today = datetime.now(NPT).date().isoformat()
