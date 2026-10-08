@@ -1990,16 +1990,10 @@ async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: in
                     pass
         return page,[],None,None
 
-    # Probe both bases because NEPSE clients differ: page=0 and page=1.
-    probes=[]
-    for page in (0,1):
-        probes.append(asyncio.create_task(fetch_page(page)))
-    results=await asyncio.gather(*probes, return_exceptions=True)
-    first=None
-    for result in results:
-        if isinstance(result,tuple) and len(result)>=4 and result[1]:
-            first=result
-            break
+    # NEPSE floorsheets pagination is 1-based: always start at page 1.
+    first=await fetch_page(1)
+    if not (isinstance(first,tuple) and len(first)>=4 and first[1]):
+        return []
     if first is None:
         return []
 
