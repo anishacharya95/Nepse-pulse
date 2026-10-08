@@ -1946,14 +1946,48 @@ async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: in
                 seen.add(key); rows.append(r)
 
     async def fetch_page(page):
-        for kwargs in ({'page':page,'size':page_size},{'page':page,'limit':page_size},{'page':page,'page_size':page_size}):
-            try:
-                raw=await nepse_call(['floor_sheet','floorsheets','getFloorSheet','get_floorsheet'], **kwargs)
-                got,tp,te=unpack(raw)
-                if got:
-                    return page,got,tp,te
-            except Exception:
-                continue
+        # IMPORTANT: call the actual AsyncNepseClient.floorsheets method first.
+        # The generic nepse_call helper returns the first non-None response,
+        # even when an older method returns an empty wrapper. That used to hide
+        # the working floorsheets() method and left the collector at zero rows.
+        client = await get_nepse_client()
+        methods = []
+        fn = getattr(client, "floorsheets", None)
+        if callable(fn):
+            methods.append(("floorsheets", fn))
+        for name in ("floor_sheet", "getFloorSheet", "get_floorsheet"):
+            fn2 = getattr(client, name, None)
+            if callable(fn2):
+                methods.append((name, fn2))
+
+        for name, fn in methods:
+            for kwargs in ({'page':page,'size':page_size},{'page':page,'limit':page_size},{'page':page,'page_size':page_size}):
+                try:
+                    raw = await fn(**kwargs)
+                    got,tp,te = unpack(raw)
+                    if got:
+                        return page,got,tp,te
+                except TypeError:
+                    # Some client versions use positional pagination.
+                    try:
+                        raw = await fn(page, page_size)
+                        got,tp,te = unpack(raw)
+                        if got:
+                            return page,got,tp,te
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+            # A few versions expose floorsheets() with no pagination and return
+            # the complete daily object. Use that only after paged calls.
+            if name == "floorsheets":
+                try:
+                    raw = await fn()
+                    got,tp,te = unpack(raw)
+                    if got:
+                        return page,got,tp,te
+                except Exception:
+                    pass
         return page,[],None,None
 
     # Probe both bases because NEPSE clients differ: page=0 and page=1.
