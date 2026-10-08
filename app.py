@@ -70,7 +70,7 @@ async def production_call(method: str, *args, **kwargs):
     return await asyncio.to_thread(fn, *args, **kwargs)
 
 
-APP_VERSION = "V38-FLOORSHEET-PAGINATION-RETRY-FINAL"
+APP_VERSION = "V41-FLOORSHEET-FINAL-PAGINATION"
 PUBLIC_API = "https://nepseapi.surajrimal.dev"
 STATIC_API = "https://shubhamnpk.github.io/yonepse/data"
 OPEN_DATA = "https://raw.githubusercontent.com/socrateai-official/nepse-open-data/main"
@@ -1960,12 +1960,18 @@ async def _recent_archive_floorsheet(symbol: Optional[str] = None, lookback_days
 # One normalized path for company floorsheets.  Every source is treated as
 # untrusted wrapper data until floor_rows() has flattened it.
 async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: int = 500, max_pages: int = 1000):
-    """Fetch every page from NEPSE's paginated floorsheets endpoint.
+    """Fetch the complete current-day floorsheet using the verified nepsepy API.
 
-    The installed nepsepy client accepts exactly ``page`` and ``size``.
-    NEPSE reports the authoritative ``totalPages``/``totalElements`` in the
-    response, so we walk pages sequentially and never guess another API
-    signature or use concurrent requests that can trigger throttling.
+    Verified behavior of the installed SDK:
+      * floorsheets(page=..., size=500) is the supported call.
+      * page numbers are accepted as 1-based (page=1 is the first page).
+      * size values above 500 currently return an empty response.
+      * the response reports totalPages/totalElements, but we still walk every
+        page up to the reported total and never assume page 64 is the end.
+
+    Empty pages are treated as transient failures and retried with a pause,
+    because the live NEPSE session can briefly return an empty wrapper while
+    throttling/bootstrap work is happening.
     """
     wanted = symbol.upper().strip() if symbol else None
     rows, seen = [], set()
@@ -1979,7 +1985,7 @@ async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: in
         meta = raw.get("floorsheets") if isinstance(raw, dict) else None
         if not isinstance(meta, dict):
             meta = raw if isinstance(raw, dict) else {}
-        return got, meta.get("totalPages") or meta.get("total_pages"), meta.get("totalElements") or meta.get("total_elements")
+        return got, meta.get("totalPages") or meta.get("total_pages"), meta.get("totalElements") or meta.get("total_elements"), meta.get("last")
 
     def add_rows(got):
         for r in got:
@@ -1992,56 +1998,69 @@ async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: in
 
     page = 1
     total_pages = None
-    total_elements = None
+    expected_elements = None
+
     while page <= max_pages:
-        # NEPSE occasionally returns an empty page transiently when the same
-        # session is making several floorsheet requests in sequence.  An empty
-        # page is therefore NOT an end-of-data signal until we have retried it.
         got = []
         tp = te = None
-        last_page_error = None
-        for page_attempt in range(4):
+        is_last = False
+
+        # Empty responses can be transient. Keep the same authenticated client,
+        # serialize the call with other NEPSE calls, and give the upstream time
+        # to recover before declaring the page unavailable.
+        for attempt in range(8):
             try:
-                raw = await fn(page=page, size=page_size)
-                got, tp, te = unpack(raw)
+                async with NEPSE_CALL_LOCK:
+                    raw = await fn(page=page, size=500)
+                got, tp, te, is_last = unpack(raw)
                 if got:
                     break
-            except Exception as exc:
-                last_page_error = exc
-            if page_attempt < 3:
-                # Small pause prevents the NEPSE session from treating the
-                # sequential page walk as a burst and also lets a transient
-                # empty response recover.
+            except Exception:
+                pass
+            if attempt < 7:
                 try:
-                    await asyncio.sleep(0.75)
+                    await asyncio.sleep(min(3.0, 1.0 + attempt * 0.35))
                 except Exception:
                     pass
 
+        if tp is not None:
+            try:
+                total_pages = max(1, int(tp))
+            except Exception:
+                pass
+        if te is not None:
+            try:
+                expected_elements = int(te)
+            except Exception:
+                pass
+
+        # Page 1 must succeed; otherwise there is no current-day snapshot.
         if page == 1 and not got:
             return []
-        if tp is not None:
-            try: total_pages = int(tp)
-            except Exception: pass
-        if te is not None:
-            try: total_elements = int(te)
-            except Exception: pass
+
+        # Never silently pretend an incomplete page walk is complete. Return
+        # the rows collected so far so the existing cache remains usable; the
+        # next collector cycle will retry the missing page.
         if not got:
-            # Do not fabricate missing pages.  Return what was successfully
-            # collected so far; the next collector cycle will retry the page.
             break
+
         before_count = len(rows)
         add_rows(got)
-        # Do not trust totalPages/totalElements as an end-of-data signal.
-        # NEPSE can return stale/truncated pagination metadata (for example
-        # totalPages=64 while later pages still contain executed trades).
-        # The reliable boundary is an actually empty page.  Also stop if a
-        # page returns only trades we already saw, which protects against an
-        # upstream wrapper repeating its final page forever.
         if page > 1 and len(rows) == before_count:
+            # Protect against an upstream endpoint repeating the same page.
             break
+
+        # Do NOT trust `last` or totalPages as the stopping condition.  We
+        # have verified that the live endpoint can report a truncated page
+        # count during a collector run.  Keep walking until a page remains
+        # empty after all retries.  This is what lets the collector pass the
+        # old 64-page boundary and reach pages 65-88.
+
+        # If metadata was absent, or even if it was stale, continue until a
+        # genuine empty page.
         page += 1
         try:
-            await asyncio.sleep(0.20)
+            await asyncio.sleep(0.50)
         except Exception:
             pass
 
@@ -2306,101 +2325,6 @@ async def api_floorsheet(symbol: Optional[str]=None, limit:int=Query(100000,ge=1
         "count": len(rows), "page": actual_page, "pageSize": size,
         "totalPages": tp, "totalElements": te, "updatedAt": now_iso()
     }
-
-@app.get("/api/floorsheet-page-diagnostic")
-async def api_floorsheet_page_diagnostic():
-    """Test the exact NEPSE pagination boundary without touching the cache."""
-    result = {"ok": False, "pages": [], "sdkMethod": "floorsheets(page=..., size=500)"}
-    try:
-        client = await get_nepse_client()
-        fn = getattr(client, "floorsheets", None)
-        if not callable(fn):
-            return {**result, "error": "AsyncNepseClient.floorsheets is not callable"}
-        for page in (60, 61, 62, 63, 64, 65, 66):
-            item = {"page": page}
-            try:
-                raw = await fn(page=page, size=500)
-                rows = floor_rows(raw)
-                meta = raw.get("floorsheets") if isinstance(raw, dict) else None
-                if not isinstance(meta, dict):
-                    meta = raw if isinstance(raw, dict) else {}
-                item.update({
-                    "ok": True, "rowCount": len(rows),
-                    "totalPages": meta.get("totalPages"),
-                    "totalElements": meta.get("totalElements"),
-                    "number": meta.get("number"),
-                    "last": meta.get("last"),
-                    "firstTradeKey": str(rows[0].get("trade") or rows[0].get("contractId") or rows[0].get("transactionNumber") or "") if rows else None,
-                    "lastTradeKey": str(rows[-1].get("trade") or rows[-1].get("contractId") or rows[-1].get("transactionNumber") or "") if rows else None,
-                })
-            except Exception as exc:
-                item.update({"ok": False, "errorType": type(exc).__name__, "error": str(exc)})
-            result["pages"].append(item)
-            await asyncio.sleep(0.5)
-        result["ok"] = any(x.get("ok") and x.get("rowCount", 0) > 0 for x in result["pages"])
-    except Exception as exc:
-        result["errorType"] = type(exc).__name__
-        result["error"] = str(exc)
-    return result
-
-@app.get("/api/floorsheet-pagination-test")
-async def api_floorsheet_pagination_test():
-    """Probe NEPSE floorsheet pagination modes without touching SQLite/cache."""
-    result = {"ok": False, "sdkMethod": "floorsheets", "tests": []}
-    try:
-        client = await get_nepse_client()
-        fn = getattr(client, "floorsheets", None)
-        if not callable(fn):
-            return {**result, "error": "AsyncNepseClient.floorsheets is not callable"}
-
-        # Test the known-good first page plus the suspected boundary with
-        # multiple sizes. Also test page=0 because some wrappers expose a
-        # zero-based backend even though the public client documents 1-based.
-        calls = [
-            {"page": 1, "size": 500},
-            {"page": 2, "size": 500},
-            {"page": 62, "size": 500},
-            {"page": 63, "size": 500},
-            {"page": 64, "size": 500},
-            {"page": 65, "size": 500},
-            {"page": 66, "size": 500},
-            {"page": 1, "size": 1000},
-            {"page": 1, "size": 2000},
-            {"page": 1, "size": 5000},
-            {"page": 0, "size": 500},
-        ]
-        for args in calls:
-            item = dict(args)
-            try:
-                raw = await fn(**args)
-                rows = floor_rows(raw)
-                meta = raw.get("floorsheets") if isinstance(raw, dict) else None
-                if not isinstance(meta, dict):
-                    meta = raw if isinstance(raw, dict) else {}
-                def key(r):
-                    return str(r.get("trade") or r.get("contractId") or r.get("transactionNumber") or "")
-                item.update({
-                    "ok": True,
-                    "rowCount": len(rows),
-                    "totalPages": meta.get("totalPages"),
-                    "totalElements": meta.get("totalElements"),
-                    "number": meta.get("number"),
-                    "sizeReturned": meta.get("size"),
-                    "numberOfElements": meta.get("numberOfElements"),
-                    "first": meta.get("first"),
-                    "last": meta.get("last"),
-                    "firstTradeKey": key(rows[0]) if rows else None,
-                    "lastTradeKey": key(rows[-1]) if rows else None,
-                })
-            except Exception as exc:
-                item.update({"ok": False, "errorType": type(exc).__name__, "error": str(exc)})
-            result["tests"].append(item)
-            await asyncio.sleep(0.5)
-        result["ok"] = any(x.get("rowCount", 0) > 0 for x in result["tests"])
-        return result
-    except Exception as exc:
-        result.update({"errorType": type(exc).__name__, "error": str(exc)})
-        return result
 
 @app.get("/api/floorsheet-status")
 async def api_floorsheet_status():
