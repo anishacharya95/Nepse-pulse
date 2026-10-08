@@ -3870,7 +3870,8 @@ function pick(o,ks){for(const k of ks){if(o&&o[k]!==undefined&&o[k]!==null&&o[k]
 function normalizeStock(x){
  const symbol=str(pick(x,['symbol','Symbol','ticker','Ticker','securitySymbol'])).toUpperCase();
  const name=str(pick(x,['companyName','CompanyName','name','Name','securityName']));
- const sector=canonicalSectorName(pick(x,['sector','Sector','sectorName','SectorName','industry','Industry']));
+ const rawSector=str(pick(x,['sector','Sector','sectorName','SectorName','industry','Industry']));
+ const sector=rawSector?canonicalSectorName(rawSector):'Unclassified';
  const price=num(pick(x,['lastPrice','LastPrice','ltp','LTP','closePrice','price','Price']));
  const change=num(pick(x,['percentageChange','PercentageChange','percentChange','PercentChange','changePercent','ChangePercent','change','Change']));
  const volume=num(pick(x,['totalTradedQuantity','TotalTradedQuantity','volume','Volume','quantity','Quantity']))||0;
@@ -3972,7 +3973,7 @@ function renderHeatmap(){
    const point=x.change===null?'—':(x.change>0?'+':'')+fmt(x.change,2)+' pts';
    const idx=x.index===null?'—':fmt(x.index,2);
    const breadth=(x.advancing!=null||x.declining!=null)?`${x.advancing??'—'}↑ ${x.declining??'—'}↓`:'';
-   const count=x.stocksTraded??(x.stocks.length||'—');
+   const count=x.stocksTraded!=null?x.stocksTraded:(x.stocks.length||'—');
    return `<button class="sv5-tile ${cls}" data-sector-index="${i}">
      <div class="sv5-tile-top"><span class="sv5-tile-name">${esc(x.name)}</span><span class="sv5-tile-change">${change}</span></div>
      <div class="sv5-index-line"><b>${idx}</b><span>${esc(point)}</span></div>
@@ -3986,9 +3987,13 @@ function renderHeatmap(){
 function renderLeaders(){
  const a=filteredSectors();
  $('sv5SectorRows').innerHTML=a.length?a.map(x=>{
-   const adv=x.stocks.filter(y=>y.change>0).length,dec=x.stocks.filter(y=>y.change<0).length,c=x.stocks.map(y=>y.change).filter(y=>y!==null);
-   const avg=c.length?c.reduce((u,v)=>u+v,0)/c.length:null;
-   return `<tr><td><b>${esc(x.name)}</b></td><td>${x.stocks.length}</td><td>${adv}</td><td>${dec}</td><td class="${avg>0?'sv5-up':avg<0?'sv5-down':''}">${avg===null?'—':fmt(avg,2)+'%'}</td><td>${fmt(x.stocks.reduce((s,z)=>s+z.turnover,0))}</td><td>${fmt(x.stocks.reduce((s,z)=>s+z.volume,0))}</td></tr>`;
+   const adv=x.advancing!=null?x.advancing:x.stocks.filter(y=>y.change>0).length;
+   const dec=x.declining!=null?x.declining:x.stocks.filter(y=>y.change<0).length;
+   const count=x.stocksTraded!=null?x.stocksTraded:x.stocks.length;
+   const avg=x.percentChange!=null?x.percentChange:(x.stocks.length?x.stocks.map(y=>y.change).filter(y=>y!==null).reduce((u,v)=>u+v,0)/Math.max(1,x.stocks.map(y=>y.change).filter(y=>y!==null).length):null);
+   const tv=Number(x.turnover)||x.stocks.reduce((s,z)=>s+z.turnover,0);
+   const vol=Number(x.volume)||x.stocks.reduce((s,z)=>s+z.volume,0);
+   return `<tr><td><b>${esc(x.name)}</b></td><td>${fmt(count)}</td><td>${fmt(adv)}</td><td>${fmt(dec)}</td><td class="${avg>0?'sv5-up':avg<0?'sv5-down':''}">${avg===null?'—':fmt(avg,2)+'%'}</td><td>${fmt(tv)}</td><td>${fmt(vol)}</td></tr>`;
  }).join(''):'<tr><td colspan="7" class="sv5-empty">No sector data available.</td></tr>';
 }
 function openDrill(x){
@@ -4005,7 +4010,7 @@ async function loadVerifiedSectors(){
    const j=await r.json();const rows=Array.isArray(j?.data)?j.data:[];
    if(!rows.length)return;
    const by=Object.fromEntries(rows.map(x=>[canonicalSectorName(pick(x,['sector','name','sectorName'])).toLowerCase(),normalizeSector(x)]));
-   state.sectors.forEach(x=>{const z=by[canonicalSectorName(x.name).toLowerCase()];if(z){Object.assign(x,z);x.stocks=x.stocks?.length?x.stocks:z.stocks}});
+   state.sectors.forEach(x=>{const z=by[canonicalSectorName(x.name).toLowerCase()];if(z){const priorStocks=Array.isArray(x.stocks)?x.stocks:[];Object.assign(x,z);x.stocks=(z.stocks&&z.stocks.length)?z.stocks:(x.name==='Others'&&priorStocks.length>50?[]:priorStocks)}});
    for(const name of CANONICAL_SECTORS){if(!state.sectors.some(x=>x.name===name)&&by[name.toLowerCase()])state.sectors.push(by[name.toLowerCase()]);}
    renderMetrics();renderHeatmap();renderLeaders();
    loadSectorHistories();
