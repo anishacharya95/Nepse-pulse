@@ -1997,8 +1997,7 @@ async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: in
         # retry budget short enough that a broken page cannot hang Render.
         for attempt in range(6):
             try:
-                async with NEPSE_CALL_LOCK:
-                    raw = await fn(page=page, size=500)
+                raw = await nepse_call(["floorsheets"], page=page, size=500)
                 got, tp, te = unpack(raw)
                 if got: break
             except Exception:
@@ -2021,8 +2020,7 @@ async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: in
                 for attempt in range(3):
                     await asyncio.sleep(2.0)
                     try:
-                        async with NEPSE_CALL_LOCK:
-                            raw = await fn(page=page, size=500)
+                        raw = await nepse_call(["floorsheets"], page=page, size=500)
                         got, tp2, te2 = unpack(raw)
                         if tp2:
                             try: target_pages = max(target_pages, min(max_pages, int(tp2)))
@@ -2033,7 +2031,15 @@ async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: in
                         if got: recovered = True; break
                     except Exception: pass
                 if not recovered:
-                    raise RuntimeError(f"floorsheets page {page} remained empty after retries (target={target_pages})")
+                    raw_hint = "no response"
+                    try:
+                        if isinstance(raw, dict):
+                            raw_hint = f"dict_keys={list(raw.keys())[:20]} floorsheets_type={type(raw.get('floorsheets')).__name__}"
+                        else:
+                            raw_hint = f"raw_type={type(raw).__name__}"
+                    except Exception:
+                        pass
+                    raise RuntimeError(f"floorsheets page {page} remained empty after retries (target={target_pages}; {raw_hint})")
             else:
                 break
 
