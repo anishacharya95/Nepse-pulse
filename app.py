@@ -107,30 +107,25 @@ NEPSE_CLIENT_INIT_LOCK = asyncio.Lock()
 NEPSE_CALL_LOCK = asyncio.Lock()
 
 
-FLOOR_COLLECTOR_LAST_ERROR = None
-FLOOR_COLLECTOR_LAST_FETCH_COUNT = 0
-
 async def _floor_collector_loop():
     while not FLOOR_COLLECTOR_STOP.is_set():
         try:
-            day = datetime.now(NPT).date().isoformat()
-            rows = await _complete_daily_floorsheet(None, page_size=500, max_pages=200)
+            day=datetime.now(NPT).date().isoformat()
+            rows=await _complete_daily_floorsheet(None,page_size=500,max_pages=200)
+            FLOOR_DIAG["lastFetchCount"] = len(rows)
+            FLOOR_DIAG["lastCollectorError"] = None
+            FLOOR_DIAG["lastSampleDate"] = _floor_date(rows[0]) if rows else None
             if rows:
-                globals()["FLOOR_COLLECTOR_LAST_FETCH_COUNT"] = len(rows)
-                globals()["FLOOR_COLLECTOR_LAST_ERROR"] = None
-                stored = _store_floorsheet_rows(rows)
-                if stored:
-                    _rebuild_broker_rollups(day)
-                else:
-                    globals()["FLOOR_COLLECTOR_LAST_ERROR"] = "fetched rows but 0 rows were stored"
+                stored=_store_floorsheet_rows(rows)
+                FLOOR_DIAG["lastStoreCount"] = stored
+                FLOOR_DIAG["lastStoreSkipped"] = max(0, len(rows)-stored)
+                _rebuild_broker_rollups(day)
             else:
-                # Keep the collector alive but expose the failure instead of
-                # silently swallowing every SDK/parser error.
-                globals()["FLOOR_COLLECTOR_LAST_FETCH_COUNT"] = 0
-                globals()["FLOOR_COLLECTOR_LAST_ERROR"] = "floorsheets returned 0 rows"
+                FLOOR_DIAG["lastStoreCount"] = 0
+                FLOOR_DIAG["lastStoreSkipped"] = 0
         except Exception as exc:
-            globals()["FLOOR_COLLECTOR_LAST_ERROR"] = f"{type(exc).__name__}: {exc}"
-        try: await asyncio.wait_for(FLOOR_COLLECTOR_STOP.wait(), timeout=20)
+            FLOOR_DIAG["lastCollectorError"] = str(exc)
+        try: await asyncio.wait_for(FLOOR_COLLECTOR_STOP.wait(),timeout=20)
         except asyncio.TimeoutError: pass
 
 @app.on_event("startup")
@@ -382,6 +377,7 @@ NPT = timezone(timedelta(hours=5, minutes=45))
 FLOOR_CACHE_DB = Path(os.getenv("FLOOR_CACHE_DB", "nepse_pulse_floorsheet.sqlite3"))
 FLOOR_COLLECTOR_TASK = None
 FLOOR_COLLECTOR_STOP = asyncio.Event()
+FLOOR_DIAG = {"lastFetchCount": 0, "lastFetchedPages": 0, "lastStoreCount": 0, "lastStoreSkipped": 0, "lastCollectorError": None, "lastSampleDate": None}
 
 def _floor_db_init():
     FLOOR_CACHE_DB.parent.mkdir(parents=True, exist_ok=True)
@@ -410,43 +406,32 @@ def _floor_key(r):
                f"{r.get('symbol')}|{r.get('businessDate')}|{r.get('tradeTime')}|{r.get('quantity')}|{r.get('rate')}|{r.get('buyerBroker')}|{r.get('sellerBroker')}")
 
 def _floor_date(r):
-    raw = (r.get("businessDate") or r.get("tradeDate") or r.get("tradingDate") or r.get("date") or "")
-    text = str(raw).strip()
-    if len(text) >= 10:
-        # Handles YYYY-MM-DD, YYYY-MM-DDTHH:MM..., and YYYY/MM/DD.
-        if text[4] in "-/:" and text[7] in "-/:":
-            return text[:10].replace("/", "-").replace(":", "-")
-        if len(text) >= 8 and text[:8].isdigit():
-            return f"{text[:4]}-{text[4:6]}-{text[6:8]}"
+    # NEPSE payloads may expose the trading date under several names and may
+    # include an ISO timestamp. Normalize all common forms to YYYY-MM-DD.
+    for key in ("businessDate", "tradeDate", "tradingDate", "date"):
+        value=r.get(key)
+        if value:
+            text=str(value).strip()
+            m=re.search(r"\d{4}-\d{2}-\d{2}", text)
+            if m: return m.group(0)
     return datetime.now(NPT).date().isoformat()
 
 def _store_floorsheet_rows(rows):
     if not rows: return 0
     _floor_db_init()
-    inserted = 0
-    skipped = 0
     with sqlite3.connect(FLOOR_CACHE_DB) as db:
         for r in rows:
-            try:
-                def _num(v):
-                    if v is None or v == "": return 0.0
-                    return float(str(v).replace(",", "").strip())
-                db.execute("""INSERT OR REPLACE INTO floorsheet_raw
-                    (trade_key,business_date,symbol,buyer_broker,seller_broker,quantity,rate,amount,trade_time,payload)
-                    VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                    (_floor_key(r), _floor_date(r), str(r.get("symbol") or "").upper(),
-                     str(r.get("buyerBroker") or r.get("buyerBrokerName") or r.get("buyerBrokerCode") or ""),
-                     str(r.get("sellerBroker") or r.get("sellerBrokerName") or r.get("sellerBrokerCode") or ""),
-                     _num(r.get("quantity")), _num(r.get("rate")), _num(r.get("amount")),
-                     str(r.get("tradeTime") or r.get("tradeDateTime") or r.get("time") or ""),
-                     json.dumps(r, separators=(",",":"), default=str)))
-                inserted += 1
-            except Exception:
-                skipped += 1
+            db.execute("""INSERT OR REPLACE INTO floorsheet_raw
+                (trade_key,business_date,symbol,buyer_broker,seller_broker,quantity,rate,amount,trade_time,payload)
+                VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (_floor_key(r), _floor_date(r), str(r.get("symbol") or "").upper(),
+                 str(r.get("buyerBroker") or r.get("buyerBrokerName") or ""),
+                 str(r.get("sellerBroker") or r.get("sellerBrokerName") or ""),
+                 float(r.get("quantity") or 0), float(r.get("rate") or 0),
+                 float(r.get("amount") or 0), str(r.get("tradeTime") or ""),
+                 json.dumps(r, separators=(",",":"), default=str)))
         db.commit()
-    globals()["FLOOR_COLLECTOR_LAST_STORE_COUNT"] = inserted
-    globals()["FLOOR_COLLECTOR_LAST_STORE_SKIPPED"] = skipped
-    return inserted
+    return len(rows)
 
 def _read_floor_rows(business_date=None, symbol=None, limit=None, offset=0):
     _floor_db_init(); sql="SELECT payload FROM floorsheet_raw WHERE 1=1"; args=[]
@@ -2358,10 +2343,7 @@ async def api_floorsheet_status():
         "cachedTradesToday": count,
         "sdkMethods": methods,
         "collectorRunning": bool(FLOOR_COLLECTOR_TASK and not FLOOR_COLLECTOR_TASK.done()),
-        "lastFetchCount": FLOOR_COLLECTOR_LAST_FETCH_COUNT,
-        "lastStoreCount": globals().get("FLOOR_COLLECTOR_LAST_STORE_COUNT", 0),
-        "lastStoreSkipped": globals().get("FLOOR_COLLECTOR_LAST_STORE_SKIPPED", 0),
-        "lastCollectorError": FLOOR_COLLECTOR_LAST_ERROR,
+        **FLOOR_DIAG,
         "updatedAt": now_iso(),
     }
 
