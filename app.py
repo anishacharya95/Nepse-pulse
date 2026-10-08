@@ -2343,6 +2343,65 @@ async def api_floorsheet_page_diagnostic():
         result["error"] = str(exc)
     return result
 
+@app.get("/api/floorsheet-pagination-test")
+async def api_floorsheet_pagination_test():
+    """Probe NEPSE floorsheet pagination modes without touching SQLite/cache."""
+    result = {"ok": False, "sdkMethod": "floorsheets", "tests": []}
+    try:
+        client = await get_nepse_client()
+        fn = getattr(client, "floorsheets", None)
+        if not callable(fn):
+            return {**result, "error": "AsyncNepseClient.floorsheets is not callable"}
+
+        # Test the known-good first page plus the suspected boundary with
+        # multiple sizes. Also test page=0 because some wrappers expose a
+        # zero-based backend even though the public client documents 1-based.
+        calls = [
+            {"page": 1, "size": 500},
+            {"page": 2, "size": 500},
+            {"page": 62, "size": 500},
+            {"page": 63, "size": 500},
+            {"page": 64, "size": 500},
+            {"page": 65, "size": 500},
+            {"page": 66, "size": 500},
+            {"page": 1, "size": 1000},
+            {"page": 1, "size": 2000},
+            {"page": 1, "size": 5000},
+            {"page": 0, "size": 500},
+        ]
+        for args in calls:
+            item = dict(args)
+            try:
+                raw = await fn(**args)
+                rows = floor_rows(raw)
+                meta = raw.get("floorsheets") if isinstance(raw, dict) else None
+                if not isinstance(meta, dict):
+                    meta = raw if isinstance(raw, dict) else {}
+                def key(r):
+                    return str(r.get("trade") or r.get("contractId") or r.get("transactionNumber") or "")
+                item.update({
+                    "ok": True,
+                    "rowCount": len(rows),
+                    "totalPages": meta.get("totalPages"),
+                    "totalElements": meta.get("totalElements"),
+                    "number": meta.get("number"),
+                    "sizeReturned": meta.get("size"),
+                    "numberOfElements": meta.get("numberOfElements"),
+                    "first": meta.get("first"),
+                    "last": meta.get("last"),
+                    "firstTradeKey": key(rows[0]) if rows else None,
+                    "lastTradeKey": key(rows[-1]) if rows else None,
+                })
+            except Exception as exc:
+                item.update({"ok": False, "errorType": type(exc).__name__, "error": str(exc)})
+            result["tests"].append(item)
+            await asyncio.sleep(0.5)
+        result["ok"] = any(x.get("rowCount", 0) > 0 for x in result["tests"])
+        return result
+    except Exception as exc:
+        result.update({"errorType": type(exc).__name__, "error": str(exc)})
+        return result
+
 @app.get("/api/floorsheet-status")
 async def api_floorsheet_status():
     today = datetime.now(NPT).date().isoformat()
