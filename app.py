@@ -169,6 +169,27 @@ async def get_nepse_client() -> AsyncNepseClient:
     return NEPSE_CLIENT
 
 
+async def reset_nepse_client():
+    """Drop a stale AsyncNepseClient session and create a fresh one."""
+    global NEPSE_CLIENT
+    async with NEPSE_CLIENT_INIT_LOCK:
+        old = NEPSE_CLIENT
+        NEPSE_CLIENT = None
+        if old is not None:
+            try:
+                close = getattr(old, "close", None)
+                if callable(close):
+                    result = close()
+                    if inspect.isawaitable(result):
+                        await result
+            except Exception:
+                pass
+        if AsyncNepseClient is None:
+            raise RuntimeError("nepsepy is not installed")
+        NEPSE_CLIENT = AsyncNepseClient()
+        return NEPSE_CLIENT
+
+
 @app.on_event("shutdown")
 async def stop_floor_collector():
     global FLOOR_COLLECTOR_TASK
@@ -1997,9 +2018,15 @@ async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: in
         # retry budget short enough that a broken page cannot hang Render.
         for attempt in range(6):
             try:
-                raw = await nepse_call(["floorsheets"], page=page, size=500)
+                async with NEPSE_CALL_LOCK:
+                    raw = await nepse_call(["floorsheets"], page=page, size=500)
                 got, tp, te = unpack(raw)
                 if got: break
+                if attempt == 1 and page == 1:
+                    try:
+                        await reset_nepse_client()
+                    except Exception:
+                        pass
             except Exception:
                 pass
             if attempt < 5:
@@ -2020,7 +2047,8 @@ async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: in
                 for attempt in range(3):
                     await asyncio.sleep(2.0)
                     try:
-                        raw = await nepse_call(["floorsheets"], page=page, size=500)
+                        async with NEPSE_CALL_LOCK:
+                            raw = await nepse_call(["floorsheets"], page=page, size=500)
                         got, tp2, te2 = unpack(raw)
                         if tp2:
                             try: target_pages = max(target_pages, min(max_pages, int(tp2)))
