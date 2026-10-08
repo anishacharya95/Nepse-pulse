@@ -2081,7 +2081,20 @@ async def api_floorsheet(symbol: Optional[str]=None, limit:int=Query(100000,ge=1
     # Some older wrappers are one-based. Only page 0 gets this compatibility probe.
     if not rows and page == 0:
         rows, tp, te = await call_paged(1)
-        actual_page = 1
+        actual_page = 1 if rows else page
+    # Last-resort real executed-trade fallback. This is intentionally limited
+    # to the first page so a transient NEPSE SDK outage never leaves Trade Tape
+    # stuck on "waiting for feed".
+    if not rows and page == 0:
+        try:
+            fallback_rows = await _merolagani_floorsheet_fallback(symbol)
+            if fallback_rows:
+                rows = fallback_rows[:size]
+                actual_page = 0
+                tp = None
+                te = len(fallback_rows)
+        except Exception:
+            pass
 
     if rows and not symbol and actual_page == 0:
         _LAST_VALID_FLOORSHEET = list(rows)
@@ -2109,9 +2122,115 @@ async def api_brokers():
         return cached
     return data
 
+SECTOR_INDEX_IDS = {
+    "Commercial Banks": 51,
+    "Development Banks": 55,
+    "Finance": 60,
+    "Hotels and Tourism": 52,
+    "Hydro Power": 54,
+    "Investment": 67,
+    "Life Insurance": 65,
+    "Manufacturing and Processing": 56,
+    "Microfinance": 64,
+    "Mutual Fund": 66,
+    "Non Life Insurance": 59,
+    "Others": 53,
+    "Trading": 61,
+}
+
+
+def _sector_index_id(name: str) -> int | None:
+    key = str(name or "").strip().lower().replace("&", "and").replace("-", " ")
+    key = " ".join(key.split())
+    aliases = {
+        "banking": "Commercial Banks", "commercial bank": "Commercial Banks", "commercial banks": "Commercial Banks",
+        "development bank": "Development Banks", "development banks": "Development Banks",
+        "hotel and tourism": "Hotels and Tourism", "hotels and tourism": "Hotels and Tourism", "hotels": "Hotels and Tourism",
+        "hydropower": "Hydro Power", "hydro power": "Hydro Power", "hydropower index": "Hydro Power",
+        "manufacturing": "Manufacturing and Processing", "manufacturing and processing": "Manufacturing and Processing",
+        "microfinance index": "Microfinance", "non life insurance": "Non Life Insurance", "non-life insurance": "Non Life Insurance",
+        "mutual funds": "Mutual Fund", "mutual fund": "Mutual Fund", "trading index": "Trading", "others index": "Others",
+        "investment index": "Investment", "life insurance index": "Life Insurance",
+    }
+    canonical = aliases.get(key, str(name or "").strip())
+    return SECTOR_INDEX_IDS.get(canonical)
+
+
+async def _get_sector_history(index_id: int):
+    key = f"sector_history:{index_id}"
+    async def load():
+        errors=[]
+        # nepse.py / nepsepy installations expose either an index graph or index history.
+        for method, args in (("index_daily_graph", (index_id,)), ("index_history", (index_id, 1, 1000))):
+            try:
+                raw = await production_call(method, *args)
+                rows = _normalize_graph_points(raw)
+                if rows:
+                    return {"ok": True, "data": rows, "source": "NEPSE sector index graph", "updatedAt": now_iso(), "errors": errors}
+            except Exception as e:
+                errors.append(f"production {method}: {e}")
+        try:
+            client = await get_nepse_client()
+            for method, args in (("index_daily_graph", (index_id,)), ("index_history", (index_id, 1, 1000))):
+                fn = getattr(client, method, None)
+                if fn is None: continue
+                try:
+                    raw = await fn(*args)
+                    rows = _normalize_graph_points(raw)
+                    if rows:
+                        return {"ok": True, "data": rows, "source": "NEPSE sector index graph", "updatedAt": now_iso(), "errors": errors}
+                except Exception as e:
+                    errors.append(f"nepsepy {method}: {e}")
+        except Exception as e:
+            errors.append(f"client: {e}")
+        return {"ok": False, "data": [], "source": None, "updatedAt": now_iso(), "errors": errors}
+    return await cached(key, load)
+
+
+def _normalize_graph_points(raw: Any) -> list[dict]:
+    out=[]
+    def add(ts, value):
+        v=num(value)
+        if v is None: return
+        if isinstance(ts, (int,float)):
+            try: dt=datetime.fromtimestamp(float(ts), tz=timezone.utc).isoformat()
+            except Exception: dt=str(ts)
+        else: dt=str(ts or "")
+        out.append({"time": dt, "value": v})
+    def walk(x):
+        if isinstance(x, (list,tuple)):
+            if len(x) >= 2 and not isinstance(x[0], (dict,list,tuple)) and not isinstance(x[1], (dict,list,tuple)):
+                add(x[0], x[1]); return
+            for y in x: walk(y)
+        elif isinstance(x, dict):
+            # Common graph point shapes.
+            ts=pick(x,["time","timestamp","unixTime","unix_time","date","businessDate","tradingDate","datetime"])
+            val=pick(x,["value","indexValue","currentValue","close","price","ltp","lastPrice"])
+            if ts is not None and val is not None: add(ts,val)
+            for k in ("data","content","results","result","rows","history","points","graph"):
+                if isinstance(x.get(k),(list,dict)): walk(x[k])
+    walk(raw)
+    seen=set(); clean=[]
+    for r in sorted(out,key=lambda z:z["time"]):
+        k=(r["time"],r["value"])
+        if k not in seen: seen.add(k); clean.append(r)
+    return clean[-240:]
+
 @app.get("/api/sectors")
 async def api_sectors():
-    return await get_sectors()
+    data = await get_sectors()
+    if isinstance(data, dict) and isinstance(data.get("data"), list):
+        enriched=[]
+        for x in data["data"]:
+            item=dict(x)
+            item["indexId"] = _sector_index_id(item.get("sector") or item.get("name"))
+            enriched.append(item)
+        data=dict(data); data["data"]=enriched
+    return data
+
+@app.get("/api/sector-history")
+async def api_sector_history(index_id: int = Query(..., ge=1, le=200)):
+    return await _get_sector_history(index_id)
 
 @app.get("/api/technical/{symbol}")
 async def api_technical(symbol:str):

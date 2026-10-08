@@ -8,7 +8,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#ffffff">
 <meta name="nepse-pulse-chart-revision" content="red-green-market-direction-v2">
-<meta name="description" content="NEPSE Pulse — premium Nepal market intelligence terminal • Central Feed + Portfolio + Dividends + Screener + Floorsheet + Sector V5">
+<meta name="description" content="NEPSE Pulse — premium Nepal market intelligence terminal • Central Feed + Profile + Dividends + Screener + Floorsheet + Sector V5">
 <title>NEPSE Pulse — Nepal Market Intelligence</title>
 <style>
 :root{
@@ -1619,29 +1619,6 @@ body{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",san
 
 
 
-  <section class="v22-section" id="v22-watchlist-section">
-    <div class="v22-card">
-      <div class="v22-head">
-        <div><h2>Watchlist</h2><p>Your saved NEPSE securities</p></div>
-        <button class="v22-link" type="button" onclick="v22OpenWatchlist()">Manage</button>
-      </div>
-      <div id="v22-watchlist-body" class="v22-watch-empty">Sign in to sync your watchlist across devices.</div>
-    </div>
-  </section>
-
-  <section class="v22-section" id="v22-profile-section">
-    <div class="v22-card">
-      <div class="v22-head">
-        <div><h2>Profile</h2><p>Account and synced Pulse data</p></div>
-      </div>
-      <div id="v22-profile-body" class="v22-profile">
-        <div class="v22-avatar">G</div>
-        <div><div class="v22-profile-name">Guest</div><div class="v22-profile-sub">Sign in to sync Watchlist and future Portfolio/Alerts.</div></div>
-        <button class="v22-auth-btn" type="button" onclick="v22OpenAuth()">Sign in</button>
-      </div>
-    </div>
-  </section>
-
 </main>
 </div>
 
@@ -1668,7 +1645,7 @@ body{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",san
   <button class="active" onclick="setNav(this,'Home')"><span class="ni">⌂</span>Home</button>
   <button onclick="setNav(this,'Markets')"><span class="ni">⌁</span>Market</button>
   <button onclick="openTechnicalScreener()"><span class="ni">⌕</span>Screener</button>
-  <button onclick="openModule('Portfolio')"><span class="ni">▣</span>Portfolio</button>
+  <button onclick="openProfile()"><span class="ni">◉</span>Profile</button>
   <button onclick="openFeatures()"><span class="ni">⋮</span>More</button>
 </nav></div>
 
@@ -1731,14 +1708,96 @@ body{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",san
 </div>
 
 <div class="modal" id="profileModal" onclick="if(event.target===this)closeProfile()">
-  <div class="sheet profile-sheet">
+  <div class="sheet profile-sheet np-profile-dashboard">
     <div class="grab"></div>
-    <div class="sheet-head"><h2>Your Pulse Account</h2><button class="close" onclick="closeProfile()">Close</button></div>
-    <div class="profile-row"><div class="avatar" id="profileAvatar">P</div><div><b id="profileName">Not signed in</b><small id="profileEmail">Connect an account to sync your data.</small></div></div>
-    <div class="auth-status" id="profileStatus">Authentication is configured as provider-ready. Real Google, Facebook and phone OTP require your Supabase project URL/key plus enabled providers.</div>
-    <button class="auth-btn" onclick="signOutPulse()">↪ Sign out</button>
+    <div class="np-profile-top"><div><div class="np-eyebrow">YOUR PULSE</div><h2>Profile</h2><p>Account, portfolio and market activity</p></div><button class="np-icon-btn" type="button" onclick="closeProfile()" aria-label="Close">×</button></div>
+
+    <div class="np-profile-user">
+      <div class="np-profile-avatar" id="profileAvatar">P</div>
+      <div class="np-profile-user-copy"><b id="profileName">Guest</b><small id="profileEmail">Sign in to sync your data across devices.</small></div>
+      <button class="np-profile-settings" type="button" onclick="v22OpenAuth ? v22OpenAuth() : openLogin()">⚙</button>
+    </div>
+
+    <div class="np-profile-hero">
+      <div class="np-label">TOTAL VALUE</div>
+      <div class="np-value" id="profileTotalValue">NPR —</div>
+      <div class="np-sub">Market value · Today</div>
+      <div class="np-divider"></div>
+      <div class="np-profile-pl"><div><span>TODAY'S P&amp;L</span><b id="profileTodayPL">—</b></div><small id="profileUpdated">Live feed</small></div>
+    </div>
+
+    <div class="np-profile-tabs" role="tablist">
+      <button class="active" type="button" data-profile-tab="overview">Overview</button>
+      <button type="button" data-profile-tab="holdings">Holdings</button>
+    </div>
+
+    <section id="profileOverviewPanel" class="np-profile-panel">
+      <div class="np-section-head"><h3>Allocation</h3><span id="profileHoldingCount">0 holdings</span></div>
+      <div class="np-allocation-card"><div class="np-donut" id="profileDonut"><span id="profileDonutValue">NPR —</span></div><div class="np-allocation-list" id="profileAllocation"><div class="np-empty">Add transactions to see allocation.</div></div></div>
+
+      <div class="np-section-head np-performance-head"><h3>Performance</h3><span>This month</span></div>
+      <div class="np-performance-card"><div class="np-performance-top"><b id="profilePerformanceValue">—</b><strong id="profilePerformancePct">—</strong></div><div class="np-bars" id="profileBars"></div><div class="np-performance-dates"><span>Start</span><span>Today</span></div></div>
+    </section>
+
+    <section id="profileHoldingsPanel" class="np-profile-panel" hidden>
+      <div class="np-section-head"><div><h3>Holdings</h3><span>Track your positions and live value</span></div><div class="np-head-actions"><button class="np-export" type="button" onclick="toast('Export is available when portfolio transactions are recorded.')">Export</button><button class="np-mini-add" type="button" onclick="toggleProfileAdd('holding')">＋ Add</button></div></div>
+      <div id="profileHoldingForm" class="np-inline-form" hidden>
+        <div class="np-form-grid"><input id="profileAddSymbol" placeholder="Symbol e.g. NABIL" autocomplete="off"><select id="profileAddSide"><option value="BUY">Buy</option><option value="SELL">Sell</option></select><input id="profileAddQty" type="number" min="1" step="1" placeholder="Quantity"><input id="profileAddPrice" type="number" min="0" step="0.01" placeholder="Price"></div>
+        <div class="np-form-actions"><button type="button" class="np-cancel-btn" onclick="toggleProfileAdd('holding',false)">Cancel</button><button type="button" class="np-save-btn" onclick="addProfileHolding()">Save holding</button></div>
+      </div>
+      <div id="profileHoldingsList" class="np-holdings-list"><div class="np-empty">No holdings yet. Tap Add to record your first position.</div></div>
+    </section>
+
+    <section class="np-profile-watch">
+      <div class="np-section-head"><div><h3>Watchlist</h3><span>Quick access to your saved securities</span></div><div class="np-head-actions"><button class="np-mini-add" type="button" onclick="toggleProfileAdd('watch')">＋ Add</button><button class="np-export" type="button" onclick="closeProfile();document.getElementById('alerts-watchlist-v6')?.scrollIntoView({behavior:'smooth',block:'start'})">View all</button></div></div>
+      <div id="profileWatchForm" class="np-inline-form" hidden>
+        <div class="np-form-grid np-watch-form-grid"><input id="profileWatchSymbol" placeholder="Symbol e.g. NABIL" autocomplete="off"><button type="button" class="np-save-btn" onclick="addProfileWatch()">Add to watchlist</button></div>
+      </div>
+      <div id="profileWatchlist" class="np-profile-watch-list"><div class="np-empty">Your Watchlist is empty. Tap Add to save a security.</div></div>
+    </section>
+
+    <div class="auth-status np-profile-auth-status" id="profileStatus">Sign in to sync your Watchlist, portfolio and preferences across devices.</div>
+    <button class="auth-btn np-signout" onclick="signOutPulse()">↪ Sign out</button>
   </div>
 </div>
+<style id="np-profile-interaction-fix">
+/* Profile interaction fix: keep the profile sheet above the sticky app chrome and fully tappable. */
+#profileModal{z-index:10050!important;pointer-events:none!important;align-items:flex-end!important;}
+#profileModal.open{display:flex!important;pointer-events:auto!important;}
+#profileModal .np-profile-dashboard{position:relative;z-index:10051!important;pointer-events:auto!important;max-height:calc(100vh - 12px)!important;min-height:0!important;box-sizing:border-box!important;}
+#profileModal .np-profile-tabs button,#profileModal .np-mini-add,#profileModal .np-save-btn,#profileModal .np-cancel-btn,#profileModal .np-export,#profileModal input,#profileModal select,#profileModal .np-profile-settings,#profileModal .np-icon-btn{pointer-events:auto!important;touch-action:manipulation;}
+#profileModal .np-profile-tabs button{cursor:pointer;}
+</style>
+<style id="np-profile-dashboard-v1-css">
+/* Clean Profile — matches the NEPSE Pulse home visual language. */
+.np-profile-dashboard{
+  background:#f4f8f6!important;color:#102824!important;max-height:94vh;overflow:auto;
+  padding:18px 14px 34px!important;border-radius:30px 30px 0 0!important;
+}
+.np-profile-top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
+.np-eyebrow{font-size:10px;font-weight:850;letter-spacing:1.7px;color:#16816a;margin-bottom:3px}
+.np-profile-top h2{margin:0;font-size:30px;line-height:1.05;letter-spacing:-.8px;color:#102824}
+.np-profile-top p{margin:5px 0 0;color:#72817c;font-size:13px}
+.np-icon-btn{width:42px;height:42px;border-radius:14px;border:1px solid #d8e4df;background:#fff;font-size:25px;color:#183c34;box-shadow:0 3px 12px rgba(16,42,36,.06)}
+.np-profile-user{display:flex;align-items:center;gap:12px;background:#fff;border:1px solid #dce7e2;border-radius:20px;padding:12px 13px;margin-bottom:12px;box-shadow:0 4px 15px rgba(20,45,38,.045)}
+.np-profile-avatar{width:50px;height:50px;border-radius:16px;display:grid;place-items:center;background:linear-gradient(145deg,#0a5b55,#147b64);color:#fff;font-size:21px;font-weight:850;box-shadow:0 6px 14px rgba(10,91,85,.18)}
+.np-profile-user-copy{min-width:0;flex:1}.np-profile-user-copy b{display:block;font-size:17px;color:#102824}.np-profile-user-copy small{display:block;color:#7b8984;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px}
+.np-profile-settings{width:40px;height:40px;border-radius:13px;border:1px solid #dce7e2;background:#eef6f2;color:#0d6657;font-size:18px}
+.np-profile-hero{position:relative;overflow:hidden;background:linear-gradient(135deg,#073f40 0%,#0b554b 55%,#126a57 100%);color:#fff;border-radius:24px;padding:20px;margin-bottom:12px;box-shadow:0 10px 26px rgba(7,63,64,.15)}
+.np-profile-hero:after{content:"";position:absolute;width:150px;height:150px;border-radius:50%;right:-65px;top:-75px;background:rgba(255,255,255,.06)}
+.np-profile-hero .np-label{color:#b9d2ca}.np-label{font-size:10px;font-weight:850;letter-spacing:1.5px}.np-value{font-size:31px;font-weight:900;margin-top:6px;letter-spacing:-.8px}.np-sub{color:#c5d6d0;font-size:13px;margin-top:2px}.np-divider{height:1px;background:rgba(255,255,255,.22);margin:18px 0 14px}.np-profile-pl{display:flex;justify-content:space-between;align-items:end;gap:12px}.np-profile-pl span{display:block;color:#b9d2ca;font-size:10px;font-weight:850;letter-spacing:1.1px}.np-profile-pl b{display:block;color:#ffd36a;font-size:18px;margin-top:4px}.np-profile-pl small{color:#c5d6d0;font-size:11px}
+.np-profile-tabs{display:grid;grid-template-columns:1fr 1fr;background:#e5eeea;border:1px solid #d8e3de;border-radius:17px;padding:4px;margin:12px 0}.np-profile-tabs button{border:0;background:transparent;border-radius:13px;padding:10px;font-size:14px;font-weight:800;color:#73817c}.np-profile-tabs button.active{background:#fff;color:#12362f;box-shadow:0 3px 9px rgba(20,45,38,.08)}
+.np-section-head{display:flex;justify-content:space-between;align-items:end;gap:12px;margin:18px 2px 9px}.np-section-head h3{margin:0;font-size:20px;letter-spacing:-.4px;color:#102824}.np-section-head>span{color:#77847f;font-size:12px}.np-export{border:0;background:#eaf4ef;color:#11725c;border-radius:10px;padding:7px 10px;font-weight:850;font-size:12px}
+.np-allocation-card,.np-performance-card{background:#fff;border:1px solid #dce6e1;border-radius:21px;padding:16px;box-shadow:0 4px 14px rgba(20,45,38,.04)}.np-allocation-card{display:grid;grid-template-columns:132px 1fr;align-items:center;gap:12px}.np-donut{width:122px;height:122px;border-radius:50%;display:grid;place-items:center;background:conic-gradient(#14765d 0 70%,#e7edf0 70% 100%);position:relative}.np-donut:after{content:"";position:absolute;width:79px;height:79px;border-radius:50%;background:#fff}.np-donut span{position:relative;z-index:1;text-align:center;font-size:14px;font-weight:850;color:#17322c}.np-allocation-list{display:flex;flex-direction:column;gap:10px}.np-allocation-row{display:grid;grid-template-columns:9px 1fr auto;gap:8px;align-items:center;font-size:13px}.np-allocation-dot{width:9px;height:9px;border-radius:50%;background:#14765d}.np-allocation-row span:last-child{color:#75827d;font-weight:800}
+.np-performance-top{display:flex;justify-content:space-between;align-items:center}.np-performance-top b{font-size:23px;color:#102824}.np-performance-top strong{font-size:16px;color:#14765d}.np-bars{height:92px;display:flex;align-items:end;gap:7px;margin-top:12px}.np-bar{flex:1;min-width:0;background:#e6ece9;border-radius:7px 7px 3px 3px}.np-bar.live{background:#14745c}.np-performance-dates{display:flex;justify-content:space-between;color:#697771;font-size:11px;margin-top:7px}
+.np-holdings-list{display:flex;flex-direction:column;gap:8px}.np-holding{display:flex;align-items:center;gap:11px;background:#fff;border:1px solid #dce6e1;border-radius:17px;padding:11px 12px;box-shadow:0 3px 10px rgba(20,45,38,.025)}.np-holding-avatar{width:43px;height:43px;border-radius:13px;background:#e7f0ec;color:#14745c;display:grid;place-items:center;font-weight:900}.np-holding-main{flex:1;min-width:0}.np-holding-main b{display:block;font-size:15px}.np-holding-main small{display:block;color:#7b8783;margin-top:2px;font-size:11px}.np-holding-value{text-align:right}.np-holding-value b{display:block;font-size:14px}.np-holding-value small{display:block;color:#14745c;margin-top:2px;font-size:11px;font-weight:800}
+.np-add-transaction{width:100%;border:0;border-radius:17px;background:#14745c;color:#fff;padding:14px;font-size:15px;font-weight:850;margin-top:10px;box-shadow:0 7px 16px rgba(20,116,92,.16)}
+.np-profile-watch{margin-top:4px}.np-profile-watch-list{display:flex;flex-direction:column;gap:7px}.np-watch-row{display:flex;align-items:center;gap:10px;background:#fff;border:1px solid #dce6e1;border-radius:15px;padding:10px 12px}.np-watch-row b{flex:1;font-size:13px}.np-watch-row span{font-weight:800;font-size:12px}.np-watch-up{color:#14745c}.np-watch-down{color:#a94b4b}.np-empty{padding:16px;text-align:center;color:#7b8783;background:#fff;border:1px dashed #d2ddd7;border-radius:15px;font-size:12px}.np-profile-auth-status{margin-top:12px!important;font-size:12px!important}.np-signout{margin-top:7px;width:100%}
+.np-head-actions{display:flex;align-items:center;gap:6px}.np-mini-add{border:0;background:#14745c;color:#fff;border-radius:11px;padding:8px 11px;font-size:12px;font-weight:850;box-shadow:0 4px 10px rgba(20,116,92,.14)}
+.np-inline-form{background:#f7fbf9;border:1px solid #d9e7e1;border-radius:17px;padding:12px;margin:0 0 10px}.np-form-grid{display:grid;grid-template-columns:1.2fr .8fr 1fr 1fr;gap:7px}.np-form-grid input,.np-form-grid select{width:100%;box-sizing:border-box;border:1px solid #d3e0da;background:#fff;color:#18362f;border-radius:11px;padding:10px 9px;font-size:12px;outline:none}.np-form-actions{display:flex;justify-content:flex-end;gap:7px;margin-top:8px}.np-cancel-btn,.np-save-btn{border:0;border-radius:11px;padding:9px 12px;font-weight:800;font-size:12px}.np-cancel-btn{background:#e8efec;color:#50645d}.np-save-btn{background:#14745c;color:#fff}.np-watch-form-grid{grid-template-columns:1fr auto}.np-watch-form-grid .np-save-btn{min-width:130px}
+.np-chart-col{flex:1;min-width:30px;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:4px}.np-chart-col .np-bar{width:100%;min-height:8px}.np-chart-col span{font-size:8px;color:#718079;max-width:42px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.np-chart-empty{width:100%;display:grid;place-items:center;color:#7b8783;font-size:12px;padding:24px 8px}
+@media(max-width:430px){.np-profile-dashboard{padding-left:11px!important;padding-right:11px!important}.np-profile-top h2{font-size:28px}.np-allocation-card{grid-template-columns:105px 1fr;padding:13px}.np-donut{width:98px;height:98px}.np-donut:after{width:64px;height:64px}.np-profile-hero .np-value{font-size:28px}.np-allocation-list{gap:8px}.np-allocation-row{font-size:12px}}
+</style>
 
 <div class="drawer" id="tradersZoneModal" onclick="if(event.target===this)closeTradersZone()">
   <div class="sheet tz-sheet">
@@ -2262,7 +2321,64 @@ async function renderTraderScan(name){
 const PULSE_AUTH_CONFIG = window.NEPSE_PULSE_AUTH || {supabaseUrl:'',supabaseAnonKey:''};
 let pulseSession = null;
 
-function openProfile(){document.getElementById('profileModal').classList.add('open')}
+function initProfileDashboardInteractions(){
+  const modal=document.getElementById('profileModal');
+  if(!modal||modal.dataset.profileInteractions==='1')return;
+  modal.dataset.profileInteractions='1';
+  modal.querySelectorAll('[data-profile-tab]').forEach(btn=>{
+    btn.addEventListener('click',function(e){
+      e.preventDefault();
+      e.stopPropagation();
+      const tab=this.dataset.profileTab;
+      modal.querySelectorAll('[data-profile-tab]').forEach(x=>x.classList.toggle('active',x===this));
+      const overview=document.getElementById('profileOverviewPanel');
+      const holdings=document.getElementById('profileHoldingsPanel');
+      if(overview)overview.hidden=tab!=='overview';
+      if(holdings)holdings.hidden=tab!=='holdings';
+      renderProfileDashboard();
+    });
+  });
+}
+
+function renderProfileDashboard(){
+  const tx=(()=>{try{return JSON.parse(localStorage.getItem('nepsePulsePortfolioTxV1')||'[]')}catch(e){return[]}})();
+  const rows=(window.PulseFeedEngine?.state?.().live||window.PULSE_FEED?.state?.liveMarket||[]);
+  const num=v=>{const n=Number(String(v??'').replace(/,/g,''));return Number.isFinite(n)?n:null};
+  const pick=(o,keys)=>{for(const k of keys){if(o&&o[k]!=null&&o[k]!=='')return o[k]}return null};
+  const map={};rows.forEach(r=>{const s=String(pick(r,['symbol','stockSymbol','ticker'])||'').toUpperCase();if(s)map[s]=num(pick(r,['ltp','lastPrice','price','close','lastTradedPrice']))});
+  const h={}; tx.slice().sort((a,b)=>String(a.date||'').localeCompare(String(b.date||'')) || (a.createdAt||0)-(b.createdAt||0)).forEach(t=>{const s=String(t.symbol||'').toUpperCase();if(!s)return;if(!h[s])h[s]={symbol:s,qty:0,cost:0};const q=num(t.qty)||0,p=num(t.price)||0;if(t.side==='BUY'){h[s].qty+=q;h[s].cost+=q*p}else{const sell=Math.min(q,h[s].qty),avg=h[s].qty?h[s].cost/h[s].qty:0;h[s].qty-=sell;h[s].cost=Math.max(0,h[s].cost-sell*avg)}});
+  const hs=Object.values(h).filter(x=>x.qty>0); let total=0,cost=0;
+  const calc=hs.map(x=>{const live=map[x.symbol],mv=live==null?null:x.qty*live;cost+=x.cost;if(mv!=null)total+=mv;return {...x,live,mv,pl:mv==null?null:mv-x.cost}});
+  const money=v=>v==null?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:0});
+  const val=document.getElementById('profileTotalValue');if(val)val.textContent='NPR '+money(total||null);
+  const pl=calc.reduce((a,x)=>a+(x.pl??0),0);const hasLive=calc.some(x=>x.mv!=null);const plEl=document.getElementById('profileTodayPL');if(plEl)plEl.textContent=hasLive?((pl>=0?'+':'')+'NPR '+money(Math.abs(pl))):'—';
+  const count=document.getElementById('profileHoldingCount');if(count)count.textContent=hs.length+' holding'+(hs.length===1?'':'s');
+  const donut=document.getElementById('profileDonutValue');if(donut)donut.textContent='NPR '+(total?money(total):'—');
+  const alloc=document.getElementById('profileAllocation');
+  const sorted=[...calc].sort((a,b)=>(b.mv||b.cost)-(a.mv||a.cost));
+  if(alloc)alloc.innerHTML=sorted.length?sorted.slice(0,5).map(x=>{const base=total||cost||1,pct=((x.mv??x.cost)/base)*100;return `<div class="np-allocation-row"><i class="np-allocation-dot"></i><b>${x.symbol}</b><span>${pct.toFixed(0)}%</span></div>`}).join(''):'<div class="np-empty">Add transactions to see allocation.</div>';
+  if(document.getElementById('profileDonut')){const pcts=sorted.slice(0,5).map(x=>((x.mv??x.cost)/(total||cost||1))*100);let acc=0;const parts=pcts.map((p,i)=>{const st=acc;acc+=p;return `${i%2?'#e8b33f':'#16765d'} ${st}% ${acc}%`});document.getElementById('profileDonut').style.background=parts.length?'conic-gradient('+parts.join(',')+')':'conic-gradient(#dfe7e3 0 100%)'}
+  const list=document.getElementById('profileHoldingsList');if(list)list.innerHTML=calc.length?calc.map(x=>`<div class="np-holding"><div class="np-holding-avatar">${x.symbol.charAt(0)}</div><div class="np-holding-main"><b>${x.symbol}</b><small>${x.qty.toLocaleString()} shares · Avg NPR ${money(x.cost/x.qty)}</small></div><div class="np-holding-value"><b>${x.mv==null?'NPR —':'NPR '+money(x.mv)}</b><small>${x.pl==null?'—':(x.pl>=0?'+':'')+'NPR '+money(Math.abs(x.pl))}</small></div></div>`).join(''):'<div class="np-empty">No holdings yet. Add a transaction from the Portfolio tracker.</div>';
+  const bars=document.getElementById('profileBars');if(bars){const chartRows=sorted.filter(x=>(x.mv??x.cost)>0).slice(0,10);if(chartRows.length){const max=Math.max(...chartRows.map(x=>x.mv??x.cost),1);bars.innerHTML=chartRows.map((x,i)=>{const amount=x.mv??x.cost;const h=Math.max(10,Math.round((amount/max)*100));return `<div class="np-chart-col" title="${x.symbol}: NPR ${money(amount)}"><i class="np-bar live" style="height:${h}%"></i><span>${x.symbol.slice(0,7)}</span></div>`}).join('')}else{bars.innerHTML='<div class="np-chart-empty">Add holdings to see your portfolio value chart.</div>'}}
+  const perf=document.getElementById('profilePerformanceValue');if(perf)perf.textContent=hasLive?((pl>=0?'+':'-')+'NPR '+money(Math.abs(pl))):'—';const pp=document.getElementById('profilePerformancePct');if(pp)pp.textContent=hasLive&&cost?((pl/cost*100>=0?'+':'')+(pl/cost*100).toFixed(1)+'%'):'—';
+  const wl=document.getElementById('profileWatchlist');let watch=[];try{watch=JSON.parse(localStorage.getItem('nepsePulseWatchlistV6')||localStorage.getItem('nepsePulseV22Watchlist')||'[]')}catch(e){};watch=[...new Set((Array.isArray(watch)?watch:[]).map(x=>String(x).toUpperCase()).filter(Boolean))];if(wl)wl.innerHTML=watch.length?watch.slice(0,6).map(s=>{const r=rows.find(x=>String(pick(x,['symbol','stockSymbol','ticker'])||'').toUpperCase()===s);const pct=num(pick(r,['pct','percentageChange','changePercent','pChange']));return `<div class="np-watch-row"><b>${s}</b><span>${num(pick(r,['ltp','lastPrice','price','close']))==null?'—':'NPR '+money(num(pick(r,['ltp','lastPrice','price','close'])))}</span><span class="${pct>0?'np-watch-up':pct<0?'np-watch-down':''}">${pct==null?'—':(pct>=0?'+':'')+pct.toFixed(2)+'%'}</span></div>`}).join(''):'<div class="np-empty">Your Watchlist is empty. Add securities from Home.</div>';
+}
+function toggleProfileAdd(type,force){
+  const id=type==='holding'?'profileHoldingForm':'profileWatchForm';const el=document.getElementById(id);if(!el)return;el.hidden=force===undefined?!el.hidden:!force;
+  if(!el.hidden){const input=el.querySelector('input');setTimeout(()=>input?.focus(),40)}
+}
+function addProfileHolding(){
+  const s=String(document.getElementById('profileAddSymbol')?.value||'').trim().toUpperCase();const side=document.getElementById('profileAddSide')?.value||'BUY';const q=Number(document.getElementById('profileAddQty')?.value);const price=Number(document.getElementById('profileAddPrice')?.value);
+  if(!s||!Number.isFinite(q)||q<=0||!Number.isFinite(price)||price<0){toast('Enter symbol, quantity and price.');return}
+  let tx=[];try{tx=JSON.parse(localStorage.getItem('nepsePulsePortfolioTxV1')||'[]')}catch(e){};tx.push({symbol:s,side,qty:q,price,date:new Date().toISOString().slice(0,10),createdAt:Date.now()});localStorage.setItem('nepsePulsePortfolioTxV1',JSON.stringify(tx));
+  document.getElementById('profileAddSymbol').value='';document.getElementById('profileAddQty').value='';document.getElementById('profileAddPrice').value='';toggleProfileAdd('holding',false);renderProfileDashboard();toast(s+' '+side.toLowerCase()+' transaction added.');
+}
+function addProfileWatch(){
+  const input=document.getElementById('profileWatchSymbol');const s=String(input?.value||'').trim().toUpperCase();if(!s){toast('Enter a symbol to add.');return}
+  let list=[];try{list=JSON.parse(localStorage.getItem('nepsePulseWatchlistV6')||localStorage.getItem('nepsePulseV22Watchlist')||'[]')}catch(e){};list=[...new Set((Array.isArray(list)?list:[]).map(x=>String(x).toUpperCase()).filter(Boolean))];if(!list.includes(s))list.push(s);localStorage.setItem('nepsePulseWatchlistV6',JSON.stringify(list));
+  if(input)input.value='';toggleProfileAdd('watch',false);renderProfileDashboard();toast(s+' added to Watchlist.');
+}
+function openProfile(){initProfileDashboardInteractions();document.getElementById('profileModal').classList.add('open');renderProfileDashboard()}
 function closeProfile(){document.getElementById('profileModal').classList.remove('open')}
 
 function authReady(){
@@ -2855,6 +2971,7 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
 
 
 <style id="pulse-portfolio-v1-css">
+#portfolioZone{display:none!important}
 #portfolioZone{margin:18px 0;padding:16px;border-radius:22px;background:var(--card,#10141c);border:1px solid rgba(127,127,127,.18)}
 #portfolioZone .p-head{display:flex;justify-content:space-between;align-items:center;gap:10px}
 #portfolioZone h2{margin:0;font-size:20px}
@@ -3543,7 +3660,7 @@ async function loadDirect(){
 
     all=rows.map(normalize).filter(x=>x.symbol||x.buyer||x.seller);
     window.__PULSE_LAST_VALID_FLOORSHEET=all.slice();
-    $('fsStatus').textContent='LIVE • '+all.length.toLocaleString()+' loaded • '+new Date().toLocaleTimeString();
+    $('fsStatus').textContent='LOADING • '+all.length.toLocaleString()+' trades received…';
     $('fsDot').style.background='#20a464';
     render();
 
@@ -3563,9 +3680,11 @@ async function loadDirect(){
     let loadedPages=0;
     while(nextPage<maxProbePages){
       const batch=[];
-      for(let j=0;j<batchSize && nextPage+j<maxProbePages;j++)batch.push(nextPage+j);
+      for(let j=0;j<1 && nextPage+j<maxProbePages;j++)batch.push(nextPage+j);
       nextPage+=batch.length;
-      const results=await Promise.all(batch.map(async pg=>{
+      const results=[];
+      for(const pg of batch){
+        results.push(await (async()=>{
         try{
           for(let attempt=0;attempt<4;attempt++){
             try{
@@ -3578,7 +3697,10 @@ async function loadDirect(){
             }catch(e){await new Promise(r=>setTimeout(r,300*(attempt+1)))}
           }
           return []
-      }));
+        })());
+        // NEPSE's floorsheet endpoint is rate-sensitive; keep page requests sequential.
+        await new Promise(resolve=>setTimeout(resolve,420));
+      }
       let batchRows=0,added=0;
       const seen=new Set(all.map(x=>x.id||[x.symbol,x.time,x.qty,x.price,x.buyer,x.seller].join('|')));
       for(const raw of results.flat()){
@@ -3610,13 +3732,13 @@ function sync(st){
  const status=String(st?.status||'OFFLINE').toUpperCase();
  // NEVER replace a valid tape with a transient empty websocket/central snapshot.
  // The exchange can briefly return an empty payload while the next poll is loading.
- if(incoming.length){
+ if(incoming.length && (!all.length || incoming.length >= all.length)){
    all=incoming;
-   window.__PULSE_LAST_VALID_FLOORSHEET=all;
+   window.__PULSE_LAST_VALID_FLOORSHEET=all.slice();
  }else if(!all.length && Array.isArray(window.__PULSE_LAST_VALID_FLOORSHEET)){
    all=window.__PULSE_LAST_VALID_FLOORSHEET.slice();
  }
- $('fsStatus').textContent=(incoming.length?'LIVE':'CACHED')+(st?.updatedAt?' • '+new Date(st.updatedAt).toLocaleTimeString():'');
+ $('fsStatus').textContent=all.length?((incoming.length && incoming.length>=all.length?'LIVE':'CACHED')+' • '+all.length.toLocaleString()+' trades'):'WAITING FOR FLOORSHEET • retrying…';
  $('fsDot').style.background=incoming.length?'#20a464':all.length?'#d29b19':'#999';
  render();
  if(!all.length)loadDirect();
@@ -3726,15 +3848,14 @@ document.addEventListener('DOMContentLoaded',()=>{
 </section>
 
 <style id="pulse-v5-sector-style">
-#sector-breadth-v5{margin:28px 0;border:1px solid rgba(127,127,127,.18);border-radius:24px;padding:20px;background:rgba(127,127,127,.045);font-family:inherit}
-.sv5-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:16px}.sv5-kicker{font-size:10px;letter-spacing:.14em;font-weight:800;opacity:.62}.sv5-head h2{margin:4px 0;font-size:25px}.sv5-head p{margin:0;font-size:13px;opacity:.68}.sv5-status{font-size:11px;display:flex;align-items:center;gap:7px;padding:8px 10px;border-radius:99px;background:rgba(127,127,127,.09);white-space:nowrap}.sv5-status span:first-child{width:7px;height:7px;border-radius:50%;background:#999}
-.sv5-metrics{display:grid;grid-template-columns:repeat(6,1fr);gap:9px;margin-bottom:14px}.sv5-metrics div{padding:12px;border-radius:13px;background:rgba(127,127,127,.07)}.sv5-metrics b{display:block;font-size:18px}.sv5-metrics span{font-size:10px;opacity:.6}
-.sv5-toolbar{display:flex;gap:12px;align-items:end;justify-content:space-between;margin-bottom:14px}.sv5-tabs{display:flex;gap:7px;overflow:auto}.sv5-tab,.sv5-drill-head button{border:1px solid rgba(127,127,127,.2);background:transparent;color:inherit;border-radius:10px;padding:9px 12px;white-space:nowrap;cursor:pointer}.sv5-tab.active{font-weight:800;background:rgba(127,127,127,.13)}.sv5-toolbar label{font-size:10px;opacity:.7;min-width:160px}.sv5-toolbar input,.sv5-toolbar select{display:block;width:100%;box-sizing:border-box;margin-top:5px;border:1px solid rgba(127,127,127,.22);border-radius:9px;padding:9px;background:transparent;color:inherit}
-.sv5-heatmap{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.sv5-tile{border:1px solid rgba(127,127,127,.15);border-radius:15px;padding:14px;cursor:pointer;min-height:105px;transition:transform .15s ease}.sv5-tile:hover{transform:translateY(-2px)}.sv5-tile.positive{background:rgba(32,164,100,.10)}.sv5-tile.negative{background:rgba(210,70,70,.10)}.sv5-tile.neutral{background:rgba(127,127,127,.07)}.sv5-tile-top{display:flex;justify-content:space-between;gap:8px}.sv5-tile-name{font-weight:800;font-size:13px}.sv5-tile-change{font-weight:800;font-size:13px}.sv5-tile-stats{display:flex;gap:10px;margin-top:17px;font-size:10px;opacity:.65}.sv5-drill{margin-top:14px;border:1px solid rgba(127,127,127,.15);border-radius:16px;padding:14px;background:rgba(127,127,127,.035)}.sv5-drill-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.sv5-drill-head h3{margin:4px 0;font-size:19px}
-.sv5-table-wrap{overflow:auto}.sv5-table{width:100%;border-collapse:collapse;min-width:680px;font-size:12px}.sv5-table th,.sv5-table td{text-align:left;padding:10px;border-bottom:1px solid rgba(127,127,127,.12);white-space:nowrap}.sv5-table th{font-size:10px;opacity:.6}.sv5-up{font-weight:800}.sv5-down{font-weight:800}.sv5-empty{text-align:center!important;padding:22px!important;opacity:.6}
-.sv5-breadth-grid{display:grid;grid-template-columns:1.5fr 1fr;gap:14px}.sv5-card{border:1px solid rgba(127,127,127,.15);border-radius:16px;padding:16px;background:rgba(127,127,127,.035)}.sv5-card-title{font-size:12px;font-weight:800;margin-bottom:16px}.sv5-bar{height:22px;border-radius:99px;overflow:hidden;display:flex;background:rgba(127,127,127,.08)}.sv5-bar span{height:100%;display:block}.sv5-legend{display:flex;justify-content:space-between;gap:8px;font-size:10px;margin-top:10px;opacity:.7}.sv5-breadth-text{font-size:14px;line-height:1.6}.sv5-breadth-text strong{font-size:20px}
-@media(max-width:900px){.sv5-metrics{grid-template-columns:repeat(3,1fr)}.sv5-heatmap{grid-template-columns:repeat(3,minmax(0,1fr))}.sv5-breadth-grid{grid-template-columns:1fr}.sv5-toolbar{flex-wrap:wrap}.sv5-toolbar label{min-width:130px;flex:1}}
-@media(max-width:600px){#sector-breadth-v5{padding:14px;border-radius:18px}.sv5-head{display:block}.sv5-status{display:inline-flex;margin-top:10px}.sv5-metrics{grid-template-columns:repeat(2,1fr)}.sv5-heatmap{grid-template-columns:repeat(2,minmax(0,1fr))}.sv5-toolbar{display:grid;grid-template-columns:1fr 1fr}.sv5-tabs{grid-column:1/-1}.sv5-toolbar label{min-width:0}.sv5-tile{min-height:90px;padding:11px}.sv5-tile-stats{margin-top:11px;flex-wrap:wrap}}
+#sector-breadth-v5{margin:28px 0;border:1px solid #e4e8ec;border-radius:24px;padding:20px;background:#fff;color:#111827;font-family:inherit;box-shadow:0 10px 32px rgba(15,23,42,.06)}
+.sv5-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:16px}.sv5-kicker{font-size:10px;letter-spacing:.14em;font-weight:800;opacity:.62}.sv5-head h2{margin:4px 0;font-size:25px}.sv5-head p{margin:0;font-size:13px;opacity:.68}.sv5-status{font-size:11px;display:flex;align-items:center;gap:7px;padding:8px 10px;border-radius:99px;background:#f5f7f8;white-space:nowrap}.sv5-status span:first-child{width:7px;height:7px;border-radius:50%;background:#999}
+.sv5-metrics{display:grid;grid-template-columns:repeat(6,1fr);gap:9px;margin-bottom:14px}.sv5-metrics div{padding:12px;border-radius:13px;background:#f7f9fb;border:1px solid #edf0f3}.sv5-metrics b{display:block;font-size:18px}.sv5-metrics span{font-size:10px;opacity:.6}
+.sv5-toolbar{display:flex;gap:12px;align-items:end;justify-content:space-between;margin-bottom:14px}.sv5-tabs{display:flex;gap:7px;overflow:auto}.sv5-tab,.sv5-drill-head button{border:1px solid #e2e6ea;background:#fff;color:#334155;border-radius:10px;padding:9px 12px;white-space:nowrap;cursor:pointer}.sv5-tab.active{font-weight:800;background:#0f766e;color:#fff;border-color:#0f766e}.sv5-toolbar label{font-size:10px;opacity:.7;min-width:160px}.sv5-toolbar input,.sv5-toolbar select{display:block;width:100%;box-sizing:border-box;margin-top:5px;border:1px solid rgba(127,127,127,.22);border-radius:9px;padding:9px;background:#fff;color:inherit}
+.sv5-heatmap{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.sv5-tile{position:relative;border:1px solid #e2e7ea;border-radius:20px;padding:15px;cursor:pointer;min-height:176px;transition:transform .15s ease,box-shadow .15s ease;background:#fff;text-align:left;color:#111827;overflow:hidden}.sv5-tile:hover{transform:translateY(-2px);box-shadow:0 10px 24px rgba(15,23,42,.09)}.sv5-tile.positive{background:linear-gradient(145deg,#f3fbf7,#fff);border-color:#d8eee4}.sv5-tile.negative{background:linear-gradient(145deg,#fff7f7,#fff);border-color:#f3dddd}.sv5-tile.neutral{background:#fafbfc}.sv5-tile-top{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}.sv5-tile-name{font-weight:850;font-size:15px;line-height:1.2;max-width:68%}.sv5-tile-change{font-weight:900;font-size:22px;white-space:nowrap}.sv5-tile.positive .sv5-tile-change{color:#35b887}.sv5-tile.negative .sv5-tile-change{color:#f06a67}.sv5-tile.neutral .sv5-tile-change{color:#64748b}.sv5-spark{width:100%;height:54px;margin:12px 0 8px;display:block}.sv5-spark .base{stroke:#d8dee2;stroke-width:1.5;stroke-dasharray:2 5}.sv5-spark .line{fill:none;stroke-width:2.8;stroke-linecap:round;stroke-linejoin:round}.sv5-spark .dot{stroke:#fff;stroke-width:2}.sv5-spark-empty{display:flex;align-items:center;justify-content:center;color:#9aa3ad;font-size:9px;border-top:1px dashed #dfe4e8;border-bottom:1px dashed #dfe4e8}.sv5-index-line{display:flex;align-items:baseline;gap:7px;margin-top:5px;color:#64748b;font-size:10px}.sv5-index-line b{font-size:16px;color:#111827}.sv5-tile.positive .sv5-spark .line{stroke:#49c99b}.sv5-tile.positive .sv5-spark .dot{fill:#49c99b}.sv5-tile.negative .sv5-spark .line{stroke:#f47770}.sv5-tile.negative .sv5-spark .dot{fill:#f47770}.sv5-tile.neutral .sv5-spark .line{stroke:#94a3b8}.sv5-tile.neutral .sv5-spark .dot{fill:#94a3b8}.sv5-money{display:flex;align-items:center;gap:9px;margin-top:2px;color:#6b7280;font-size:11px;font-weight:750}.sv5-money-bar{height:6px;border-radius:99px;background:#e8ecef;overflow:hidden;flex:1;max-width:105px}.sv5-money-fill{height:100%;border-radius:99px;background:#9ca3af}.sv5-tile.positive .sv5-money-fill{background:#7ac8ad}.sv5-tile.negative .sv5-money-fill{background:#b8a0a0}.sv5-tile-meta{display:flex;justify-content:space-between;gap:8px;margin-top:7px;font-size:10px;color:#7b8490}.sv5-drill{margin-top:14px;border:1px solid rgba(127,127,127,.15);border-radius:16px;padding:14px;background:#fafbfc}.sv5-drill-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.sv5-drill-head h3{margin:4px 0;font-size:19px}
+.sv5-table-wrap{overflow:auto}.sv5-table{width:100%;border-collapse:collapse;min-width:680px;font-size:12px}.sv5-table th,.sv5-table td{text-align:left;padding:10px;border-bottom:1px solid rgba(127,127,127,.12);white-space:nowrap}.sv5-table th{font-size:10px;opacity:.6}.sv5-up{font-weight:800}.sv5-down{font-weight:800}.sv5-empty{text-align:center!important;padding:22px!important;opacity:.6}.sv5-breadth-grid{display:grid;grid-template-columns:1.5fr 1fr;gap:14px}.sv5-card{border:1px solid rgba(127,127,127,.15);border-radius:16px;padding:16px;background:#fafbfc}.sv5-card-title{font-size:12px;font-weight:800;margin-bottom:16px}.sv5-bar{height:22px;border-radius:99px;overflow:hidden;display:flex;background:rgba(127,127,127,.08)}.sv5-bar span{height:100%;display:block}.sv5-legend{display:flex;justify-content:space-between;gap:8px;font-size:10px;margin-top:10px;opacity:.7}.sv5-breadth-text{font-size:14px;line-height:1.6}.sv5-breadth-text strong{font-size:20px}
+@media(max-width:900px){.sv5-metrics{grid-template-columns:repeat(3,1fr)}.sv5-breadth-grid{grid-template-columns:1fr}.sv5-toolbar{flex-wrap:wrap}.sv5-toolbar label{min-width:130px;flex:1}}
+@media(max-width:600px){#sector-breadth-v5{padding:14px;border-radius:18px}.sv5-head{display:block}.sv5-status{display:inline-flex;margin-top:10px}.sv5-metrics{grid-template-columns:repeat(2,1fr)}.sv5-heatmap{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.sv5-toolbar{display:grid;grid-template-columns:1fr 1fr}.sv5-tabs{grid-column:1/-1}.sv5-toolbar label{min-width:0}.sv5-tile{min-height:164px;padding:12px;border-radius:18px}.sv5-tile-name{font-size:13px}.sv5-tile-change{font-size:19px}.sv5-spark{height:48px;margin:10px 0 7px}.sv5-money{font-size:10px}.sv5-tile-meta{font-size:9px}}
 </style>
 
 <script id="pulse-v5-sector-engine">
@@ -3749,18 +3870,40 @@ function pick(o,ks){for(const k of ks){if(o&&o[k]!==undefined&&o[k]!==null&&o[k]
 function normalizeStock(x){
  const symbol=str(pick(x,['symbol','Symbol','ticker','Ticker','securitySymbol'])).toUpperCase();
  const name=str(pick(x,['companyName','CompanyName','name','Name','securityName']));
- const sector=str(pick(x,['sector','Sector','sectorName','SectorName','industry','Industry']))||'Unclassified';
+ const sector=canonicalSectorName(pick(x,['sector','Sector','sectorName','SectorName','industry','Industry']));
  const price=num(pick(x,['lastPrice','LastPrice','ltp','LTP','closePrice','price','Price']));
  const change=num(pick(x,['percentageChange','PercentageChange','percentChange','PercentChange','changePercent','ChangePercent','change','Change']));
  const volume=num(pick(x,['totalTradedQuantity','TotalTradedQuantity','volume','Volume','quantity','Quantity']))||0;
  const turnover=num(pick(x,['totalTradedValue','TotalTradedValue','turnover','Turnover','value','Value']))||0;
  return {raw:x,symbol,name,sector,price,change,volume,turnover};
 }
+const CANONICAL_SECTORS=[
+ 'Commercial Banks','Development Banks','Finance','Hotels And Tourism','Hydro Power','Investment','Life Insurance','Manufacturing And Processing','Microfinance','Mutual Fund','Non-Life Insurance','Others','Trading'
+];
+const SECTOR_ALIASES={
+ 'banking':'Commercial Banks','commercial bank':'Commercial Banks','commercial banks':'Commercial Banks','commercial':'Commercial Banks',
+ 'development bank':'Development Banks','development banks':'Development Banks',
+ 'hotel':'Hotels And Tourism','hotels':'Hotels And Tourism','hotels and tourism':'Hotels And Tourism','hotels & tourism':'Hotels And Tourism',
+ 'hydropower':'Hydro Power','hydro power':'Hydro Power',
+ 'life insurance':'Life Insurance','manufacturing':'Manufacturing And Processing','manufacturing and processing':'Manufacturing And Processing',
+ 'micro finance':'Microfinance','microfinance':'Microfinance','mutual funds':'Mutual Fund','mutual fund':'Mutual Fund',
+ 'non life insurance':'Non-Life Insurance','non-life insurance':'Non-Life Insurance','nonlife insurance':'Non-Life Insurance',
+ 'others':'Others','trading':'Trading','investment':'Investment','finance':'Finance'
+};
+function canonicalSectorName(v){const raw=str(v);const k=raw.toLowerCase().replace(/[&]/g,'and').replace(/\s+/g,' ').trim();return SECTOR_ALIASES[k]||raw||'Others'}
+
 function normalizeSector(x){
- const name=str(pick(x,['sectorName','SectorName','sector','Sector','name','Name','indexName','IndexName']))||'Unknown';
- const change=num(pick(x,['percentageChange','PercentageChange','percentChange','PercentChange','changePercent','ChangePercent','change','Change']));
- const index=num(pick(x,['indexValue','IndexValue','value','Value','index','Index']));
- return {raw:x,name,change,index,stocks:[]};
+ const name=canonicalSectorName(pick(x,['sectorName','SectorName','sector','Sector','name','Name','indexName','IndexName']));
+ const pointChange=num(pick(x,['pointChange','difference','changeValue','changePoints']));
+ const pct=num(pick(x,['percentageChange','PercentageChange','percentChange','PercentChange','changePercent','ChangePercent','perChange','pChange']));
+ const fallbackChange=num(pick(x,['change','Change']));
+ const index=num(pick(x,['indexValue','IndexValue','currentValue','CurrentValue','value','Value','index','Index','close','Close']));
+ return {raw:x,name,change:pointChange??fallbackChange??pct,percentChange:pct,index,indexId:num(pick(x,['indexId','IndexId','sectorId','SectorId'])),
+   open:num(pick(x,['open','Open'])),high:num(pick(x,['high','High'])),low:num(pick(x,['low','Low'])),previousClose:num(pick(x,['previousClose','PreviousClose'])),
+   turnover:num(pick(x,['turnover','totalTurnover','turnoverValue','totalTradeValue','totalTradeValueRs'])),
+   volume:num(pick(x,['volume','totalTradedQuantity','tradedShares','sharesTraded','quantity'])),
+   advancing:num(pick(x,['advancing','advancers','advance'])),declining:num(pick(x,['declining','decliners','decline'])),unchanged:num(pick(x,['unchanged','unchangedCount'])),
+   stocksTraded:num(pick(x,['stocksTraded','scripsTraded','securitiesTraded','tradedScrips'])),history:null,stocks:[]};
 }
 function extract(st){
  const stockCandidates=[st?.live,st?.liveMarket,st?.securities,st?.data?.liveMarket,st?.data?.LiveMarket,st?.data?.securities];
@@ -3770,12 +3913,14 @@ function extract(st){
  if(!secs.length && st?.sector_indices)secs=(Array.isArray(st.sector_indices)?st.sector_indices:[]).map(normalizeSector);
  const map={};
  stocks.forEach(x=>(map[x.sector]??=[]).push(x));
- const byName={};secs.forEach(x=>byName[x.name.toLowerCase()]=x);
+ const byName={};secs.forEach(x=>byName[canonicalSectorName(x.name).toLowerCase()]=x);
  Object.entries(map).forEach(([name,list])=>{
-   if(!byName[name.toLowerCase()]){const a=list.map(x=>x.change).filter(x=>x!==null);secs.push({name,change:a.length?a.reduce((u,v)=>u+v,0)/a.length:null,index:null,stocks:list})}
+   const key=canonicalSectorName(name).toLowerCase();
+   if(!byName[key]){const a=list.map(x=>x.change).filter(x=>x!==null);const item={name:canonicalSectorName(name),change:a.length?a.reduce((u,v)=>u+v,0)/a.length:null,index:null,stocks:list};secs.push(item);byName[key]=item}
  });
- secs.forEach(x=>{const list=map[x.name]||map[Object.keys(map).find(k=>k.toLowerCase()===x.name.toLowerCase())]||[];x.stocks=list;if(x.change===null){const a=list.map(y=>y.change).filter(y=>y!==null);x.change=a.length?a.reduce((u,v)=>u+v,0)/a.length:null}});
- return {sectors:secs.filter(x=>x.name!=='Unknown'||x.stocks.length),stocks,status:st?.status||'OFFLINE',updatedAt:st?.updatedAt};
+ const complete=CANONICAL_SECTORS.map(name=>byName[name.toLowerCase()]||{name,change:null,index:null,stocks:[]});
+ complete.forEach(x=>{const list=map[x.name]||map[Object.keys(map).find(k=>canonicalSectorName(k).toLowerCase()===x.name.toLowerCase())]||x.stocks||[];x.stocks=list;if(x.change===null){const a=list.map(y=>y.change).filter(y=>y!==null);x.change=a.length?a.reduce((u,v)=>u+v,0)/a.length:null}});
+ return {sectors:complete,stocks,status:st?.status||'OFFLINE',updatedAt:st?.updatedAt};
 }
 function fmt(v,d=0){return v===null||v===undefined||!Number.isFinite(v)?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:d})}
 function renderMetrics(){
@@ -3803,13 +3948,39 @@ function filteredSectors(){
    return (y.change??-Infinity)-(x.change??-Infinity);
  });
 }
+function sparkline(x){
+ const pts=(Array.isArray(x.history)?x.history:[]).map(p=>num(p?.value)).filter(v=>v!==null);
+ if(pts.length<2)return '<div class="sv5-spark sv5-spark-empty"><span>Chart data unavailable</span></div>';
+ const w=220,h=54,p=4,min=Math.min(...pts),max=Math.max(...pts),span=Math.max(max-min,0.000001);
+ const coords=pts.slice(-48).map((v,i,a)=>`${p+i*(w-2*p)/Math.max(1,a.length-1)},${h-p-(v-min)/span*(h-2*p)}`).join(' ');
+ const last=coords.split(' ').at(-1).split(',');
+ const first=pts[0],lastVal=pts[pts.length-1],trend=lastVal-first;
+ return `<svg class="sv5-spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-label="Real sector index chart"><line class="base" x1="0" y1="${h/2}" x2="${w}" y2="${h/2}"/><polyline class="line" points="${coords}"/><circle class="dot" cx="${last[0]}" cy="${last[1]}" r="4"/></svg>`;
+}
 function renderHeatmap(){
  const a=filteredSectors();
+ const sectorMoney=x=>Number(x.turnover)||x.stocks.reduce((s,z)=>s+(Number(z.turnover)||0),0);
+ const totalMoney=state.sectors.reduce((sum,x)=>sum+sectorMoney(x),0);
  $('sv5Heatmap').innerHTML=a.length?a.map((x,i)=>{
-   const cls=x.change>0?'positive':x.change<0?'negative':'neutral';
-   const tv=x.stocks.reduce((s,z)=>s+z.turnover,0), vol=x.stocks.reduce((s,z)=>s+z.volume,0);
-   return `<button class="sv5-tile ${cls}" data-sector-index="${i}"><div class="sv5-tile-top"><span class="sv5-tile-name">${esc(x.name)}</span><span class="sv5-tile-change">${x.change===null?'—':(x.change>0?'+':'')+fmt(x.change,2)+'%'}</span></div><div class="sv5-tile-stats"><span>${x.stocks.length} stocks</span><span>Turnover ${fmt(tv)}</span><span>Vol ${fmt(vol)}</span></div></button>`;
- }).join(''):'<div class="sv5-empty">No sector data available in the Central Feed.</div>';
+   const cls=x.percentChange>0?'positive':x.percentChange<0?'negative':(x.change>0?'positive':x.change<0?'negative':'neutral');
+   const tv=sectorMoney(x);
+   const vol=Number(x.volume)||x.stocks.reduce((s,z)=>s+(Number(z.volume)||0),0);
+   const moneyPct=totalMoney>0?tv/totalMoney*100:0;
+   const width=Math.min(100,Math.max(0,moneyPct));
+   const pct=x.percentChange??(x.change!==null&&x.index?((x.change/(x.index-x.change))*100):null);
+   const change=pct===null?'—':(pct>0?'+':'')+fmt(pct,2)+'%';
+   const point=x.change===null?'—':(x.change>0?'+':'')+fmt(x.change,2)+' pts';
+   const idx=x.index===null?'—':fmt(x.index,2);
+   const breadth=(x.advancing!=null||x.declining!=null)?`${x.advancing??'—'}↑ ${x.declining??'—'}↓`:'';
+   const count=x.stocksTraded??(x.stocks.length||'—');
+   return `<button class="sv5-tile ${cls}" data-sector-index="${i}">
+     <div class="sv5-tile-top"><span class="sv5-tile-name">${esc(x.name)}</span><span class="sv5-tile-change">${change}</span></div>
+     <div class="sv5-index-line"><b>${idx}</b><span>${esc(point)}</span></div>
+     ${sparkline(x)}
+     <div class="sv5-money"><span class="sv5-money-bar"><span class="sv5-money-fill" style="width:${width}%"></span></span><span>${moneyPct?moneyPct.toFixed(0):'0'}% of money</span></div>
+     <div class="sv5-tile-meta"><span>${count} stocks${breadth?' · '+breadth:''}</span><span>${tv?'Rs '+fmt(tv):'Turnover —'}</span></div>
+   </button>`;
+ }).join(''):'<div class="sv5-empty">No sector data available.</div>';
  document.querySelectorAll('#sv5Heatmap .sv5-tile').forEach((b,i)=>b.addEventListener('click',()=>openDrill(a[i])));
 }
 function renderLeaders(){
@@ -3826,11 +3997,32 @@ function openDrill(x){
  $('sv5Stocks').innerHTML=a.length?a.map(y=>`<tr><td><b>${esc(y.symbol||y.name)}</b></td><td>${fmt(y.price,2)}</td><td class="${y.change>0?'sv5-up':y.change<0?'sv5-down':''}">${y.change===null?'—':(y.change>0?'+':'')+fmt(y.change,2)+'%'}</td><td>${fmt(y.volume)}</td><td>${fmt(y.turnover)}</td></tr>`).join(''):'<tr><td colspan="5" class="sv5-empty">No constituent data available.</td></tr>';
 }
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+const SECTOR_API=(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
+async function loadVerifiedSectors(){
+ try{
+   const r=await fetch(SECTOR_API+'/api/sectors?_sector='+Date.now(),{cache:'no-store'});
+   if(!r.ok)throw Error('HTTP '+r.status);
+   const j=await r.json();const rows=Array.isArray(j?.data)?j.data:[];
+   if(!rows.length)return;
+   const by=Object.fromEntries(rows.map(x=>[canonicalSectorName(pick(x,['sector','name','sectorName'])).toLowerCase(),normalizeSector(x)]));
+   state.sectors.forEach(x=>{const z=by[canonicalSectorName(x.name).toLowerCase()];if(z){Object.assign(x,z);x.stocks=x.stocks?.length?x.stocks:z.stocks}});
+   for(const name of CANONICAL_SECTORS){if(!state.sectors.some(x=>x.name===name)&&by[name.toLowerCase()])state.sectors.push(by[name.toLowerCase()]);}
+   renderMetrics();renderHeatmap();renderLeaders();
+   loadSectorHistories();
+ }catch(e){console.warn('Verified sector data unavailable',e)}
+}
+async function loadSectorHistories(){
+ const queue=state.sectors.filter(x=>x.indexId&&!x.history);
+ let cursor=0;
+ async function worker(){while(cursor<queue.length){const x=queue[cursor++];try{const r=await fetch(SECTOR_API+'/api/sector-history?index_id='+encodeURIComponent(x.indexId)+'&_h='+Date.now(),{cache:'no-store'});if(r.ok){const j=await r.json();if(Array.isArray(j?.data)&&j.data.length>1)x.history=j.data}}catch(e){} renderHeatmap()}}
+ await Promise.all([worker(),worker()]);
+}
 function sync(st){
  state=extract(st||{});const status=String(state.status).toUpperCase();
  $('sv5Status').textContent=status+(state.updatedAt?' • '+new Date(state.updatedAt).toLocaleTimeString():'');
  $('sv5Dot').style.background=status==='LIVE'?'#20a464':status==='CACHED'?'#d29b19':'#999';
  renderMetrics();renderHeatmap();renderLeaders();
+ loadVerifiedSectors();
 }
 document.addEventListener('DOMContentLoaded',()=>{
  document.querySelectorAll('.sv5-tab').forEach(b=>b.addEventListener('click',()=>{
