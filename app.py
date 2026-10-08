@@ -111,40 +111,47 @@ NEPSE_CALL_LOCK = asyncio.Lock()
 async def _floor_collector_loop():
     while not FLOOR_COLLECTOR_STOP.is_set():
         try:
-            day=datetime.now(NPT).date().isoformat()
-            rows=[]
-            last_error=None
-            # A temporary empty response is common while the NEPSE session is
-            # bootstrapping or being rate-limited. Retry before declaring the
-            # collector empty, and never erase the last successful diagnostics.
+            today = datetime.now(NPT).date().isoformat()
+            rows = []
+            last_error = None
+            # Use the stable sequential page walker. NEPSE can throttle or
+            # silently drop concurrent page requests, which can make page 1
+            # look like the complete sheet.
             for attempt in range(3):
                 try:
-                    candidate=await _complete_daily_floorsheet(None,page_size=500,max_pages=200)
+                    candidate = await _complete_daily_floorsheet(None, page_size=500, max_pages=200)
                     if candidate:
-                        rows=candidate
+                        rows = candidate
                         break
-                    last_error="floorsheets returned 0 rows"
+                    last_error = "floorsheets returned 0 rows"
                 except Exception as exc:
-                    last_error=f"{type(exc).__name__}: {exc}"
+                    last_error = f"{type(exc).__name__}: {exc}"
                 if attempt < 2:
-                    try: await asyncio.wait_for(FLOOR_COLLECTOR_STOP.wait(),timeout=2)
+                    try: await asyncio.wait_for(FLOOR_COLLECTOR_STOP.wait(), timeout=2)
                     except asyncio.TimeoutError: pass
                     if FLOOR_COLLECTOR_STOP.is_set(): break
 
             if rows:
-                stored=_store_floorsheet_rows(rows)
+                sample_date = _floor_date(rows[0])
+                stored = _store_floorsheet_rows(rows)
                 FLOOR_DIAG["lastFetchCount"] = len(rows)
                 FLOOR_DIAG["lastFetchedPages"] = max(1, (len(rows)+499)//500)
                 FLOOR_DIAG["lastStoreCount"] = stored
                 FLOOR_DIAG["lastStoreSkipped"] = max(0, len(rows)-stored)
                 FLOOR_DIAG["lastCollectorError"] = None
-                FLOOR_DIAG["lastSampleDate"] = _floor_date(rows[0])
-                _rebuild_broker_rollups(day)
+                FLOOR_DIAG["lastSampleDate"] = sample_date
+                FLOOR_DIAG["displayDate"] = sample_date
+                FLOOR_DIAG["usingPreviousDay"] = sample_date != today
+                # Rollups must use the date actually contained in the
+                # floorsheet, not today's calendar date.
+                _rebuild_broker_rollups(sample_date)
             elif last_error:
+                # Empty data can be normal outside trading hours. Do not erase
+                # a previously successful cache/diagnostic state.
                 FLOOR_DIAG["lastCollectorError"] = last_error
         except Exception as exc:
             FLOOR_DIAG["lastCollectorError"] = f"{type(exc).__name__}: {exc}"
-        try: await asyncio.wait_for(FLOOR_COLLECTOR_STOP.wait(),timeout=20)
+        try: await asyncio.wait_for(FLOOR_COLLECTOR_STOP.wait(), timeout=20)
         except asyncio.TimeoutError: pass
 
 @app.on_event("startup")
@@ -396,7 +403,7 @@ NPT = timezone(timedelta(hours=5, minutes=45))
 FLOOR_CACHE_DB = Path(os.getenv("FLOOR_CACHE_DB", "nepse_pulse_floorsheet.sqlite3"))
 FLOOR_COLLECTOR_TASK = None
 FLOOR_COLLECTOR_STOP = asyncio.Event()
-FLOOR_DIAG = {"lastFetchCount": 0, "lastFetchedPages": 0, "lastStoreCount": 0, "lastStoreSkipped": 0, "lastCollectorError": None, "lastSampleDate": None}
+FLOOR_DIAG = {"lastFetchCount": 0, "lastFetchedPages": 0, "lastStoreCount": 0, "lastStoreSkipped": 0, "lastCollectorError": None, "lastSampleDate": None, "displayDate": None, "usingPreviousDay": False}
 
 def _floor_db_init():
     FLOOR_CACHE_DB.parent.mkdir(parents=True, exist_ok=True)
@@ -1955,18 +1962,14 @@ async def _recent_archive_floorsheet(symbol: Optional[str] = None, lookback_days
 # One normalized path for company floorsheets.  Every source is treated as
 # untrusted wrapper data until floor_rows() has flattened it.
 async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: int = 500, max_pages: int = 1000):
-    """Fetch the complete current-day floorsheet quickly.
+    """Fetch the complete available daily floorsheet using stable 1-based paging.
 
-    NEPSE returns the floor sheet in paginated 500-row pages.  The old
-    implementation fetched pages strictly one-by-one, which was slow and
-    could fall back to the limited 5,000-row public table.  We now discover
-    the page count from the first response and fetch the remaining pages in
-    small concurrent batches, while preserving the zero/one-based pagination
-    compatibility.
+    We intentionally fetch sequentially: NEPSE may throttle concurrent page
+    requests and return only page 1. An empty page after rows is normal end of
+    pagination, not an error. The returned rows retain their actual trading date.
     """
     wanted = symbol.upper().strip() if symbol else None
-    rows=[]
-    seen=set()
+    rows=[]; seen=set()
 
     def unpack(raw):
         rr=floor_rows(raw)
@@ -1975,7 +1978,7 @@ async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: in
         if isinstance(nested,dict): meta=nested
         total_pages=meta.get('totalPages') or meta.get('total_pages')
         total_elements=meta.get('totalElements') or meta.get('total_elements')
-        return rr, total_pages, total_elements
+        return rr,total_pages,total_elements
 
     def add_rows(got):
         for r in got:
@@ -1984,100 +1987,46 @@ async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: in
                 seen.add(key); rows.append(r)
 
     async def fetch_page(page):
-        # IMPORTANT: call the actual AsyncNepseClient.floorsheets method first.
-        # The generic nepse_call helper returns the first non-None response,
-        # even when an older method returns an empty wrapper. That used to hide
-        # the working floorsheets() method and left the collector at zero rows.
-        client = await get_nepse_client()
-        methods = []
-        fn = getattr(client, "floorsheets", None)
-        if callable(fn):
-            methods.append(("floorsheets", fn))
-        for name in ("floor_sheet", "getFloorSheet", "get_floorsheet"):
-            fn2 = getattr(client, name, None)
-            if callable(fn2):
-                methods.append((name, fn2))
-
-        for name, fn in methods:
-            for kwargs in ({'page':page,'size':page_size},{'page':page,'limit':page_size},{'page':page,'page_size':page_size}):
+        client=await get_nepse_client()
+        fn=getattr(client,'floorsheets',None)
+        if not callable(fn): return [],None,None
+        attempts=(({'page':page,'size':page_size}),({'page':page,'limit':page_size}),({'page':page,'page_size':page_size}))
+        for kwargs in attempts:
+            try:
+                raw=await fn(**kwargs)
+                got,tp,te=unpack(raw)
+                if got or page==1: return got,tp,te
+            except TypeError:
                 try:
-                    raw = await fn(**kwargs)
-                    got,tp,te = unpack(raw)
-                    if got:
-                        return page,got,tp,te
-                except TypeError:
-                    # Some client versions use positional pagination.
-                    try:
-                        raw = await fn(page, page_size)
-                        got,tp,te = unpack(raw)
-                        if got:
-                            return page,got,tp,te
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
-            # A few versions expose floorsheets() with no pagination and return
-            # the complete daily object. Use that only after paged calls.
-            if name == "floorsheets":
-                try:
-                    raw = await fn()
-                    got,tp,te = unpack(raw)
-                    if got:
-                        return page,got,tp,te
-                except Exception:
-                    pass
-        return page,[],None,None
+                    raw=await fn(page,page_size)
+                    got,tp,te=unpack(raw)
+                    if got or page==1: return got,tp,te
+                except Exception: pass
+            except Exception: pass
+        return [],None,None
 
-    # NEPSE floorsheets pagination is 1-based: always start at page 1.
-    first=await fetch_page(1)
-    if not (isinstance(first,tuple) and len(first)>=4 and first[1]):
+    first,tp,te=await fetch_page(1)
+    if not first:
         return []
-    if first is None:
-        return []
+    add_rows(first)
+    try: target=min(max_pages,int(tp)) if tp is not None else max_pages
+    except Exception: target=max_pages
 
-    first_page, first_rows, total_pages, total_elements=first
-    add_rows(first_rows)
-
-    if total_pages is not None:
-        try:
-            target=min(max_pages,int(total_pages))
-        except Exception:
-            target=max_pages
-        # totalPages is a count. For a zero-based first page, the last valid
-        # index is totalPages-1; for one-based pagination it is totalPages.
-        last_page=target-1 if first_page==0 else target
-        pages=list(range(first_page+1,last_page+1))
-    else:
-        pages=list(range(first_page+1,max_pages+1))
-
-    # Fetch in bounded concurrent batches. This is dramatically faster than
-    # waiting for ~80+ HTTP round trips sequentially, while avoiding a burst
-    # large enough to trigger upstream throttling.
-    batch_size=10
-    for i in range(0,len(pages),batch_size):
-        batch=pages[i:i+batch_size]
-        results=await asyncio.gather(*(fetch_page(p) for p in batch), return_exceptions=True)
-        empty=0
-        for result in results:
-            if not isinstance(result,tuple):
-                empty+=1; continue
-            page,got,tp,te=result
-            if not got:
-                empty+=1
-                continue
-            add_rows(got)
-            if total_pages is None and tp is not None:
-                try:
-                    new_target=min(max_pages,int(tp))
-                    if first_page==0:
-                        pages=pages[:pages.index(page)+1] if page in pages else pages
-                    else:
-                        pages=pages[:pages.index(page)+1] if page in pages else pages
-                except Exception:
-                    pass
-        if total_elements is not None and len(rows)>=int(total_elements):
+    for page in range(2,target+1):
+        got,tp2,te2=await fetch_page(page)
+        if not got:
+            # Empty page after successful pages is the normal end.
             break
-        if total_pages is None and empty==len(batch):
+        add_rows(got)
+        if te2 is not None:
+            try:
+                if len(rows) >= int(te2): break
+            except Exception: pass
+        if tp2 is not None:
+            try:
+                if page >= int(tp2): break
+            except Exception: pass
+        if len(got) < page_size and tp is None and tp2 is None:
             break
 
     if wanted:
@@ -2344,22 +2293,29 @@ async def api_floorsheet(symbol: Optional[str]=None, limit:int=Query(100000,ge=1
 
 @app.get("/api/floorsheet-status")
 async def api_floorsheet_status():
-    day = datetime.now(NPT).date().isoformat()
+    today=datetime.now(NPT).date().isoformat()
+    display_date=FLOOR_DIAG.get("displayDate")
+    if not display_date:
+        # Prefer today; outside trading hours fall back to the newest cached day.
+        with sqlite3.connect(FLOOR_CACHE_DB) as db:
+            row=db.execute("SELECT business_date, COUNT(*) FROM floorsheet_raw GROUP BY business_date ORDER BY business_date DESC LIMIT 1").fetchone()
+        display_date=row[0] if row else today
+    try: count=_floor_count(display_date)
+    except Exception: count=0
+    methods={}
     try:
-        count = _floor_count(day)
-    except Exception:
-        count = 0
-    methods = {}
-    try:
-        client = await get_nepse_client()
-        for name in ("floor_sheet", "floorsheets", "getFloorSheet", "get_floorsheet", "getFloorSheetOf"):
-            methods[name] = callable(getattr(client, name, None))
+        client=await get_nepse_client()
+        for name in ("floor_sheet","floorsheets","getFloorSheet","get_floorsheet","getFloorSheetOf"):
+            methods[name]=callable(getattr(client,name,None))
     except Exception as exc:
-        methods["clientError"] = str(exc)
+        methods["clientError"]=str(exc)
     return {
         "ok": count > 0,
-        "today": day,
-        "cachedTradesToday": count,
+        "today": today,
+        "displayDate": display_date,
+        "usingPreviousDay": display_date != today,
+        "cachedTradesToday": _floor_count(today),
+        "cachedTradesDisplayed": count,
         "sdkMethods": methods,
         "collectorRunning": bool(FLOOR_COLLECTOR_TASK and not FLOOR_COLLECTOR_TASK.done()),
         **FLOOR_DIAG,
