@@ -1999,6 +1999,7 @@ async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: in
     page = 1
     total_pages = None
     expected_elements = None
+    missing_pages = []
 
     while page <= max_pages:
         got = []
@@ -2038,10 +2039,19 @@ async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: in
         if page == 1 and not got:
             return []
 
-        # Never silently pretend an incomplete page walk is complete. Return
-        # the rows collected so far so the existing cache remains usable; the
-        # next collector cycle will retry the missing page.
+        # An empty page can be transient even when later pages are available.
+        # If NEPSE supplied the expected element count, keep walking through
+        # the expected page range instead of truncating the day at that page.
         if not got:
+            expected_pages = None
+            if expected_elements:
+                expected_pages = max(1, (int(expected_elements) + 499) // 500)
+            elif total_pages:
+                expected_pages = max(1, int(total_pages))
+            if expected_pages and page < expected_pages:
+                missing_pages.append(page)
+                page += 1
+                continue
             break
 
         before_count = len(rows)
@@ -2063,6 +2073,25 @@ async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: in
             await asyncio.sleep(0.50)
         except Exception:
             pass
+
+    # Revisit only pages that were empty during the main walk.
+    if missing_pages:
+        for missing_page in missing_pages:
+            got_missing = []
+            for attempt in range(6):
+                try:
+                    async with NEPSE_CALL_LOCK:
+                        raw = await fn(page=missing_page, size=500)
+                    got_missing, _, _, _ = unpack(raw)
+                    if got_missing:
+                        break
+                except Exception:
+                    pass
+                if attempt < 5:
+                    try: await asyncio.sleep(min(3.0, 1.0 + attempt * 0.4))
+                    except Exception: pass
+            if got_missing:
+                add_rows(got_missing)
 
     if wanted:
         rows = [r for r in rows if str(r.get("symbol") or "").upper().strip() == wanted]
