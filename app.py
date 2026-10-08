@@ -118,8 +118,11 @@ async def _floor_collector_loop():
             if rows:
                 globals()["FLOOR_COLLECTOR_LAST_FETCH_COUNT"] = len(rows)
                 globals()["FLOOR_COLLECTOR_LAST_ERROR"] = None
-                _store_floorsheet_rows(rows)
-                _rebuild_broker_rollups(day)
+                stored = _store_floorsheet_rows(rows)
+                if stored:
+                    _rebuild_broker_rollups(day)
+                else:
+                    globals()["FLOOR_COLLECTOR_LAST_ERROR"] = "fetched rows but 0 rows were stored"
             else:
                 # Keep the collector alive but expose the failure instead of
                 # silently swallowing every SDK/parser error.
@@ -407,24 +410,43 @@ def _floor_key(r):
                f"{r.get('symbol')}|{r.get('businessDate')}|{r.get('tradeTime')}|{r.get('quantity')}|{r.get('rate')}|{r.get('buyerBroker')}|{r.get('sellerBroker')}")
 
 def _floor_date(r):
-    return str(r.get("businessDate") or datetime.now(NPT).date().isoformat())[:10]
+    raw = (r.get("businessDate") or r.get("tradeDate") or r.get("tradingDate") or r.get("date") or "")
+    text = str(raw).strip()
+    if len(text) >= 10:
+        # Handles YYYY-MM-DD, YYYY-MM-DDTHH:MM..., and YYYY/MM/DD.
+        if text[4] in "-/:" and text[7] in "-/:":
+            return text[:10].replace("/", "-").replace(":", "-")
+        if len(text) >= 8 and text[:8].isdigit():
+            return f"{text[:4]}-{text[4:6]}-{text[6:8]}"
+    return datetime.now(NPT).date().isoformat()
 
 def _store_floorsheet_rows(rows):
     if not rows: return 0
     _floor_db_init()
+    inserted = 0
+    skipped = 0
     with sqlite3.connect(FLOOR_CACHE_DB) as db:
         for r in rows:
-            db.execute("""INSERT OR REPLACE INTO floorsheet_raw
-                (trade_key,business_date,symbol,buyer_broker,seller_broker,quantity,rate,amount,trade_time,payload)
-                VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                (_floor_key(r), _floor_date(r), str(r.get("symbol") or "").upper(),
-                 str(r.get("buyerBroker") or r.get("buyerBrokerName") or ""),
-                 str(r.get("sellerBroker") or r.get("sellerBrokerName") or ""),
-                 float(r.get("quantity") or 0), float(r.get("rate") or 0),
-                 float(r.get("amount") or 0), str(r.get("tradeTime") or ""),
-                 json.dumps(r, separators=(",",":"), default=str)))
+            try:
+                def _num(v):
+                    if v is None or v == "": return 0.0
+                    return float(str(v).replace(",", "").strip())
+                db.execute("""INSERT OR REPLACE INTO floorsheet_raw
+                    (trade_key,business_date,symbol,buyer_broker,seller_broker,quantity,rate,amount,trade_time,payload)
+                    VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                    (_floor_key(r), _floor_date(r), str(r.get("symbol") or "").upper(),
+                     str(r.get("buyerBroker") or r.get("buyerBrokerName") or r.get("buyerBrokerCode") or ""),
+                     str(r.get("sellerBroker") or r.get("sellerBrokerName") or r.get("sellerBrokerCode") or ""),
+                     _num(r.get("quantity")), _num(r.get("rate")), _num(r.get("amount")),
+                     str(r.get("tradeTime") or r.get("tradeDateTime") or r.get("time") or ""),
+                     json.dumps(r, separators=(",",":"), default=str)))
+                inserted += 1
+            except Exception:
+                skipped += 1
         db.commit()
-    return len(rows)
+    globals()["FLOOR_COLLECTOR_LAST_STORE_COUNT"] = inserted
+    globals()["FLOOR_COLLECTOR_LAST_STORE_SKIPPED"] = skipped
+    return inserted
 
 def _read_floor_rows(business_date=None, symbol=None, limit=None, offset=0):
     _floor_db_init(); sql="SELECT payload FROM floorsheet_raw WHERE 1=1"; args=[]
@@ -2337,6 +2359,8 @@ async def api_floorsheet_status():
         "sdkMethods": methods,
         "collectorRunning": bool(FLOOR_COLLECTOR_TASK and not FLOOR_COLLECTOR_TASK.done()),
         "lastFetchCount": FLOOR_COLLECTOR_LAST_FETCH_COUNT,
+        "lastStoreCount": globals().get("FLOOR_COLLECTOR_LAST_STORE_COUNT", 0),
+        "lastStoreSkipped": globals().get("FLOOR_COLLECTOR_LAST_STORE_SKIPPED", 0),
         "lastCollectorError": FLOOR_COLLECTOR_LAST_ERROR,
         "updatedAt": now_iso(),
     }
