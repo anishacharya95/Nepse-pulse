@@ -70,7 +70,7 @@ async def production_call(method: str, *args, **kwargs):
     return await asyncio.to_thread(fn, *args, **kwargs)
 
 
-APP_VERSION = "V36-FLOORSHEET-PAGINATION-FINAL"
+APP_VERSION = "V37-FLOORSHEET-PAGINATION-RETRY-FINAL"
 PUBLIC_API = "https://nepseapi.surajrimal.dev"
 STATIC_API = "https://shubhamnpk.github.io/yonepse/data"
 OPEN_DATA = "https://raw.githubusercontent.com/socrateai-official/nepse-open-data/main"
@@ -1994,8 +1994,29 @@ async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: in
     total_pages = None
     total_elements = None
     while page <= max_pages:
-        raw = await fn(page=page, size=page_size)
-        got, tp, te = unpack(raw)
+        # NEPSE occasionally returns an empty page transiently when the same
+        # session is making several floorsheet requests in sequence.  An empty
+        # page is therefore NOT an end-of-data signal until we have retried it.
+        got = []
+        tp = te = None
+        last_page_error = None
+        for page_attempt in range(4):
+            try:
+                raw = await fn(page=page, size=page_size)
+                got, tp, te = unpack(raw)
+                if got:
+                    break
+            except Exception as exc:
+                last_page_error = exc
+            if page_attempt < 3:
+                # Small pause prevents the NEPSE session from treating the
+                # sequential page walk as a burst and also lets a transient
+                # empty response recover.
+                try:
+                    await asyncio.sleep(0.75)
+                except Exception:
+                    pass
+
         if page == 1 and not got:
             return []
         if tp is not None:
@@ -2005,6 +2026,8 @@ async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: in
             try: total_elements = int(te)
             except Exception: pass
         if not got:
+            # Do not fabricate missing pages.  Return what was successfully
+            # collected so far; the next collector cycle will retry the page.
             break
         add_rows(got)
         if total_elements is not None and len(rows) >= total_elements:
@@ -2012,6 +2035,10 @@ async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: in
         if total_pages is not None and page >= total_pages:
             break
         page += 1
+        try:
+            await asyncio.sleep(0.20)
+        except Exception:
+            pass
 
     if wanted:
         rows = [r for r in rows if str(r.get("symbol") or "").upper().strip() == wanted]
