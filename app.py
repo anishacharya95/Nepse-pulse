@@ -107,15 +107,27 @@ NEPSE_CLIENT_INIT_LOCK = asyncio.Lock()
 NEPSE_CALL_LOCK = asyncio.Lock()
 
 
+FLOOR_COLLECTOR_LAST_ERROR = None
+FLOOR_COLLECTOR_LAST_FETCH_COUNT = 0
+
 async def _floor_collector_loop():
     while not FLOOR_COLLECTOR_STOP.is_set():
         try:
-            day=datetime.now(NPT).date().isoformat()
-            rows=await _complete_daily_floorsheet(None,page_size=500,max_pages=200)
+            day = datetime.now(NPT).date().isoformat()
+            rows = await _complete_daily_floorsheet(None, page_size=500, max_pages=200)
             if rows:
-                _store_floorsheet_rows(rows); _rebuild_broker_rollups(day)
-        except Exception: pass
-        try: await asyncio.wait_for(FLOOR_COLLECTOR_STOP.wait(),timeout=20)
+                globals()["FLOOR_COLLECTOR_LAST_FETCH_COUNT"] = len(rows)
+                globals()["FLOOR_COLLECTOR_LAST_ERROR"] = None
+                _store_floorsheet_rows(rows)
+                _rebuild_broker_rollups(day)
+            else:
+                # Keep the collector alive but expose the failure instead of
+                # silently swallowing every SDK/parser error.
+                globals()["FLOOR_COLLECTOR_LAST_FETCH_COUNT"] = 0
+                globals()["FLOOR_COLLECTOR_LAST_ERROR"] = "floorsheets returned 0 rows"
+        except Exception as exc:
+            globals()["FLOOR_COLLECTOR_LAST_ERROR"] = f"{type(exc).__name__}: {exc}"
+        try: await asyncio.wait_for(FLOOR_COLLECTOR_STOP.wait(), timeout=20)
         except asyncio.TimeoutError: pass
 
 @app.on_event("startup")
@@ -2324,6 +2336,8 @@ async def api_floorsheet_status():
         "cachedTradesToday": count,
         "sdkMethods": methods,
         "collectorRunning": bool(FLOOR_COLLECTOR_TASK and not FLOOR_COLLECTOR_TASK.done()),
+        "lastFetchCount": FLOOR_COLLECTOR_LAST_FETCH_COUNT,
+        "lastCollectorError": FLOOR_COLLECTOR_LAST_ERROR,
         "updatedAt": now_iso(),
     }
 
