@@ -70,7 +70,7 @@ async def production_call(method: str, *args, **kwargs):
     return await asyncio.to_thread(fn, *args, **kwargs)
 
 
-APP_VERSION = "V37-FLOORSHEET-PAGINATION-RETRY-FINAL"
+APP_VERSION = "V38-FLOORSHEET-PAGINATION-RETRY-FINAL"
 PUBLIC_API = "https://nepseapi.surajrimal.dev"
 STATIC_API = "https://shubhamnpk.github.io/yonepse/data"
 OPEN_DATA = "https://raw.githubusercontent.com/socrateai-official/nepse-open-data/main"
@@ -2029,10 +2029,15 @@ async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: in
             # Do not fabricate missing pages.  Return what was successfully
             # collected so far; the next collector cycle will retry the page.
             break
+        before_count = len(rows)
         add_rows(got)
-        if total_elements is not None and len(rows) >= total_elements:
-            break
-        if total_pages is not None and page >= total_pages:
+        # Do not trust totalPages/totalElements as an end-of-data signal.
+        # NEPSE can return stale/truncated pagination metadata (for example
+        # totalPages=64 while later pages still contain executed trades).
+        # The reliable boundary is an actually empty page.  Also stop if a
+        # page returns only trades we already saw, which protects against an
+        # upstream wrapper repeating its final page forever.
+        if page > 1 and len(rows) == before_count:
             break
         page += 1
         try:
