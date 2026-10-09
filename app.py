@@ -2244,6 +2244,36 @@ async def api_company_floorsheet(symbol: str, limit: int = Query(100000, ge=1, l
         "updatedAt": now_iso(),
     }
 
+@app.get("/api/floorsheet-cache")
+async def api_floorsheet_cache(
+    business_date: Optional[str] = None,
+    symbol: Optional[str] = None,
+    limit: int = Query(5000, ge=1, le=10000),
+    offset: int = Query(0, ge=0, le=1000000),
+):
+    """Read the already-stored floorsheet from SQLite in safe chunks.
+
+    This endpoint never calls NEPSE. It is the browser-facing reader for the
+    completed collector cache, so Trade Tape can consume all stored rows even
+    when the upstream session is closed or the collector is working on a new
+    day.
+    """
+    day = str(business_date or "").strip()[:10] or None
+    if not day:
+        _floor_db_init()
+        with sqlite3.connect(FLOOR_CACHE_DB) as db:
+            row = db.execute("SELECT MAX(business_date) FROM floorsheet_raw").fetchone()
+            day = str(row[0])[:10] if row and row[0] else None
+    total = _floor_count(day, symbol) if day else 0
+    rows = _read_floor_rows(day, symbol, limit=limit, offset=offset) if day and total else []
+    return {
+        "ok": bool(rows), "source": "NEPSE Pulse stored floorsheet cache",
+        "businessDate": day, "symbol": symbol.upper().strip() if symbol else None,
+        "data": rows, "floorsheet": rows, "count": len(rows),
+        "total": total, "offset": offset, "limit": limit, "hasMore": offset + len(rows) < total,
+        "updatedAt": now_iso(),
+    }
+
 @app.get("/api/floorsheet")
 async def api_floorsheet(symbol: Optional[str]=None, limit:int=Query(100000,ge=1,le=100000), page:int=Query(0,ge=0,le=2000), size:int=Query(500,ge=1,le=500)):
     """Return exactly one real NEPSE floorsheet page.
