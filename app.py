@@ -463,7 +463,18 @@ def _floor_date(r):
         if value:
             text=str(value).strip()
             m=re.search(r"\d{4}-\d{2}-\d{2}", text)
-            if m: return m.group(0)
+            if m:
+                return m.group(0)
+            # Some NEPSE feeds encode trade dates as YYYYMMDD (and trade IDs
+            # may begin with that date). Normalize these instead of misfiling
+            # every row under today's date.
+            compact=re.search(r"(?<!\d)(\d{8})(?!\d)", text)
+            if compact:
+                raw=compact.group(1)
+                try:
+                    return datetime.strptime(raw, "%Y%m%d").date().isoformat()
+                except ValueError:
+                    pass
     return datetime.now(NPT).date().isoformat()
 
 def _store_floorsheet_rows(rows):
@@ -1854,19 +1865,29 @@ async def get_floorsheet(symbol: Optional[str] = None):
     return []
 
 async def get_broker_analysis():
-    day=datetime.now(NPT).date().isoformat()
+    # Prefer the newest available stored trading day, not only today's date:
+    # NEPSE returns an empty live floorsheet outside market hours and on holidays.
     try:
-        count=_floor_count(day)
-        if count:
-            data,symbol_rows=_cached_broker_rollup(day)
-            return {"ok":True,"updatedAt":now_iso(),"data":data,"bySymbol":symbol_rows,"sourceRows":count,"source":"local indexed floorsheet cache"}
-    except Exception: pass
+        _floor_db_init()
+        with sqlite3.connect(FLOOR_CACHE_DB) as db:
+            latest = db.execute("SELECT MAX(business_date) FROM floorsheet_raw").fetchone()
+        latest_day = latest[0] if latest else None
+        if latest_day:
+            count = _floor_count(latest_day)
+            if count:
+                data, symbol_rows = _cached_broker_rollup(latest_day)
+                return {"ok":True,"updatedAt":now_iso(),"businessDate":latest_day,"data":data,"bySymbol":symbol_rows,"sourceRows":count,"source":"local indexed floorsheet cache"}
+    except Exception:
+        pass
     try:
-        rows=await get_floorsheet(None)
+        rows = await get_floorsheet(None)
         if rows:
-            _store_floorsheet_rows(rows); data,symbol_rows=_cached_broker_rollup(day)
-            return {"ok":True,"updatedAt":now_iso(),"data":data,"bySymbol":symbol_rows,"sourceRows":len(rows),"source":"local indexed floorsheet cache"}
-    except Exception: pass
+            _store_floorsheet_rows(rows)
+            day = _floor_date(rows[0])
+            data, symbol_rows = _cached_broker_rollup(day)
+            return {"ok":True,"updatedAt":now_iso(),"businessDate":day,"data":data,"bySymbol":symbol_rows,"sourceRows":len(rows),"source":"local indexed floorsheet cache"}
+    except Exception:
+        pass
     return {"ok":False,"updatedAt":now_iso(),"data":[],"bySymbol":[],"sourceRows":0,"source":"NEPSE verified floorsheet","error":"No verified floorsheet rows returned"}
 
 async def get_history(symbol: str):
@@ -2225,6 +2246,19 @@ async def get_floorsheet(symbol: Optional[str] = None):
         rows = await _merolagani_floorsheet_fallback(wanted)
         if rows:
             return rows
+    except Exception:
+        pass
+
+    # Keep the floorsheet and broker panels usable when the live endpoint is
+    # temporarily empty: serve the most recent real trading day already stored.
+    try:
+        _floor_db_init()
+        with sqlite3.connect(FLOOR_CACHE_DB) as db:
+            row = db.execute("SELECT MAX(business_date) FROM floorsheet_raw").fetchone()
+        latest_day = row[0] if row else None
+        cached_rows = _read_floor_rows(latest_day, wanted, limit=100000) if latest_day else []
+        if cached_rows:
+            return cached_rows
     except Exception:
         pass
 
