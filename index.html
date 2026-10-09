@@ -2111,13 +2111,22 @@ const PulseFeedEngine = (()=>{
         if(total!==null && offset>=total)break;
         if(chunk.length<5000)break;
       }
-      state.floorsheet=rows;
-      state.floorsheetDate=day;
-      state.floorsheetStatus=rows.length?'CACHED':'EMPTY';
+      // Preserve the last successful cache snapshot if a later page/refresh is empty.
+      if(rows.length){
+        state.floorsheet=rows;
+        window.__PULSE_LAST_GOOD_FLOORSHEET=rows;
+        if(day)window.__PULSE_LAST_GOOD_FLOORSHEET_DATE=day;
+      }else if(Array.isArray(window.__PULSE_LAST_GOOD_FLOORSHEET)&&window.__PULSE_LAST_GOOD_FLOORSHEET.length){
+        state.floorsheet=window.__PULSE_LAST_GOOD_FLOORSHEET;
+      }else{
+        state.floorsheet=rows;
+      }
+      state.floorsheetDate=day||window.__PULSE_LAST_GOOD_FLOORSHEET_DATE||null;
+      state.floorsheetStatus=state.floorsheet.length?'CACHED':'EMPTY';
       state.floorsheetUpdatedAt=new Date().toISOString();
-      state.floorsheetError=rows.length?'':(total===0?'Backend cache contains zero rows':'Floorsheet cache returned no rows');
+      state.floorsheetError=state.floorsheet.length?'':(total===0?'Backend cache contains zero rows':'Floorsheet cache returned no rows');
       emit();
-      return rows;
+      return state.floorsheet;
     }catch(e){
       state.floorsheetError=e.message;
       state.lastError=e.message;
@@ -3534,10 +3543,19 @@ function renderBulk(a){
 function render(){const a=filtered();setMetrics(a);renderTrades(a);renderBrokers(a);renderUnusual(a);renderBulk(a)}
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function sync(st){
- all=extract(st||{});
+ // Central-feed events can arrive after the cache request with an empty
+ // floorsheet array. Never let an empty snapshot erase a valid cached tape.
+ const incoming=extract(st||{});
+ if(incoming.length){
+   all=incoming;
+   window.__PULSE_LAST_GOOD_FLOORSHEET=all;
+ }else if(!all.length && Array.isArray(window.__PULSE_LAST_GOOD_FLOORSHEET) && window.__PULSE_LAST_GOOD_FLOORSHEET.length){
+   all=window.__PULSE_LAST_GOOD_FLOORSHEET;
+ }
  const fsCount=all.length;
- const fsStatus=fsCount?'CACHED':'LOADING';
- $('fsStatus').textContent=fsCount?('CACHED • '+fsCount.toLocaleString()+' trades'+(st?.floorsheetDate?' • '+st.floorsheetDate:'')):('LOADING FLOORSHEET'+(st?.floorsheetError?' • '+st.floorsheetError:''));
+ const date=st?.floorsheetDate||window.__PULSE_LAST_GOOD_FLOORSHEET_DATE||'';
+ if(st?.floorsheetDate && incoming.length)window.__PULSE_LAST_GOOD_FLOORSHEET_DATE=st.floorsheetDate;
+ $('fsStatus').textContent=fsCount?('CACHED • '+fsCount.toLocaleString()+' trades'+(date?' • '+date:'')):('LOADING FLOORSHEET'+(st?.floorsheetError?' • '+st.floorsheetError:''));
  $('fsDot').style.background=fsCount?'#20a464':'#d29b19';
  render();
 }
