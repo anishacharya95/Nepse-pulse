@@ -2085,11 +2085,23 @@ const PulseFeedEngine = (()=>{
     try{
       const rows=[];
       let offset=0, total=null, day=null;
-      // Read the completed Render-side SQLite cache in chunks. This does not
-      // hit NEPSE and therefore remains reliable after the daily collector
-      // has finished or while the next session is being collected.
+      const backend=String(window.NEPSE_PULSE_BACKEND_URL||PULSE_FEED_CONFIG.apiBase||'').replace(/\/$/,'');
+      if(!backend) throw new Error('Floorsheet backend URL is not configured');
+      // Read the completed Render-side SQLite cache directly. Do not depend on
+      // the central market-feed state or its refresh cycle.
       for(let guard=0;guard<30;guard++){
-        const d=await fetchRoute('/api/floorsheet-cache?limit=5000&offset='+offset);
+        const url=backend+'/api/floorsheet-cache?limit=5000&offset='+offset+'&_fs='+Date.now();
+        let d=null,lastErr=null;
+        for(let attempt=0;attempt<3;attempt++){
+          try{
+            const r=await fetch(url,{cache:'no-store',headers:{Accept:'application/json'}});
+            if(!r.ok) throw new Error('Floorsheet cache HTTP '+r.status);
+            d=await r.json();
+            if(d && d.ok===false && !Array.isArray(d.data) && !Array.isArray(d.floorsheet)) throw new Error(d.error||'Floorsheet cache returned no data');
+            break;
+          }catch(e){lastErr=e;if(attempt<2)await new Promise(res=>setTimeout(res,800*(attempt+1)));}
+        }
+        if(!d){throw lastErr||new Error('Floorsheet cache request failed');}
         const chunk=arr(d?.data ?? d?.floorsheet ?? d);
         if(d?.businessDate)day=d.businessDate;
         if(Number.isFinite(Number(d?.total)))total=Number(d.total);
@@ -2101,13 +2113,13 @@ const PulseFeedEngine = (()=>{
       }
       state.floorsheet=rows;
       state.floorsheetDate=day;
-      if(rows.length){
-        state.floorsheetStatus='CACHED';
-        state.floorsheetUpdatedAt=new Date().toISOString();
-      }
+      state.floorsheetStatus=rows.length?'CACHED':'EMPTY';
+      state.floorsheetUpdatedAt=new Date().toISOString();
+      state.floorsheetError=rows.length?'':(total===0?'Backend cache contains zero rows':'Floorsheet cache returned no rows');
       emit();
       return rows;
     }catch(e){
+      state.floorsheetError=e.message;
       state.lastError=e.message;
       emit();
       return [];
@@ -3523,9 +3535,10 @@ function render(){const a=filtered();setMetrics(a);renderTrades(a);renderBrokers
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function sync(st){
  all=extract(st||{});
- const status=String(st?.status||'OFFLINE').toUpperCase();
- $('fsStatus').textContent=status+(st?.updatedAt?' • '+new Date(st.updatedAt).toLocaleTimeString(): '');
- $('fsDot').style.background=status==='LIVE'?'#20a464':status==='CACHED'?'#d29b19':'#999';
+ const fsCount=all.length;
+ const fsStatus=fsCount?'CACHED':'LOADING';
+ $('fsStatus').textContent=fsCount?('CACHED • '+fsCount.toLocaleString()+' trades'+(st?.floorsheetDate?' • '+st.floorsheetDate:'')):('LOADING FLOORSHEET'+(st?.floorsheetError?' • '+st.floorsheetError:''));
+ $('fsDot').style.background=fsCount?'#20a464':'#d29b19';
  render();
 }
 document.addEventListener('DOMContentLoaded',async()=>{
