@@ -2,6 +2,7 @@ import asyncio
 import time
 import csv
 import io
+import inspect
 import json
 import os
 import re
@@ -1985,24 +1986,28 @@ async def _recent_archive_floorsheet(symbol: Optional[str] = None, lookback_days
 # One normalized path for company floorsheets.  Every source is treated as
 # untrusted wrapper data until floor_rows() has flattened it.
 async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: int = 500, max_pages: int = 100):
-    """Fetch the full current floorsheet using the verified 500-row API.
+    """Fetch the complete floorsheet in short SDK sessions.
 
-    The live endpoint has occasionally returned stale/truncated pagination
-    metadata, so this routine uses metadata only as a target and retries empty
-    pages instead of treating the first empty response as end-of-data.
+    NEPSE can return empty pages after a long run of successful requests.  The
+    collector therefore works in small batches, stores each successful page
+    immediately, and refreshes the AsyncNepseClient between batches.  A failed
+    page is retried in isolation; already-fetched pages are never discarded.
     """
     wanted = symbol.upper().strip() if symbol else None
     rows, seen = [], set()
-    client = await get_nepse_client()
-    fn = getattr(client, "floorsheets", None)
-    if not callable(fn):
-        raise RuntimeError("AsyncNepseClient.floorsheets is not callable")
+    target_pages = 1
+    target_rows = None
+    page = 1
+    batch_size = 8
 
     def unpack(raw):
         got = floor_rows(raw)
         meta = raw.get("floorsheets") if isinstance(raw, dict) else None
-        if not isinstance(meta, dict): meta = raw if isinstance(raw, dict) else {}
-        return got, meta.get("totalPages") or meta.get("total_pages"), meta.get("totalElements") or meta.get("total_elements")
+        if not isinstance(meta, dict):
+            meta = raw if isinstance(raw, dict) else {}
+        return (got,
+                meta.get("totalPages") or meta.get("total_pages"),
+                meta.get("totalElements") or meta.get("total_elements"))
 
     def add_rows(got):
         for r in got:
@@ -2010,129 +2015,115 @@ async def _complete_daily_floorsheet(symbol: Optional[str] = None, page_size: in
             if not key:
                 key = f"{r.get('symbol')}|{r.get('businessDate')}|{r.get('tradeTime')}|{r.get('quantity')}|{r.get('rate')}|{r.get('buyerBroker')}|{r.get('sellerBroker')}"
             if key not in seen:
-                seen.add(key); rows.append(r)
+                seen.add(key)
+                rows.append(r)
 
-    page = 1
-    target_pages = 1
-    target_rows = None
     while page <= max_pages:
-        got = []
-        tp = te = None
-        FLOOR_DIAG["currentPage"] = page
-        FLOOR_DIAG["progress"] = f"fetching page {page}"
-        FLOOR_DIAG["lastAttemptAt"] = now_iso()
-        # Refresh the SDK session at the known long-run failure boundary.
-        # This preserves all accumulated rows while avoiding a stale HTTP
-        # session carrying the collector into page 65 with empty responses.
-        if page == 65:
-            try:
-                await reset_nepse_client()
-            except Exception:
-                pass
-        # Upstream empties are transient. Retry the SAME page, but keep the
-        # retry budget short enough that a broken page cannot hang Render.
-        for attempt in range(6):
-            try:
-                async with NEPSE_CALL_LOCK:
-                    raw = await nepse_call(["floorsheets"], page=page, size=500)
-                got, tp, te = unpack(raw)
-                if got: break
-                if attempt == 1 and page == 1:
-                    try:
-                        await reset_nepse_client()
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-            # NEPSE can keep returning an empty page after a long sequence of
-            # successful requests.  This is especially reproducible around
-            # page 65 even though independent diagnostics show page 65/66 are
-            # valid.  Refresh the SDK session before retrying the same page;
-            # NEVER discard the rows already accumulated.
-            if not got and attempt in (1, 3) and page >= 65:
+        # Start every batch with a fresh SDK session. This avoids accumulating
+        # stale/rate-limited state across dozens of requests.
+        try:
+            await reset_nepse_client()
+        except Exception:
+            pass
+        batch_end = min(page + batch_size - 1, max_pages, target_pages)
+        FLOOR_DIAG["progress"] = f"starting batch {page}-{batch_end}"
+
+        while page <= batch_end:
+            got = []
+            tp = te = None
+            FLOOR_DIAG["currentPage"] = page
+            FLOOR_DIAG["targetPages"] = target_pages
+            FLOOR_DIAG["targetRows"] = target_rows
+            FLOOR_DIAG["lastAttemptAt"] = now_iso()
+            FLOOR_DIAG["progress"] = f"fetching page {page}"
+
+            # Retry one page only. Refresh the client between retries so a
+            # transient/stale session cannot poison the rest of the batch.
+            for attempt in range(10):
+                try:
+                    client = await get_nepse_client()
+                    fn = getattr(client, "floorsheets", None)
+                    if not callable(fn):
+                        raise RuntimeError("AsyncNepseClient.floorsheets is not callable")
+                    async with NEPSE_CALL_LOCK:
+                        raw = await fn(page=page, size=500)
+                    got, tp, te = unpack(raw)
+                    if got:
+                        break
+                except Exception as exc:
+                    FLOOR_DIAG["lastCollectorError"] = f"page {page} attempt {attempt+1}: {type(exc).__name__}: {exc}"
+                if attempt < 9:
+                    if attempt in (1, 3, 5, 7):
+                        try:
+                            await reset_nepse_client()
+                        except Exception:
+                            pass
+                    FLOOR_DIAG["progress"] = f"page {page} retry {attempt+1}/10"
+                    await asyncio.sleep(min(4.0, 1.0 + attempt * 0.4))
+
+            if tp is not None:
+                try:
+                    target_pages = max(target_pages, min(max_pages, int(tp)))
+                except Exception:
+                    pass
+            if te is not None:
+                try:
+                    target_rows = int(te)
+                except Exception:
+                    pass
+            FLOOR_DIAG["targetPages"] = target_pages
+            FLOOR_DIAG["targetRows"] = target_rows
+
+            if not got:
+                # Keep the current page and accumulated rows. Do not raise to
+                # the outer collector: that would restart the whole walk at
+                # page 1. Refresh the client and retry this same page.
+                FLOOR_DIAG["progress"] = f"page {page} still empty; refreshing session and retrying same page"
+                FLOOR_DIAG["lastCollectorError"] = f"page {page} empty after 10 retries; accumulated {len(rows)} rows"
                 try:
                     await reset_nepse_client()
                 except Exception:
                     pass
-            if attempt < 5:
-                await asyncio.sleep(1.0 + attempt * 0.5)
+                await asyncio.sleep(5.0)
+                continue
 
-        if tp is not None:
-            try: target_pages = max(target_pages, min(max_pages, int(tp)))
-            except Exception: pass
-        if te is not None:
-            try: target_rows = int(te)
-            except Exception: pass
+            before = len(rows)
+            add_rows(got)
+            if page > 1 and len(rows) == before:
+                raise RuntimeError(f"floorsheets page {page} repeated previous data")
 
-        FLOOR_DIAG["targetPages"] = target_pages
-        FLOOR_DIAG["targetRows"] = target_rows
-        FLOOR_DIAG["lastFetchCount"] = len(rows)
-        FLOOR_DIAG["lastFetchedPages"] = max(0, page - 1)
+            # Persist each successful page immediately. If a later page fails,
+            # Render still has the earlier pages in SQLite.
+            try:
+                stored_now = _store_floorsheet_rows(got)
+                FLOOR_DIAG["lastStoreCount"] = int(FLOOR_DIAG.get("lastStoreCount") or 0) + stored_now
+            except Exception as exc:
+                FLOOR_DIAG["lastCollectorError"] = f"page {page} store: {type(exc).__name__}: {exc}"
+                raise
 
-        if not got:
-            # If metadata says more pages exist, make one bounded second pass
-            # over this page rather than terminating the whole collection.
-            if page <= target_pages:
-                recovered = False
-                for attempt in range(3):
-                    await asyncio.sleep(2.0)
-                    try:
-                        async with NEPSE_CALL_LOCK:
-                            raw = await nepse_call(["floorsheets"], page=page, size=500)
-                        got, tp2, te2 = unpack(raw)
-                        if tp2:
-                            try: target_pages = max(target_pages, min(max_pages, int(tp2)))
-                            except Exception: pass
-                        if te2:
-                            try: target_rows = int(te2)
-                            except Exception: pass
-                        if got: recovered = True; break
-                    except Exception: pass
-                if not recovered:
-                    # IMPORTANT: do NOT raise here. Raising discards every row
-                    # fetched so far and the outer collector starts again at
-                    # page 1. NEPSE has been observed to transiently return an
-                    # empty page around the 60-70 range even though the page
-                    # is valid. Keep the accumulated rows and retry THIS SAME
-                    # page in-place.
-                    raw_hint = "no response"
-                    try:
-                        if isinstance(raw, dict):
-                            raw_hint = f"dict_keys={list(raw.keys())[:20]} floorsheets_type={type(raw.get('floorsheets')).__name__}"
-                        else:
-                            raw_hint = f"raw_type={type(raw).__name__}"
-                    except Exception:
-                        pass
-                    FLOOR_DIAG["progress"] = f"page {page} temporarily empty; retrying same page ({raw_hint})"
-                    FLOOR_DIAG["lastCollectorError"] = f"page {page} temporarily empty; accumulated {len(rows)} rows"
-                    await asyncio.sleep(5.0)
-                    continue
-            else:
+            page += 1
+            FLOOR_DIAG["lastFetchCount"] = len(rows)
+            FLOOR_DIAG["lastFetchedPages"] = page - 1
+            FLOOR_DIAG["progress"] = f"fetched {page-1}/{target_pages} pages ({len(rows)} rows)"
+
+            if page > target_pages and (target_rows is None or len(rows) >= target_rows):
+                FLOOR_DIAG["progress"] = "complete"
                 break
+            await asyncio.sleep(0.25)
 
-        before = len(rows)
-        add_rows(got)
-        if page > 1 and len(rows) == before:
-            raise RuntimeError(f"floorsheets page {page} repeated previous data")
-
-        page += 1
-        FLOOR_DIAG["lastFetchCount"] = len(rows)
-        FLOOR_DIAG["lastFetchedPages"] = page - 1
-        FLOOR_DIAG["progress"] = f"fetched {page - 1}/{target_pages} pages ({len(rows)} rows)"
-        # Once we've reached the known target, require one additional page
-        # probe only when the collected count is still below totalElements.
         if page > target_pages and (target_rows is None or len(rows) >= target_rows):
             break
-        await asyncio.sleep(0.25)
+        # End of a short batch: next loop creates a fresh client/session.
+        await asyncio.sleep(0.5)
 
-    FLOOR_DIAG["progress"] = "complete"
-    FLOOR_DIAG["currentPage"] = page - 1
-    FLOOR_DIAG["lastFetchCount"] = len(rows)
-    FLOOR_DIAG["lastFetchedPages"] = max(0, page - 1)
     if target_rows is not None and len(rows) < target_rows:
         raise RuntimeError(f"incomplete floorsheet: got {len(rows)} of {target_rows}")
     if wanted:
         rows = [r for r in rows if str(r.get("symbol") or "").upper().strip() == wanted]
+    FLOOR_DIAG["currentPage"] = max(0, page - 1)
+    FLOOR_DIAG["lastFetchCount"] = len(rows)
+    FLOOR_DIAG["lastFetchedPages"] = max(0, page - 1)
+    FLOOR_DIAG["progress"] = "complete"
     return rows
 
 
