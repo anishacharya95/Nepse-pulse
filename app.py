@@ -85,6 +85,7 @@ CACHE_TTL = {
     "company": 300,
     "history": 600,
     "sectors": 60,
+    "sectorconstituents": 1800,
     "brokers": 45,
 }
 
@@ -463,18 +464,7 @@ def _floor_date(r):
         if value:
             text=str(value).strip()
             m=re.search(r"\d{4}-\d{2}-\d{2}", text)
-            if m:
-                return m.group(0)
-            # Some NEPSE feeds encode trade dates as YYYYMMDD (and trade IDs
-            # may begin with that date). Normalize these instead of misfiling
-            # every row under today's date.
-            compact=re.search(r"(?<!\d)(\d{8})(?!\d)", text)
-            if compact:
-                raw=compact.group(1)
-                try:
-                    return datetime.strptime(raw, "%Y%m%d").date().isoformat()
-                except ValueError:
-                    pass
+            if m: return m.group(0)
     return datetime.now(NPT).date().isoformat()
 
 def _store_floorsheet_rows(rows):
@@ -1865,29 +1855,19 @@ async def get_floorsheet(symbol: Optional[str] = None):
     return []
 
 async def get_broker_analysis():
-    # Prefer the newest available stored trading day, not only today's date:
-    # NEPSE returns an empty live floorsheet outside market hours and on holidays.
+    day=datetime.now(NPT).date().isoformat()
     try:
-        _floor_db_init()
-        with sqlite3.connect(FLOOR_CACHE_DB) as db:
-            latest = db.execute("SELECT MAX(business_date) FROM floorsheet_raw").fetchone()
-        latest_day = latest[0] if latest else None
-        if latest_day:
-            count = _floor_count(latest_day)
-            if count:
-                data, symbol_rows = _cached_broker_rollup(latest_day)
-                return {"ok":True,"updatedAt":now_iso(),"businessDate":latest_day,"data":data,"bySymbol":symbol_rows,"sourceRows":count,"source":"local indexed floorsheet cache"}
-    except Exception:
-        pass
+        count=_floor_count(day)
+        if count:
+            data,symbol_rows=_cached_broker_rollup(day)
+            return {"ok":True,"updatedAt":now_iso(),"data":data,"bySymbol":symbol_rows,"sourceRows":count,"source":"local indexed floorsheet cache"}
+    except Exception: pass
     try:
-        rows = await get_floorsheet(None)
+        rows=await get_floorsheet(None)
         if rows:
-            _store_floorsheet_rows(rows)
-            day = _floor_date(rows[0])
-            data, symbol_rows = _cached_broker_rollup(day)
-            return {"ok":True,"updatedAt":now_iso(),"businessDate":day,"data":data,"bySymbol":symbol_rows,"sourceRows":len(rows),"source":"local indexed floorsheet cache"}
-    except Exception:
-        pass
+            _store_floorsheet_rows(rows); data,symbol_rows=_cached_broker_rollup(day)
+            return {"ok":True,"updatedAt":now_iso(),"data":data,"bySymbol":symbol_rows,"sourceRows":len(rows),"source":"local indexed floorsheet cache"}
+    except Exception: pass
     return {"ok":False,"updatedAt":now_iso(),"data":[],"bySymbol":[],"sourceRows":0,"source":"NEPSE verified floorsheet","error":"No verified floorsheet rows returned"}
 
 async def get_history(symbol: str):
@@ -2246,19 +2226,6 @@ async def get_floorsheet(symbol: Optional[str] = None):
         rows = await _merolagani_floorsheet_fallback(wanted)
         if rows:
             return rows
-    except Exception:
-        pass
-
-    # Keep the floorsheet and broker panels usable when the live endpoint is
-    # temporarily empty: serve the most recent real trading day already stored.
-    try:
-        _floor_db_init()
-        with sqlite3.connect(FLOOR_CACHE_DB) as db:
-            row = db.execute("SELECT MAX(business_date) FROM floorsheet_raw").fetchone()
-        latest_day = row[0] if row else None
-        cached_rows = _read_floor_rows(latest_day, wanted, limit=100000) if latest_day else []
-        if cached_rows:
-            return cached_rows
     except Exception:
         pass
 
@@ -3217,6 +3184,140 @@ async def company_list():
 @app.get("/api/companies")
 async def api_companies():
     return await company_list()
+
+
+@app.get("/api/sector-constituents")
+async def api_sector_constituents():
+    """Return live NEPSE rows enriched with sector classifications.
+
+    Company directories and live-market feeds often omit sector fields. This
+    endpoint joins the live rows to the public company profile/security tables,
+    then uses the per-company detail endpoint only for still-unclassified live
+    securities. The response is cached to avoid repeating profile lookups.
+    """
+    async def load():
+        def records(obj, depth=0):
+            if depth > 7 or obj is None:
+                return []
+            if isinstance(obj, list):
+                out=[]
+                for item in obj:
+                    if isinstance(item, dict): out.append(item)
+                    elif isinstance(item, (list, dict)): out.extend(records(item, depth+1))
+                return out
+            if not isinstance(obj, dict): return []
+            out=[]
+            # Handle both ordinary row arrays and maps keyed by ticker.
+            for k,v in obj.items():
+                if isinstance(v, dict):
+                    row=dict(v)
+                    if not pick(row, ["symbol","ticker","stockSymbol","symbolCode","securitySymbol","code"]):
+                        if isinstance(k,str) and k.replace("&", "").replace("-", "").isalnum() and 1 <= len(k) <= 12:
+                            row["symbol"] = k
+                    if pick(row, ["symbol","ticker","stockSymbol","symbolCode","securitySymbol","code"]): out.append(row)
+                    out.extend(records(v, depth+1))
+                elif isinstance(v, list): out.extend(records(v, depth+1))
+            # A single object row should be retained.
+            if pick(obj, ["symbol","ticker","stockSymbol","symbolCode","securitySymbol","code"]): out.insert(0,obj)
+            return out
+
+        def symbol_of(row):
+            return str(pick(row,["symbol","ticker","stockSymbol","symbolCode","securitySymbol","securityID","securityId","code"],"") or "").strip().upper()
+        sector_keys=["sector","sectorName","sector_name","sectorDescription","industry","industryName","groupName","sectorDesc","sectorNameEnglish","sectorType","category","subSector","businessSector"]
+        def sector_of(*objs):
+            seen=set()
+            def scan(obj, depth=0):
+                if depth>6 or obj is None: return None
+                if isinstance(obj,list):
+                    for child in obj:
+                        found=scan(child,depth+1)
+                        if found: return found
+                    return None
+                if not isinstance(obj,dict) or id(obj) in seen: return None
+                seen.add(id(obj))
+                val=pick(obj,sector_keys)
+                if isinstance(val,dict): val=pick(val,["name","sector","description","title"])
+                if val and not isinstance(val,(dict,list)) and str(val).strip(): return str(val).strip()
+                # Prioritize common profile wrappers before traversing unknown keys.
+                for key in ("profile","details","data","content","security","company","result","rows","items"):
+                    child=obj.get(key)
+                    found=scan(child,depth+1)
+                    if found: return found
+                for child in obj.values():
+                    if isinstance(child,(dict,list)):
+                        found=scan(child,depth+1)
+                        if found: return found
+                return None
+            for obj in objs:
+                found=scan(obj)
+                if found: return found
+            return None
+
+        try:
+            market, companies, profiles, securities = await asyncio.gather(
+                get_market(), company_list(), yonepse_get("company/profiles.json"), yonepse_get("other/securities.json"),
+                return_exceptions=True,
+            )
+        except Exception:
+            market, companies, profiles, securities = {}, [], None, None
+        if isinstance(market, Exception): market={}
+        if isinstance(companies, Exception): companies=[]
+        if isinstance(profiles, Exception): profiles=None
+        if isinstance(securities, Exception): securities=None
+        live_rows=deep_rows(market.get("live",[])) if isinstance(market,dict) else []
+        company_rows=records(companies)
+        profile_rows=records(profiles)
+        security_rows=records(securities)
+        by_symbol={}
+        for row in company_rows + profile_rows + security_rows:
+            sym=symbol_of(row)
+            if not sym: continue
+            old=by_symbol.get(sym,{})
+            by_symbol[sym]={**row,**old}
+            sector=sector_of(old,row)
+            if sector: by_symbol[sym]["sector"]=sector
+        live_by_symbol={}
+        for row in live_rows:
+            sym=symbol_of(row)
+            if not sym: continue
+            live_by_symbol[sym]={**by_symbol.get(sym,{}),**row,"symbol":sym}
+            sec=sector_of(row,by_symbol.get(sym,{}))
+            if sec: live_by_symbol[sym]["sector"]=sec
+
+        # Sector metadata can be absent from the bulk feed. Resolve the live
+        # constituents from cached company-detail calls, with bounded concurrency.
+        unresolved=[sym for sym,row in live_by_symbol.items() if not sector_of(row)]
+        sem=asyncio.Semaphore(10)
+        async def enrich(sym):
+            async with sem:
+                try:
+                    detail=await get_company(sym)
+                    return sym, sector_of(detail, detail.get("details") if isinstance(detail,dict) else None)
+                except Exception:
+                    return sym,None
+        if unresolved:
+            results=await asyncio.gather(*(enrich(sym) for sym in unresolved), return_exceptions=True)
+            for result in results:
+                if isinstance(result,tuple) and len(result)==2 and result[1]:
+                    live_by_symbol[result[0]]["sector"]=result[1]
+
+        def nval(row, keys):
+            return num(pick(row,keys))
+        out=[]
+        for sym,row in live_by_symbol.items():
+            sector=sector_of(row)
+            out.append({
+                "symbol":sym,
+                "companyName":pick(row,["companyName","securityName","name","company_name","companyNameEnglish"],sym),
+                "sector":sector,
+                "price":nval(row,["ltp","lastTradedPrice","lastPrice","closePrice","price","closingPrice"]),
+                "change":nval(row,["percentageChange","perChange","percentChange","changePercent","pChange","pct"]),
+                "absoluteChange":nval(row,["change","pointChange","difference","changeValue"]),
+                "volume":nval(row,["totalTradedQuantity","volume","tradedQuantity","quantity","tradedShares"]),
+                "turnover":nval(row,["totalTradedValue","turnover","totalTurnover","value"]),
+            })
+        return {"ok":bool(out),"data":out,"count":len(out),"classified":sum(1 for x in out if x.get("sector")),"updatedAt":now_iso(),"source":"NEPSE live market + public company profiles/security directory"}
+    return await cached("sectorconstituents:all", load)
 
 
 @app.get("/CompanyDetails")

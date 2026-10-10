@@ -1668,7 +1668,7 @@ body{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",san
   <button class="active" onclick="setNav(this,'Home')"><span class="ni">⌂</span>Home</button>
   <button onclick="setNav(this,'Markets')"><span class="ni">⌁</span>Market</button>
   <button onclick="openTechnicalScreener()"><span class="ni">⌕</span>Screener</button>
-  <button onclick="openModule('Portfolio')"><span class="ni">▣</span>Portfolio</button>
+  <button onclick="setNav(this,'Profile')"><span class="ni">●</span>Profile</button>
   <button onclick="openFeatures()"><span class="ni">⋮</span>More</button>
 </nav></div>
 
@@ -2108,25 +2108,17 @@ const PulseFeedEngine = (()=>{
         if(!chunk.length)break;
         rows.push(...chunk);
         offset+=chunk.length;
+        // Continue through short pages whenever the API reports a larger total.
         if(total!==null && offset>=total)break;
-        if(chunk.length<5000)break;
+        if(total===null && chunk.length<5000)break;
       }
-      // Preserve the last successful cache snapshot if a later page/refresh is empty.
-      if(rows.length){
-        state.floorsheet=rows;
-        window.__PULSE_LAST_GOOD_FLOORSHEET=rows;
-        if(day)window.__PULSE_LAST_GOOD_FLOORSHEET_DATE=day;
-      }else if(Array.isArray(window.__PULSE_LAST_GOOD_FLOORSHEET)&&window.__PULSE_LAST_GOOD_FLOORSHEET.length){
-        state.floorsheet=window.__PULSE_LAST_GOOD_FLOORSHEET;
-      }else{
-        state.floorsheet=rows;
-      }
-      state.floorsheetDate=day||window.__PULSE_LAST_GOOD_FLOORSHEET_DATE||null;
-      state.floorsheetStatus=state.floorsheet.length?'CACHED':'EMPTY';
+      state.floorsheet=rows;
+      state.floorsheetDate=day;
+      state.floorsheetStatus=rows.length?'CACHED':'EMPTY';
       state.floorsheetUpdatedAt=new Date().toISOString();
-      state.floorsheetError=state.floorsheet.length?'':(total===0?'Backend cache contains zero rows':'Floorsheet cache returned no rows');
+      state.floorsheetError=rows.length?'':(total===0?'Backend cache contains zero rows':'Floorsheet cache returned no rows');
       emit();
-      return state.floorsheet;
+      return rows;
     }catch(e){
       state.floorsheetError=e.message;
       state.lastError=e.message;
@@ -2682,15 +2674,20 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
   function broker(o){return text(o,['brokerName','broker','buyerBrokerName','sellerBrokerName','memberName','clientBroker'])||'Unknown broker'}
 
   function discover(){
+    const engineState=window.PULSE_FEED_ENGINE?.state?.();
+    const feedState=window.PULSE_FEED?.state;
     const c=[
-      window.PULSE_FEED?.state?.floorsheet,
-      window.PULSE_FEED?.state?.floorsheetData,
+      engineState?.floorsheet,
+      engineState?.floorsheetData,
+      feedState?.floorsheet,
+      feedState?.floorsheetData,
       window.PULSE_FEED?.floorsheet,
       window.marketData?.floorsheet,
       window.floorsheetData
     ];
     for(const x of c) if(Array.isArray(x)&&x.length)return x;
-    return [];
+    // A temporary empty poll must not wipe a previously loaded broker view.
+    return null;
   }
 
   function esc(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
@@ -2731,7 +2728,7 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
     if(ur)ur.innerHTML=unusual.map(x=>`<div class="b-item"><span><b>${esc(x.symbol)}</b><small>${esc(x.broker)} • ${esc(x.side)}</small></span><span>${money(x.qty)} qty</span></div>`).join('')||'<div class="b-empty">No verified unusual trades.</div>';
   }
 
-  function refresh(){floors=discover();render()}
+  function refresh(){const next=discover();if(Array.isArray(next)&&next.length)floors=next;render()}
   document.addEventListener('pulse-feed-update',refresh);
   setInterval(refresh,5000);
   setTimeout(refresh,900);
@@ -3040,6 +3037,20 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
 
     const pl=value&&cost?value-cost:null;
     if($('pStats'))$('pStats').innerHTML=`<div class="p-stat"><strong>${hs.length}</strong><span>Positions</span></div><div class="p-stat"><strong>${money(value||null)}</strong><span>Value</span></div><div class="p-stat"><strong>${pl===null?'—':money(pl)}</strong><span>Unrealized P/L</span></div>`;
+    const dash=$('profilePortfolioDash');
+    if(dash){
+      const fmt=n=>n===null||n===undefined?'—':Number(n).toLocaleString(undefined,{maximumFractionDigits:2});
+      const set=(id,v)=>{const el=$(id);if(el)el.textContent=v};
+      set('ppdValue','NPR '+fmt(value||null));set('ppdPL',pl===null?'—':(pl>=0?'+NPR ':'−NPR ')+fmt(Math.abs(pl)));set('ppdPositions',hs.length+' holdings');set('ppdCount',hs.length+' holdings');set('ppdHoldingsCount',hs.length+' holdings');set('ppdDonutValue',value?fmt(value/1000)+'K':'—');
+      const colors=['#176b53','#e2aa3e','#2c7d9b','#8c6bb1','#d16b62','#7d9b55','#4774b8'];
+      let cursor=0;const slices=rendered.filter(x=>x.mv!==null&&x.mv>0);const total=slices.reduce((a,x)=>a+x.mv,0);
+      const stops=slices.map((x,i)=>{const start=cursor;cursor+=total?x.mv/total*100:0;return `${colors[i%colors.length]} ${start}% ${cursor}%`});
+      const donut=$('ppdDonut');if(donut&&stops.length)donut.style.background='conic-gradient('+stops.join(',')+')';
+      const legend=$('ppdLegend');if(legend)legend.innerHTML=slices.map((x,i)=>`<div class="ppd-legend-row"><i class="ppd-dot" style="background:${colors[i%colors.length]}"></i><b>${x.h.symbol}</b><span>${total?Math.round(x.mv/total*100):0}%</span></div>`).join('')||'<div class="ppd-empty">Add holdings to see allocation.</div>';
+      const holdingHtml=rendered.map((x,i)=>`<div class="ppd-holding"><div><b>${x.h.symbol}</b><small>${x.h.qty.toLocaleString()} shares · Avg ${money(x.avg)} · LTP ${money(x.live)}</small></div><div style="text-align:right"><b>NPR ${money(x.mv)}</b><small style="color:${x.pl===null?'#77837c':x.pl>=0?'#167653':'#c34242'}">P/L ${money(x.pl)}</small></div></div>`).join('')||'<div class="ppd-empty">No holdings yet. Add a buy transaction below.</div>';
+      const hl=$('ppdHoldingList');if(hl)hl.innerHTML=holdingHtml;
+      const perf=$('ppdPerformance');if(perf)perf.innerHTML=rendered.length?`<div class="ppd-holding"><span>Market value</span><b>NPR ${fmt(value||null)}</b></div><div class="ppd-holding"><span>Invested cost</span><b>NPR ${fmt(cost||null)}</b></div><div class="ppd-holding"><span>Unrealized P/L</span><b style="color:${pl===null?'#77837c':pl>=0?'#167653':'#c34242'}">${pl===null?'—':(pl>=0?'+':'−')+'NPR '+fmt(Math.abs(pl))}</b></div>`:'Performance will appear when holdings and live prices are available.';
+    }
 
     const dr=$('pDividends');
     const total=div.reduce((a,d)=>a+(d.rate*d.shares),0);
@@ -3420,6 +3431,13 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
         <tbody id="fsTradeRows"><tr><td colspan="8" class="fs-empty">Connect the Central Feed to populate floorsheet data.</td></tr></tbody>
       </table>
     </div>
+    <div class="fs-pagination" aria-label="Trade tape pagination">
+      <span id="fsPageInfo">Page 1</span>
+      <div class="fs-page-actions">
+        <button id="fsPrevPage" type="button" disabled>Previous</button>
+        <button id="fsNextPage" type="button" disabled>Next</button>
+      </div>
+    </div>
   </div>
 
   <div id="fsBrokersView" class="fs-view" hidden>
@@ -3462,6 +3480,11 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
 .fs-broker-grid{display:grid;grid-template-columns:2fr 1fr;gap:14px}.fs-card{border:1px solid rgba(127,127,127,.14);border-radius:16px;padding:14px;background:rgba(127,127,127,.035)}.fs-card-title{font-size:12px;font-weight:800;margin-bottom:10px}.fs-rank-list{display:flex;flex-direction:column;gap:8px}.fs-rank{display:flex;justify-content:space-between;gap:8px;padding:10px;border-radius:10px;background:rgba(127,127,127,.07);font-size:11px}.fs-hint{font-size:11px;opacity:.6;line-height:1.45}
 @media(max-width:900px){.pulse-fs-controls{grid-template-columns:repeat(3,1fr)}.fs-broker-grid{grid-template-columns:1fr}}
 @media(max-width:600px){#floorsheet-broker-v4{padding:14px;border-radius:18px}.pulse-fs-head{display:block}.pulse-fs-status{display:inline-flex;margin-top:10px}.pulse-fs-controls{grid-template-columns:1fr 1fr}.pulse-fs-controls label:first-child{grid-column:1/-1}.pulse-fs-metrics{grid-template-columns:repeat(2,1fr)}}
+
+ .fs-pagination{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 2px 2px;font-size:12px;opacity:.9}
+ .fs-page-actions{display:flex;gap:8px}
+ .fs-page-actions button{border:1px solid rgba(127,127,127,.25);background:rgba(127,127,127,.07);color:inherit;border-radius:9px;padding:9px 12px;font:inherit;cursor:pointer}
+ .fs-page-actions button:disabled{opacity:.35;cursor:not-allowed}
 </style>
 
 <script id="pulse-v4-floorsheet-engine">
@@ -3471,6 +3494,7 @@ const $=id=>document.getElementById(id);
 const num=v=>{const x=Number(String(v??'').replace(/,/g,''));return Number.isFinite(x)?x:null};
 const str=v=>String(v??'').trim();
 let all=[];
+let currentPage=1;
 
 function pick(o,ks){for(const k of ks){if(o&&o[k]!==undefined&&o[k]!==null&&o[k]!=='')return o[k]}return null}
 function normalize(x){
@@ -3515,7 +3539,16 @@ function setMetrics(a){
  const bs=new Set(a.flatMap(x=>[x.buyer,x.seller]).filter(Boolean)); $('fsBrokers').textContent=bs.size;
 }
 function renderTrades(a){
- $('fsTradeRows').innerHTML=a.length?a.slice(0,Number($('fsLimit').value)).map(x=>`<tr><td>${esc(x.time||'—')}</td><td><b>${esc(x.symbol||'—')}</b></td><td>${esc(x.buyer||'—')}</td><td>${esc(x.seller||'—')}</td><td>${fmt(x.price,2)}</td><td>${fmt(x.qty)}</td><td>${fmt(x.value)}</td><td><span class="fs-type">${esc(x.type||'Trade')}</span></td></tr>`).join(''):'<tr><td colspan="8" class="fs-empty">No trades match the current filters.</td></tr>';
+ const pageSize=Math.max(1,Number($('fsLimit').value)||50);
+ const pageCount=Math.max(1,Math.ceil(a.length/pageSize));
+ currentPage=Math.min(Math.max(1,currentPage),pageCount);
+ const start=(currentPage-1)*pageSize;
+ const visible=a.slice(start,start+pageSize);
+ $('fsTradeRows').innerHTML=visible.length?visible.map(x=>`<tr><td>${esc(x.time||'—')}</td><td><b>${esc(x.symbol||'—')}</b></td><td>${esc(x.buyer||'—')}</td><td>${esc(x.seller||'—')}</td><td>${fmt(x.price,2)}</td><td>${fmt(x.qty)}</td><td>${fmt(x.value)}</td><td><span class="fs-type">${esc(x.type||'Trade')}</span></td></tr>`).join(''):'<tr><td colspan="8" class="fs-empty">No trades match the current filters.</td></tr>';
+ const info=$('fsPageInfo'),prev=$('fsPrevPage'),next=$('fsNextPage');
+ if(info)info.textContent=a.length?`Showing ${start+1}–${Math.min(start+visible.length,a.length)} of ${a.length.toLocaleString()} trades · Page ${currentPage} of ${pageCount}`:'Showing 0 trades · Page 1 of 1';
+ if(prev)prev.disabled=currentPage<=1;
+ if(next)next.disabled=currentPage>=pageCount;
 }
 function renderBrokers(a){
  const m={};let total=a.reduce((s,x)=>s+(x.value||0),0);
@@ -3543,19 +3576,14 @@ function renderBulk(a){
 function render(){const a=filtered();setMetrics(a);renderTrades(a);renderBrokers(a);renderUnusual(a);renderBulk(a)}
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function sync(st){
- // Central-feed events can arrive after the cache request with an empty
- // floorsheet array. Never let an empty snapshot erase a valid cached tape.
  const incoming=extract(st||{});
- if(incoming.length){
-   all=incoming;
-   window.__PULSE_LAST_GOOD_FLOORSHEET=all;
- }else if(!all.length && Array.isArray(window.__PULSE_LAST_GOOD_FLOORSHEET) && window.__PULSE_LAST_GOOD_FLOORSHEET.length){
-   all=window.__PULSE_LAST_GOOD_FLOORSHEET;
- }
+ // Other market-feed snapshots may omit the floorsheet or send an empty
+ // placeholder. Keep the last successfully loaded tape instead of blanking
+ // the table during those unrelated refreshes.
+ if(incoming.length || !all.length) all=incoming;
  const fsCount=all.length;
- const date=st?.floorsheetDate||window.__PULSE_LAST_GOOD_FLOORSHEET_DATE||'';
- if(st?.floorsheetDate && incoming.length)window.__PULSE_LAST_GOOD_FLOORSHEET_DATE=st.floorsheetDate;
- $('fsStatus').textContent=fsCount?('CACHED • '+fsCount.toLocaleString()+' trades'+(date?' • '+date:'')):('LOADING FLOORSHEET'+(st?.floorsheetError?' • '+st.floorsheetError:''));
+ const fsStatus=fsCount?'CACHED':'LOADING';
+ $('fsStatus').textContent=fsCount?('CACHED • '+fsCount.toLocaleString()+' trades'+(st?.floorsheetDate?' • '+st.floorsheetDate:'')):('LOADING FLOORSHEET'+(st?.floorsheetError?' • '+st.floorsheetError:''));
  $('fsDot').style.background=fsCount?'#20a464':'#d29b19';
  render();
 }
@@ -3570,14 +3598,17 @@ document.addEventListener('DOMContentLoaded',async()=>{
  document.querySelectorAll('#floorsheet-broker-v4 .fs-tab').forEach(b=>b.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();activateTab(b)}));
  // Delegated handler protects the tabs if the workspace is re-rendered.
  $('floorsheet-broker-v4')?.addEventListener('click',e=>{const b=e.target.closest('.fs-tab');if(b){e.preventDefault();e.stopPropagation();activateTab(b)}});
- $('fsApply').addEventListener('click',render);
+ $('fsApply').addEventListener('click',()=>{currentPage=1;render()});
+ $('fsPrevPage').addEventListener('click',()=>{if(currentPage>1){currentPage--;render()}});
+ $('fsNextPage').addEventListener('click',()=>{currentPage++;render()});
  $('fsRefresh').addEventListener('click',async()=>{
    $('fsStatus').textContent='Loading stored floorsheet…';
    const rows=await PulseFeedEngine.loadFloorsheet();
    sync({...PulseFeedEngine.state(),floorsheet:rows,status:rows.length?'CACHED':'OFFLINE'});
  });
- ['fsSearch','fsMinQty','fsMinValue','fsSide','fsLimit'].forEach(id=>$(id).addEventListener('change',render));
- window.addEventListener('pulse-central-snapshot',e=>sync(e.detail));
+ ['fsSearch','fsMinQty','fsMinValue','fsSide'].forEach(id=>$(id).addEventListener('change',()=>{currentPage=1;render()}));
+ $('fsLimit').addEventListener('change',()=>{currentPage=1;render()});
+ window.addEventListener('pulse-central-snapshot',e=>{if(e.detail&&typeof e.detail==='object')sync(e.detail)});
  window.addEventListener('pulse-feed-update',()=>{const st=window.PULSE_FEED_ENGINE?.state?.();if(st)sync(st)});
  const st=window.PULSE_FEED_ENGINE?.state?.();if(st)sync(st);
  // The previous UI only loaded floorsheet when another feature explicitly
@@ -3673,11 +3704,11 @@ document.addEventListener('DOMContentLoaded',async()=>{
 .sv5-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:16px}.sv5-kicker{font-size:10px;letter-spacing:.14em;font-weight:800;opacity:.62}.sv5-head h2{margin:4px 0;font-size:25px}.sv5-head p{margin:0;font-size:13px;opacity:.68}.sv5-status{font-size:11px;display:flex;align-items:center;gap:7px;padding:8px 10px;border-radius:99px;background:rgba(127,127,127,.09);white-space:nowrap}.sv5-status span:first-child{width:7px;height:7px;border-radius:50%;background:#999}
 .sv5-metrics{display:grid;grid-template-columns:repeat(6,1fr);gap:9px;margin-bottom:14px}.sv5-metrics div{padding:12px;border-radius:13px;background:rgba(127,127,127,.07)}.sv5-metrics b{display:block;font-size:18px}.sv5-metrics span{font-size:10px;opacity:.6}
 .sv5-toolbar{display:flex;gap:12px;align-items:end;justify-content:space-between;margin-bottom:14px}.sv5-tabs{display:flex;gap:7px;overflow:auto}.sv5-tab,.sv5-drill-head button{border:1px solid rgba(127,127,127,.2);background:transparent;color:inherit;border-radius:10px;padding:9px 12px;white-space:nowrap;cursor:pointer}.sv5-tab.active{font-weight:800;background:rgba(127,127,127,.13)}.sv5-toolbar label{font-size:10px;opacity:.7;min-width:160px}.sv5-toolbar input,.sv5-toolbar select{display:block;width:100%;box-sizing:border-box;margin-top:5px;border:1px solid rgba(127,127,127,.22);border-radius:9px;padding:9px;background:transparent;color:inherit}
-.sv5-heatmap{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.sv5-tile{border:1px solid rgba(127,127,127,.15);border-radius:15px;padding:14px;cursor:pointer;min-height:105px;transition:transform .15s ease}.sv5-tile:hover{transform:translateY(-2px)}.sv5-tile.positive{background:rgba(32,164,100,.10)}.sv5-tile.negative{background:rgba(210,70,70,.10)}.sv5-tile.neutral{background:rgba(127,127,127,.07)}.sv5-tile-top{display:flex;justify-content:space-between;gap:8px}.sv5-tile-name{font-weight:800;font-size:13px}.sv5-tile-change{font-weight:800;font-size:13px}.sv5-tile-stats{display:flex;gap:10px;margin-top:17px;font-size:10px;opacity:.65}.sv5-drill{margin-top:14px;border:1px solid rgba(127,127,127,.15);border-radius:16px;padding:14px;background:rgba(127,127,127,.035)}.sv5-drill-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.sv5-drill-head h3{margin:4px 0;font-size:19px}
+.sv5-heatmap{display:flex;flex-direction:column;gap:0;border:1px solid rgba(127,127,127,.13);border-radius:20px;overflow:hidden;background:rgba(127,127,127,.025)}.sv5-tile{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(74px,.65fr) minmax(94px,.7fr);align-items:center;gap:12px;width:100%;text-align:left;border:0;border-bottom:1px solid rgba(127,127,127,.11);border-radius:0;padding:15px 16px;cursor:pointer;min-height:82px;color:inherit;transition:background .15s ease}.sv5-tile:last-child{border-bottom:0}.sv5-tile:hover{filter:brightness(1.04)}.sv5-tile.positive{background:linear-gradient(90deg,rgba(32,164,100,.07),rgba(32,164,100,.015))}.sv5-tile.negative{background:linear-gradient(90deg,rgba(230,85,85,.045),rgba(230,85,85,.09))}.sv5-tile.neutral{background:rgba(127,127,127,.035)}.sv5-tile-main{display:flex;align-items:center;gap:11px;min-width:0}.sv5-sector-icon{width:42px;height:42px;flex:0 0 42px;border-radius:50%;display:grid;place-items:center;background:rgba(127,127,127,.14);font-size:19px}.sv5-tile.positive .sv5-sector-icon{background:rgba(32,164,100,.18)}.sv5-tile.negative .sv5-sector-icon{background:rgba(230,85,85,.16)}.sv5-tile-name{font-weight:800;font-size:14px;line-height:1.25;overflow:hidden;text-overflow:ellipsis}.sv5-tile-points{font-size:11px;opacity:.62;margin-top:4px}.sv5-mini-chart{width:100%;height:34px;display:block;overflow:visible}.sv5-mini-track{stroke:rgba(127,127,127,.25);stroke-width:1.2}.sv5-mini-bar{stroke-width:4;stroke-linecap:round}.sv5-tile.positive .sv5-mini-bar{stroke:#37c99a}.sv5-tile.negative .sv5-mini-bar{stroke:#f17676}.sv5-tile.neutral .sv5-mini-bar{stroke:#9ca3af}.sv5-tile-right{text-align:right;min-width:0}.sv5-tile-index{font-weight:800;font-size:16px;font-variant-numeric:tabular-nums;white-space:nowrap}.sv5-tile-change{font-weight:800;font-size:13px;margin-top:4px;white-space:nowrap}.sv5-tile.positive .sv5-tile-change{color:#31bd91}.sv5-tile.negative .sv5-tile-change{color:#f17676}.sv5-tile-stats{display:none}.sv5-drill{margin-top:14px;border:1px solid rgba(127,127,127,.15);border-radius:16px;padding:14px;background:rgba(127,127,127,.035)}.sv5-drill-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.sv5-drill-head h3{margin:4px 0;font-size:19px}
 .sv5-table-wrap{overflow:auto}.sv5-table{width:100%;border-collapse:collapse;min-width:680px;font-size:12px}.sv5-table th,.sv5-table td{text-align:left;padding:10px;border-bottom:1px solid rgba(127,127,127,.12);white-space:nowrap}.sv5-table th{font-size:10px;opacity:.6}.sv5-up{font-weight:800}.sv5-down{font-weight:800}.sv5-empty{text-align:center!important;padding:22px!important;opacity:.6}
 .sv5-breadth-grid{display:grid;grid-template-columns:1.5fr 1fr;gap:14px}.sv5-card{border:1px solid rgba(127,127,127,.15);border-radius:16px;padding:16px;background:rgba(127,127,127,.035)}.sv5-card-title{font-size:12px;font-weight:800;margin-bottom:16px}.sv5-bar{height:22px;border-radius:99px;overflow:hidden;display:flex;background:rgba(127,127,127,.08)}.sv5-bar span{height:100%;display:block}.sv5-legend{display:flex;justify-content:space-between;gap:8px;font-size:10px;margin-top:10px;opacity:.7}.sv5-breadth-text{font-size:14px;line-height:1.6}.sv5-breadth-text strong{font-size:20px}
 @media(max-width:900px){.sv5-metrics{grid-template-columns:repeat(3,1fr)}.sv5-heatmap{grid-template-columns:repeat(3,minmax(0,1fr))}.sv5-breadth-grid{grid-template-columns:1fr}.sv5-toolbar{flex-wrap:wrap}.sv5-toolbar label{min-width:130px;flex:1}}
-@media(max-width:600px){#sector-breadth-v5{padding:14px;border-radius:18px}.sv5-head{display:block}.sv5-status{display:inline-flex;margin-top:10px}.sv5-metrics{grid-template-columns:repeat(2,1fr)}.sv5-heatmap{grid-template-columns:repeat(2,minmax(0,1fr))}.sv5-toolbar{display:grid;grid-template-columns:1fr 1fr}.sv5-tabs{grid-column:1/-1}.sv5-toolbar label{min-width:0}.sv5-tile{min-height:90px;padding:11px}.sv5-tile-stats{margin-top:11px;flex-wrap:wrap}}
+@media(max-width:600px){#sector-breadth-v5{padding:14px;border-radius:18px}.sv5-head{display:block}.sv5-status{display:inline-flex;margin-top:10px}.sv5-metrics{grid-template-columns:repeat(2,1fr)}.sv5-heatmap{display:flex;flex-direction:column}.sv5-tile{grid-template-columns:minmax(0,1fr) 58px minmax(82px,.72fr);gap:8px;min-height:76px;padding:12px 10px}.sv5-sector-icon{width:36px;height:36px;flex-basis:36px;font-size:16px}.sv5-tile-name{font-size:12px}.sv5-tile-points{font-size:10px}.sv5-mini-chart{height:28px}.sv5-tile-index{font-size:14px}.sv5-tile-change{font-size:12px}.sv5-toolbar{display:grid;grid-template-columns:1fr 1fr}.sv5-tabs{grid-column:1/-1}.sv5-toolbar label{min-width:0}}
 </style>
 
 <script id="pulse-v5-sector-engine">
@@ -3686,30 +3717,73 @@ document.addEventListener('DOMContentLoaded',async()=>{
 const $=id=>document.getElementById(id);
 const num=v=>{const x=Number(String(v??'').replace(/,/g,''));return Number.isFinite(x)?x:null};
 const str=v=>String(v??'').trim();
-let state={sectors:[],stocks:[],status:'OFFLINE'}, selected=null;
+let state={sectors:[],stocks:[],breadth:{},status:'OFFLINE'}, selected=null;
+const nepseSectors=[
+ {name:'Commercial Banks',aliases:['commercial banks','commercial bank','banking subindex','banking'],icon:'🏦'},
+ {name:'Development Banks',aliases:['development banks','development bank','development bank subindex'],icon:'🌱'},
+ {name:'Finance',aliases:['finance','finance subindex'],icon:'💵'},
+ {name:'Hotels & Tourism',aliases:['hotels & tourism','hotels and tourism','hotel and tourism','hotels and tourism subindex'],icon:'🏨'},
+ {name:'Hydropower',aliases:['hydropower','hydro power','hydropower subindex'],icon:'💧'},
+ {name:'Investment',aliases:['investment','investment subindex'],icon:'💼'},
+ {name:'Life Insurance',aliases:['life insurance','life insurance subindex'],icon:'🫀'},
+ {name:'Manufacturing & Processing',aliases:['manufacturing & processing','manufacturing and processing','manufacturing','manufacturing and processing subindex'],icon:'🏭'},
+ {name:'Microfinance',aliases:['microfinance','micro finance','microfinance subindex'],icon:'🌾'},
+ {name:'Mutual Fund',aliases:['mutual fund','mutual funds','mutual fund subindex'],icon:'📊'},
+ {name:'Non-Life Insurance',aliases:['non-life insurance','non life insurance','non-life insurance subindex','non life insurance subindex'],icon:'🛡️'},
+ {name:'Others',aliases:['others','other','others subindex'],icon:'📈'},
+ {name:'Trading',aliases:['trading','trading subindex'],icon:'🔄'}
+];
 
 function pick(o,ks){for(const k of ks){if(o&&o[k]!==undefined&&o[k]!==null&&o[k]!=='')return o[k]}return null}
+function canonicalSectorName(value){
+ const n=str(value).toLowerCase().replace(/&/g,' and ').replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' ');
+ const rules=[
+  ['Commercial Banks',['commercial bank','commercial banks','banking','commercial banking']],
+  ['Development Banks',['development bank','development banks']],
+  ['Finance',['finance','finance companies','financial institutions']],
+  ['Hotels & Tourism',['hotel','hotels','hotel and tourism','hotels and tourism','tourism']],
+  ['Hydropower',['hydropower','hydro power','hydro-power']],
+  ['Investment',['investment','investment companies']],
+  ['Life Insurance',['life insurance','life insurers']],
+  ['Manufacturing & Processing',['manufacturing','manufacturing and processing','production and processing']],
+  ['Microfinance',['microfinance','micro finance','micro financing']],
+  ['Mutual Fund',['mutual fund','mutual funds']],
+  ['Non-Life Insurance',['non life insurance','nonlife insurance','general insurance','non life insurers']],
+  ['Trading',['trading','trading companies']],
+  ['Others',['other','others','miscellaneous']]
+ ];
+ for(const [canonical,aliases] of rules){if(aliases.some(a=>n===a||n.includes(a)))return canonical;}
+ return str(value)||'Unclassified';
+}
 function normalizeStock(x){
- const symbol=str(pick(x,['symbol','Symbol','ticker','Ticker','securitySymbol'])).toUpperCase();
- const name=str(pick(x,['companyName','CompanyName','name','Name','securityName']));
- const sector=str(pick(x,['sector','Sector','sectorName','SectorName','industry','Industry']))||'Unclassified';
- const price=num(pick(x,['lastPrice','LastPrice','ltp','LTP','closePrice','price','Price']));
- const change=num(pick(x,['percentageChange','PercentageChange','percentChange','PercentChange','changePercent','ChangePercent','change','Change']));
- const volume=num(pick(x,['totalTradedQuantity','TotalTradedQuantity','volume','Volume','quantity','Quantity']))||0;
- const turnover=num(pick(x,['totalTradedValue','TotalTradedValue','turnover','Turnover','value','Value']))||0;
+ const symbol=str(pick(x,['symbol','Symbol','ticker','Ticker','securitySymbol','securityID','securityId','scrip','stockSymbol','code','companyCode','CompanyCode','stock_symbol'])).toUpperCase();
+ const name=str(pick(x,['companyName','CompanyName','name','Name','securityName','SecurityName','company_name','company']));
+ const rawSector=pick(x,['sector','Sector','sectorName','SectorName','sector_name','industry','Industry','sectorDescription','SectorDescription','groupName','GroupName','sectorDesc','SectorDesc','sector_name_en','sectorNameEnglish']);
+ const sector=canonicalSectorName(rawSector);
+ const price=num(pick(x,['lastPrice','LastPrice','ltp','LTP','closePrice','price','Price','closingPrice','ClosePrice','lastTradedPrice']));
+ const change=num(pick(x,['percentageChange','PercentageChange','percentChange','PercentChange','changePercent','ChangePercent','perChange','PerChange','pChange','change','Change']));
+ const volume=num(pick(x,['totalTradedQuantity','TotalTradedQuantity','volume','Volume','quantity','Quantity','totalTradeQuantity','TotalTradeQuantity']))||0;
+ const turnover=num(pick(x,['totalTradedValue','TotalTradedValue','turnover','Turnover','value','Value','totalTradeValue','TotalTradeValue']))||0;
  return {raw:x,symbol,name,sector,price,change,volume,turnover};
 }
 function normalizeSector(x){
  const name=str(pick(x,['sectorName','SectorName','sector','Sector','name','Name','indexName','IndexName']))||'Unknown';
- const change=num(pick(x,['percentageChange','PercentageChange','percentChange','PercentChange','changePercent','ChangePercent','change','Change']));
- const index=num(pick(x,['indexValue','IndexValue','value','Value','index','Index']));
- return {raw:x,name,change,index,stocks:[]};
+ const change=num(pick(x,['percentageChange','PercentageChange','percentChange','PercentChange','changePercent','ChangePercent','perChange','PerChange','per_change','changePercentage','ChangePercentage','percent_change','percent_change_value','change','Change','percentChangeValue','PercentChangeValue']));
+ const index=num(pick(x,['indexValue','IndexValue','currentIndex','CurrentIndex','indexValueCurrent','IndexValueCurrent','currentValue','CurrentValue','current','Current','closingIndex','ClosingIndex','value','Value','index','Index','close','Close','latestIndex','LatestIndex','current_price','currentPrice']));
+ const points=num(pick(x,['pointChange','PointChange','pointsChange','PointsChange','changePoints','ChangePoints','difference','Difference','changeValue','ChangeValue','absoluteChange','AbsoluteChange','points','Points']));
+ const turnover=num(pick(x,['turnover','totalTurnover','turnoverValue','totalTradeValue','value']));
+ const volume=num(pick(x,['volume','totalTradedQuantity','tradedShares','sharesTraded']));
+ const advancing=num(pick(x,['advancing','advancers','advance','advancingCount']));
+ const declining=num(pick(x,['declining','decliners','decline','decliningCount']));
+ const unchanged=num(pick(x,['unchanged','unchangedCount','unchangedSecurities']));
+ const stocksCount=num(pick(x,['stocksTraded','stockCount','totalStocks','numberOfStocks','tradedSecurities']));
+ return {raw:x,name,change,index,points,turnover,volume,advancing,declining,unchanged,stocksCount,stocks:[]};
 }
 function extract(st){
  const stockCandidates=[st?.live,st?.liveMarket,st?.securities,st?.data?.liveMarket,st?.data?.LiveMarket,st?.data?.securities];
  let stocks=(stockCandidates.find(Array.isArray)||[]).map(normalizeStock).filter(x=>x.symbol||x.name);
- const sectorCandidates=[st?.sectors,st?.sectorIndices,st?.data?.sectors,st?.data?.sectorIndices,st?.data?.SectorIndices];
- let secs=(sectorCandidates.find(Array.isArray)||[]).map(normalizeSector);
+ const sectorCandidates=[st?.sectors,st?.sectorIndices,st?.sector_indices,st?.subindices,st?.subIndices,st?.NepseSubIndices,st?.indices,st?.data?.sectors,st?.data?.sectorIndices,st?.data?.SectorIndices,st?.data?.subindices,st?.data?.subIndices,st?.data?.NepseSubIndices,st?.data?.indices,st?.data?.data].filter(Array.isArray);
+ let secs=(sectorCandidates.find(a=>a.length)||[]).map(normalizeSector).filter(x=>x.name!=='Unknown');
  if(!secs.length && st?.sector_indices)secs=(Array.isArray(st.sector_indices)?st.sector_indices:[]).map(normalizeSector);
  const map={};
  stocks.forEach(x=>(map[x.sector]??=[]).push(x));
@@ -3718,20 +3792,36 @@ function extract(st){
    if(!byName[name.toLowerCase()]){const a=list.map(x=>x.change).filter(x=>x!==null);secs.push({name,change:a.length?a.reduce((u,v)=>u+v,0)/a.length:null,index:null,stocks:list})}
  });
  secs.forEach(x=>{const list=map[x.name]||map[Object.keys(map).find(k=>k.toLowerCase()===x.name.toLowerCase())]||[];x.stocks=list;if(x.change===null){const a=list.map(y=>y.change).filter(y=>y!==null);x.change=a.length?a.reduce((u,v)=>u+v,0)/a.length:null}});
- return {sectors:secs.filter(x=>x.name!=='Unknown'||x.stocks.length),stocks,status:st?.status||'OFFLINE',updatedAt:st?.updatedAt};
+ const canonical=nepseSectors.map(def=>{
+   const hit=secs.find(x=>def.aliases.includes(x.name.toLowerCase())||def.aliases.some(alias=>x.name.toLowerCase().includes(alias)));
+   const list=hit?.stocks?.length?hit.stocks:(map[def.name]||[]);
+   let derived=hit?.change??null;
+   if(derived===null){const vals=list.map(y=>y.change).filter(v=>v!==null);if(vals.length)derived=vals.reduce((u,v)=>u+v,0)/vals.length}
+   return {name:def.name,icon:def.icon,raw:hit?.raw||null,change:derived,index:hit?.index??null,points:hit?.points??null,turnover:hit?.turnover??null,volume:hit?.volume??null,advancing:hit?.advancing??null,declining:hit?.declining??null,unchanged:hit?.unchanged??null,stocksCount:hit?.stocksCount??null,stocks:list,hasIndexData:!!hit&&(hit.index!==null||hit.change!==null)};
+ });
+ // Keep any additional feed-provided sectors after the standard NEPSE 13.
+ const knownNames=new Set(nepseSectors.flatMap(d=>d.aliases));
+ const extras=secs.filter(x=>!nepseSectors.some(d=>d.aliases.includes(x.name.toLowerCase())||d.aliases.some(a=>x.name.toLowerCase().includes(a)))).map(x=>({...x,icon:'📈',hasIndexData:x.index!==null||x.change!==null}));
+ return {sectors:[...canonical,...extras],stocks,breadth:st?.breadth||st?.market?.breadth||{},status:st?.status||'OFFLINE',updatedAt:st?.updatedAt};
 }
 function fmt(v,d=0){return v===null||v===undefined||!Number.isFinite(v)?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:d})}
 function renderMetrics(){
- const a=state.stocks, adv=a.filter(x=>x.change>0).length, dec=a.filter(x=>x.change<0).length, un=a.filter(x=>x.change===0).length;
+ const a=state.stocks, feed=state.breadth||{};
+ const liveCounts={adv:a.filter(x=>x.change>0).length,dec:a.filter(x=>x.change<0).length,un:a.filter(x=>x.change===0).length};
+ const hasLiveCounts=a.some(x=>x.change!==null);
+ const adv=hasLiveCounts?liveCounts.adv:(num(pick(feed,['advancing','advancers','advance']))??0);
+ const dec=hasLiveCounts?liveCounts.dec:(num(pick(feed,['declining','decliners','decline']))??0);
+ const un=hasLiveCounts?liveCounts.un:(num(pick(feed,['unchanged','unchangedCount']))??0);
+ const totalRows=hasLiveCounts?a.length:(adv+dec+un);
  $('sv5Advance').textContent=fmt(adv);$('sv5Decline').textContent=fmt(dec);$('sv5Unchanged').textContent=fmt(un);
  $('sv5Ratio').textContent=dec?fmt(adv/dec,2):adv?'∞':'—';
  $('sv5Turnover').textContent=fmt(a.reduce((s,x)=>s+x.turnover,0));
- $('sv5Participation').textContent=a.length?fmt((adv+dec)/a.length*100,1)+'%':'—';
+ $('sv5Participation').textContent=totalRows?fmt((adv+dec)/totalRows*100,1)+'%':'—';
  const total=adv+dec+un||1;
  $('sv5AdvPct').textContent=fmt(adv/total*100,1)+'%';$('sv5UnPct').textContent=fmt(un/total*100,1)+'%';$('sv5DecPct').textContent=fmt(dec/total*100,1)+'%';
  $('sv5AdvBar').style.width=(adv/total*100)+'%';$('sv5UnBar').style.width=(un/total*100)+'%';$('sv5DecBar').style.width=(dec/total*100)+'%';
  const label=adv>dec*1.5?'Broadly positive participation':dec>adv*1.5?'Broadly negative participation':adv>dec?'More advancing than declining':'More declining than advancing';
- $('sv5BreadthText').innerHTML=`<strong>${label}</strong><br>${adv} advancing · ${dec} declining · ${un} unchanged out of ${a.length} loaded securities.`;
+ $('sv5BreadthText').innerHTML=`<strong>${label}</strong><br>${adv} advancing · ${dec} declining · ${un} unchanged out of ${totalRows} securities.`;
 }
 function filteredSectors(){
  const search=str($('sv5Search').value).toLowerCase(), sort=$('sv5Sort').value;
@@ -3740,40 +3830,131 @@ function filteredSectors(){
    return x.name.toLowerCase().includes(search)||x.stocks.some(y=>(y.symbol+' '+y.name).toLowerCase().includes(search));
  });
  return a.sort((x,y)=>{
-   if(sort==='turnover')return y.stocks.reduce((s,z)=>s+z.turnover,0)-x.stocks.reduce((s,z)=>s+z.turnover,0);
-   if(sort==='volume')return y.stocks.reduce((s,z)=>s+z.volume,0)-x.stocks.reduce((s,z)=>s+z.volume,0);
-   if(sort==='stocks')return y.stocks.length-x.stocks.length;
+   if(sort==='turnover')return (y.stocks.reduce((s,z)=>s+z.turnover,0)||y.turnover||0)-(x.stocks.reduce((s,z)=>s+z.turnover,0)||x.turnover||0);
+   if(sort==='volume')return (y.stocks.reduce((s,z)=>s+z.volume,0)||y.volume||0)-(x.stocks.reduce((s,z)=>s+z.volume,0)||x.volume||0);
+   if(sort==='stocks')return (y.stocks.length||y.stocksCount||0)-(x.stocks.length||x.stocksCount||0);
    return (y.change??-Infinity)-(x.change??-Infinity);
  });
 }
 function renderHeatmap(){
  const a=filteredSectors();
+ const iconFor=x=>x.icon||'📈';
  $('sv5Heatmap').innerHTML=a.length?a.map((x,i)=>{
    const cls=x.change>0?'positive':x.change<0?'negative':'neutral';
-   const tv=x.stocks.reduce((s,z)=>s+z.turnover,0), vol=x.stocks.reduce((s,z)=>s+z.volume,0);
-   return `<button class="sv5-tile ${cls}" data-sector-index="${i}"><div class="sv5-tile-top"><span class="sv5-tile-name">${esc(x.name)}</span><span class="sv5-tile-change">${x.change===null?'—':(x.change>0?'+':'')+fmt(x.change,2)+'%'}</span></div><div class="sv5-tile-stats"><span>${x.stocks.length} stocks</span><span>Turnover ${fmt(tv)}</span><span>Vol ${fmt(vol)}</span></div></button>`;
- }).join(''):'<div class="sv5-empty">No sector data available in the Central Feed.</div>';
+   const tv=x.stocks.reduce((s,z)=>s+z.turnover,0)||x.turnover||0, vol=x.stocks.reduce((s,z)=>s+z.volume,0)||x.volume||0;
+   const hasChange=x.change!==null&&Number.isFinite(x.change);
+   const pct=hasChange?Math.max(-5,Math.min(5,x.change)):0;
+   const marker=50+(pct/5)*43;
+   const sign=hasChange&&x.change>0?'+':'';
+   const changeText=hasChange?`${sign}${fmt(x.change,2)}%`:'—';
+   const pointsText=x.points!==null&&x.points!==undefined?`${x.points>0?'+':''}${fmt(x.points,2)} pts`:(x.index!==null&&x.index!==undefined?'Index '+fmt(x.index,2):((x.stocks.length||x.stocksCount)?`${x.stocks.length||x.stocksCount} constituents`:'Index data unavailable'));
+   const indexText=x.index!==null&&x.index!==undefined?fmt(x.index,2):'—';
+   const left=Math.min(50,marker), width=Math.max(1,Math.abs(marker-50));
+   return `<button class="sv5-tile ${cls}" data-sector-index="${i}" aria-label="${esc(x.name)} ${esc(changeText)}">
+     <span class="sv5-tile-main"><span class="sv5-sector-icon" aria-hidden="true">${iconFor(x)}</span><span style="min-width:0"><span class="sv5-tile-name">${esc(x.name)}</span><span class="sv5-tile-points">${esc(pointsText)}</span></span></span>
+     <svg class="sv5-mini-chart" viewBox="0 0 100 34" role="img" aria-label="Current change gauge, not historical prices">
+       <line class="sv5-mini-track" x1="4" y1="17" x2="96" y2="17"></line>
+       <line class="sv5-mini-bar" x1="${left}" y1="17" x2="${left+width}" y2="17"></line>
+       <circle cx="${hasChange?marker:50}" cy="17" r="4" fill="${hasChange?(x.change>0?'#37c99a':x.change<0?'#f17676':'#9ca3af'):'#9ca3af'}"></circle>
+     </svg>
+     <span class="sv5-tile-right"><span class="sv5-tile-index">${indexText}</span><span class="sv5-tile-change">${hasChange?(x.change>0?'▲ ':x.change<0?'▼ ':'• ')+changeText:'—'}</span></span>
+     <span class="sv5-tile-stats"><span>${x.stocks.length} stocks</span><span>Turnover ${fmt(tv)}</span><span>Vol ${fmt(vol)}</span></span>
+   </button>`;
+ }).join(''):'<div class="sv5-empty">Sector index data is not available in the Central Feed yet.</div>';
  document.querySelectorAll('#sv5Heatmap .sv5-tile').forEach((b,i)=>b.addEventListener('click',()=>openDrill(a[i])));
 }
 function renderLeaders(){
  const a=filteredSectors();
  $('sv5SectorRows').innerHTML=a.length?a.map(x=>{
-   const adv=x.stocks.filter(y=>y.change>0).length,dec=x.stocks.filter(y=>y.change<0).length,c=x.stocks.map(y=>y.change).filter(y=>y!==null);
-   const avg=c.length?c.reduce((u,v)=>u+v,0)/c.length:null;
-   return `<tr><td><b>${esc(x.name)}</b></td><td>${x.stocks.length}</td><td>${adv}</td><td>${dec}</td><td class="${avg>0?'sv5-up':avg<0?'sv5-down':''}">${avg===null?'—':fmt(avg,2)+'%'}</td><td>${fmt(x.stocks.reduce((s,z)=>s+z.turnover,0))}</td><td>${fmt(x.stocks.reduce((s,z)=>s+z.volume,0))}</td></tr>`;
+   const stockAdv=x.stocks.filter(y=>y.change>0).length,stockDec=x.stocks.filter(y=>y.change<0).length,c=x.stocks.map(y=>y.change).filter(y=>y!==null);
+   const adv=c.length?stockAdv:(x.advancing??0), dec=c.length?stockDec:(x.declining??0);
+   const avg=c.length?c.reduce((u,v)=>u+v,0)/c.length:x.change;
+   const tv=x.stocks.reduce((s,z)=>s+z.turnover,0)||x.turnover||0,vol=x.stocks.reduce((s,z)=>s+z.volume,0)||x.volume||0;
+   const count=x.stocks.length||x.stocksCount||((adv||0)+(dec||0)+(x.unchanged||0));
+   return `<tr><td><b>${esc(x.name)}</b></td><td>${fmt(count)}</td><td>${fmt(adv)}</td><td>${fmt(dec)}</td><td class="${avg>0?'sv5-up':avg<0?'sv5-down':''}">${avg===null?'—':fmt(avg,2)+'%'}</td><td>${fmt(tv)}</td><td>${fmt(vol)}</td></tr>`;
  }).join(''):'<tr><td colspan="7" class="sv5-empty">No sector data available.</td></tr>';
 }
 function openDrill(x){
  selected=x;$('sv5Drill').hidden=false;$('sv5SectorName').textContent=x.name;
- const a=x.stocks.slice().sort((p,q)=>(q.change??-Infinity)-(p.change??-Infinity));
- $('sv5Stocks').innerHTML=a.length?a.map(y=>`<tr><td><b>${esc(y.symbol||y.name)}</b></td><td>${fmt(y.price,2)}</td><td class="${y.change>0?'sv5-up':y.change<0?'sv5-down':''}">${y.change===null?'—':(y.change>0?'+':'')+fmt(y.change,2)+'%'}</td><td>${fmt(y.volume)}</td><td>${fmt(y.turnover)}</td></tr>`).join(''):'<tr><td colspan="5" class="sv5-empty">No constituent data available.</td></tr>';
+ const a=(state.stocks||[]).filter(y=>canonicalSectorName(y.sector)===canonicalSectorName(x.name)).sort((p,q)=>(q.change??-Infinity)-(p.change??-Infinity));
+ x.stocks=a;
+ $('sv5Stocks').innerHTML=a.length?a.map(y=>`<tr><td><b>${esc(y.symbol||y.name)}</b></td><td>${fmt(y.price,2)}</td><td class="${y.change>0?'sv5-up':y.change<0?'sv5-down':''}">${y.change===null?'—':(y.change>0?'+':'')+fmt(y.change,2)+'%'}</td><td>${fmt(y.volume)}</td><td>${fmt(y.turnover)}</td></tr>`).join(''):'<tr><td colspan="5" class="sv5-empty">No live constituents were returned for this sector. Refresh the market feed or check the backend sector-constituents endpoint.</td></tr>';
 }
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function sync(st){
- state=extract(st||{});const status=String(state.status).toUpperCase();
+ const next=extract(st||{});
+ // Feed events often omit /api/sectors and breadth. Do not let those partial
+ // snapshots replace the last complete endpoint response with 13 empty placeholders.
+ const meaningfulSector=x=>!!(x&&(x.index!==null&&x.index!==undefined || x.change!==null&&x.change!==undefined || x.points!==null&&x.points!==undefined || x.turnover!==null&&x.turnover!==undefined || x.volume!==null&&x.volume!==undefined || x.advancing!==null&&x.advancing!==undefined || x.declining!==null&&x.declining!==undefined || x.stocksCount!==null&&x.stocksCount!==undefined || (x.stocks&&x.stocks.length)));
+ const nextHasSectorData=next.sectors.some(meaningfulSector);
+ const oldByName=new Map((state.sectors||[]).map(x=>[x.name.toLowerCase(),x]));
+ const mergedSectors=next.sectors.map(x=>{
+   const old=oldByName.get(x.name.toLowerCase());
+   if(!old)return x;
+   const merged={...old,...x};
+   for(const k of ['index','change','points','turnover','volume','advancing','declining','unchanged','stocksCount']){
+     if(merged[k]===null||merged[k]===undefined)merged[k]=old[k]??null;
+   }
+   if(!x.stocks||!x.stocks.length)merged.stocks=old.stocks||[];
+   if(!x.raw)merged.raw=old.raw||null;
+   return merged;
+ });
+ const nextBreadth=next.breadth&&Object.keys(next.breadth).length?next.breadth:state.breadth;
+ state={
+   ...state,...next,
+   stocks:next.stocks.length?next.stocks:(state.stocks||[]),
+   sectors:nextHasSectorData?mergedSectors:((state.sectors&&state.sectors.length)?state.sectors:mergedSectors),
+   breadth:nextBreadth||{},
+   updatedAt:next.updatedAt||state.updatedAt
+ };
+ const status=String(state.status||'OFFLINE').toUpperCase();
  $('sv5Status').textContent=status+(state.updatedAt?' • '+new Date(state.updatedAt).toLocaleTimeString():'');
  $('sv5Dot').style.background=status==='LIVE'?'#20a464':status==='CACHED'?'#d29b19':'#999';
  renderMetrics();renderHeatmap();renderLeaders();
+}
+async function loadSectorIndices(){
+ const base=String(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
+ try{
+  const [marketResp,sectorsResp,companiesResp,liveResp,companyListResp,constituentsResp]=await Promise.all([
+   fetch(base+'/api/market?_sectorHeatmap='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}}).catch(()=>null),
+   fetch(base+'/api/sectors?_sectorHeatmap='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}}).catch(()=>null),
+   fetch(base+'/api/companies?_sectorHeatmap='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}}).catch(()=>null),
+   fetch(base+'/LiveMarket?_sectorHeatmap='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}}).catch(()=>null),
+   fetch(base+'/CompanyList?_sectorHeatmap='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}}).catch(()=>null),
+   fetch(base+'/api/sector-constituents?_sectorHeatmap='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}}).catch(()=>null)
+  ]);
+  let market=null,sectorPayload=null,companyPayload=null,livePayload=null,companyListPayload=null,constituentsPayload=null;
+  if(marketResp&&marketResp.ok)market=await marketResp.json();
+  if(sectorsResp&&sectorsResp.ok)sectorPayload=await sectorsResp.json();
+  if(companiesResp&&companiesResp.ok)companyPayload=await companiesResp.json();
+  if(liveResp&&liveResp.ok)livePayload=await liveResp.json();
+  if(companyListResp&&companyListResp.ok)companyListPayload=await companyListResp.json();
+  if(constituentsResp&&constituentsResp.ok)constituentsPayload=await constituentsResp.json();
+  const sectorRows=Array.isArray(sectorPayload?.data)?sectorPayload.data:(Array.isArray(sectorPayload)?sectorPayload:[]);
+  const rowsFrom=o=>{
+   if(Array.isArray(o))return o;
+   if(!o||typeof o!=='object')return [];
+   for(const k of ['data','content','companies','securities','results','rows','live','liveMarket','records','items']){
+    const v=o[k]; if(Array.isArray(v))return v;
+    if(v&&typeof v==='object'){const nested=rowsFrom(v);if(nested.length)return nested;}
+   }
+   return [];
+  };
+  const liveRows=rowsFrom(market?.live||market?.liveMarket||market?.securities||market?.data?.live||market?.data?.liveMarket||livePayload||[]);
+  const companyRows=rowsFrom(companyPayload).length?rowsFrom(companyPayload):rowsFrom(companyListPayload);
+  const constituentRows=rowsFrom(constituentsPayload);
+  const bySymbol=new Map();
+  // Start with the backend's sector-enriched live constituents, then merge the
+  // ordinary live feed over them without allowing blank live sector fields to erase classifications.
+  constituentRows.forEach(x=>{const k=str(pick(x,['symbol','Symbol','ticker','Ticker','securitySymbol','securityID','securityId','code'])).toUpperCase();if(k)bySymbol.set(k,{...x,symbol:k,sector:canonicalSectorName(pick(x,['sector','Sector','sectorName','SectorName','industry','Industry']))});});
+  liveRows.forEach(x=>{const k=str(pick(x,['symbol','Symbol','ticker','Ticker','securitySymbol','securityID','securityId','code'])).toUpperCase();if(!k)return;const old=bySymbol.get(k)||{};const rawSector=pick(x,['sector','Sector','sectorName','SectorName','industry','Industry']);bySymbol.set(k,{...old,...x,symbol:k,sector:canonicalSectorName(rawSector||old.sector||pick(old,['sectorName','sector_name','industry'])),companyName:pick(x,['companyName','CompanyName','name','Name'])||old.companyName||old.name||k});});
+  companyRows.forEach(c=>{const k=str(pick(c,['symbol','Symbol','ticker','Ticker','securitySymbol','securityID','securityId','code'])).toUpperCase();if(!k)return;const old=bySymbol.get(k)||{};const sector=pick(c,['sector','Sector','sectorName','SectorName','sector_name','industry','Industry','sectorDescription','SectorDescription','groupName','GroupName','sectorDesc','SectorDesc','sectorNameEnglish']);const oldSector=pick(old,['sector','Sector','sectorName','SectorName','industry','Industry']);bySymbol.set(k,{...c,...old,symbol:k,sector:canonicalSectorName(oldSector||sector),companyName:pick(old,['companyName','CompanyName','name','Name'])||pick(c,['companyName','CompanyName','name','Name','securityName','SecurityName'])});});
+  const combinedStocks=Array.from(bySymbol.values());
+  const st={...(market||{}),live:combinedStocks,sectors:sectorRows.length?sectorRows:(market?.sectors||market?.subindices||market?.subIndices||[]),breadth:market?.breadth||{},status:market?.stale?'CACHED':(market?.ok?'LIVE':'OFFLINE'),updatedAt:constituentsPayload?.updatedAt||market?.updatedAt||sectorPayload?.updatedAt||new Date().toISOString()};
+  if(st.sectors.length||Array.isArray(st.live)&&st.live.length||st.breadth&&Object.keys(st.breadth).length){sync(st);return;}
+ }catch(e){console.warn('Sector heatmap data unavailable',e)}
+ const status=$('sv5Status');
+ if(status && !state.sectors.some(x=>x.index!==null||x.change!==null))status.textContent='LIVE SECTOR DATA UNAVAILABLE';
 }
 document.addEventListener('DOMContentLoaded',()=>{
  document.querySelectorAll('.sv5-tab').forEach(b=>b.addEventListener('click',()=>{
@@ -3787,6 +3968,9 @@ document.addEventListener('DOMContentLoaded',()=>{
  window.addEventListener('pulse-central-snapshot',e=>sync(e.detail));
  window.addEventListener('pulse-feed-update',()=>{const st=window.PULSE_FEED_ENGINE?.state?.();if(st)sync(st)});
  const st=window.PULSE_FEED_ENGINE?.state?.();if(st)sync(st);
+ // Explicitly start the sector endpoint loader; defining it alone never fetches data.
+ loadSectorIndices();
+ setInterval(loadSectorIndices,60000);
 });
 })();
 </script>
@@ -6158,6 +6342,74 @@ document.addEventListener('click',e=>{const tr=e.target.closest('#npamRows tr[da
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',boot,{once:true}); else boot();
 })();
 </script>
+
+
+<style id="profile-portfolio-dashboard-css">
+#profilePortfolioDash{font-family:inherit;color:#14251f;margin:0 0 16px;padding:18px 14px 20px;border-radius:26px;background:#f6f8f2;box-sizing:border-box}
+#profilePortfolioDash *{box-sizing:border-box}#profilePortfolioDash .ppd-top{display:flex;justify-content:space-between;align-items:center;margin:0 0 18px}#profilePortfolioDash .ppd-kicker{font-size:11px;letter-spacing:.13em;font-weight:800;color:#728078}#profilePortfolioDash h2{font-size:30px;line-height:1.1;margin:8px 0 0;color:#10231c}#profilePortfolioDash .ppd-settings{border:1px solid #dce3dc;background:white;border-radius:50%;width:54px;height:54px;font-size:24px;color:#193d31}
+#profilePortfolioDash .ppd-summary{border-radius:28px;padding:24px 22px;background:#143c2f;color:#fff;margin-bottom:16px}#profilePortfolioDash .ppd-label{font-size:12px;font-weight:800;letter-spacing:.12em;color:#c1d5cc}#profilePortfolioDash .ppd-value{font-size:34px;font-weight:850;line-height:1.2;margin:16px 0 4px;overflow-wrap:anywhere}#profilePortfolioDash .ppd-sub{font-size:13px;color:#c1d5cc}#profilePortfolioDash .ppd-divider{height:1px;background:#ffffff45;margin:20px 0 16px}#profilePortfolioDash .ppd-profit{display:flex;justify-content:space-between;gap:10px;align-items:end;flex-wrap:wrap}#profilePortfolioDash .ppd-profit strong{display:block;color:#efbd53;font-size:18px;margin-top:5px}
+#profilePortfolioDash .ppd-tabs{display:flex;gap:4px;padding:6px;background:#e5ece7;border-radius:18px;margin:16px 0 22px}#profilePortfolioDash .ppd-tab{flex:1;border:0;border-radius:13px;padding:12px 8px;background:transparent;color:#68766f;font-weight:750;font-size:14px}#profilePortfolioDash .ppd-tab.active{background:white;color:#172d24;box-shadow:0 1px 4px #0000000d}#profilePortfolioDash .ppd-section-head{display:flex;justify-content:space-between;align-items:center;margin:20px 0 12px;gap:10px}#profilePortfolioDash .ppd-section-head h3{margin:0;font-size:20px}#profilePortfolioDash .ppd-card{border:1px solid #dce3dc;border-radius:22px;background:white;padding:16px;margin-bottom:12px}#profilePortfolioDash .ppd-allocation{display:grid;grid-template-columns: minmax(115px, 1fr) minmax(0,1.4fr);align-items:center;gap:15px}#profilePortfolioDash .ppd-donut{width:min(100%,155px);aspect-ratio:1;border-radius:50%;margin:auto;display:grid;place-items:center;background:conic-gradient(#176b53 0 100%);position:relative}#profilePortfolioDash .ppd-donut:after{content:'';position:absolute;inset:18%;border-radius:50%;background:white}#profilePortfolioDash .ppd-donut-inner{position:relative;z-index:1;text-align:center;font-size:11px;color:#7b857f}#profilePortfolioDash .ppd-donut-inner b{display:block;font-size:20px;color:#182d24;margin-top:4px}#profilePortfolioDash .ppd-legend{display:flex;flex-direction:column;gap:10px;min-width:0}#profilePortfolioDash .ppd-legend-row{display:grid;grid-template-columns:9px minmax(0,1fr) auto;gap:8px;align-items:center;font-size:13px}#profilePortfolioDash .ppd-dot{width:9px;height:9px;border-radius:50%;background:#176b53}#profilePortfolioDash .ppd-legend-row b{overflow:hidden;text-overflow:ellipsis}#profilePortfolioDash .ppd-legend-row span:last-child{color:#6f7b74}#profilePortfolioDash .ppd-holding{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid #edf0ed}#profilePortfolioDash .ppd-holding:last-child{border-bottom:0}#profilePortfolioDash .ppd-holding small{display:block;color:#77837c;margin-top:4px}#profilePortfolioDash .ppd-empty{color:#748078;padding:12px 0;text-align:center;font-size:14px}
+#profilePortfolioDash [hidden]{display:none!important}@media(max-width:390px){#profilePortfolioDash .ppd-value{font-size:29px}#profilePortfolioDash .ppd-allocation{grid-template-columns:105px minmax(0,1fr);gap:10px}#profilePortfolioDash .ppd-legend-row{font-size:12px}}
+/* Portfolio ledger is available from the Profile tab, not Home. */
+body:not(.v22-profile-tab-active) #portfolioZone{display:none!important}body.v22-profile-tab-active #portfolioZone{display:block!important;margin-top:16px;background:white;color:#14251f;border-color:#dce3dc}
+</style>
+
+<style id="profile-tab-layout-fix">
+/* Keep Watchlist and Profile exclusively inside the Profile navigation view. */
+#v22-profile-tab-view{display:none;box-sizing:border-box;min-height:calc(100vh - 100px);padding:18px 14px 110px;background:#fff}
+#v22-profile-tab-view .v22-section{display:block!important;margin:0 0 16px!important}
+#v22-profile-tab-view .v22-card{width:100%;box-sizing:border-box;background:#fff}
+#v22-profile-tab-view .v22-section{background:#fff!important}
+#profilePortfolioDash{background:#fff!important}
+body:not(.v22-profile-tab-active) #v22-watchlist-section,body:not(.v22-profile-tab-active) #v22-profile-section{display:none!important}
+body.v22-profile-tab-active>main{display:none!important}
+/* In Profile mode, show only the dedicated Profile/Watchlist view and bottom navigation. */
+body.v22-profile-tab-active> :not(#v22-profile-tab-view):not(#v22-auth-modal):not(.bottom.mobile-exact-bottom){display:none!important}
+/* Keep the sign-in dialog visible above Profile when its Sign in button is tapped. */
+body.v22-profile-tab-active>#v22-auth-modal{display:flex!important;z-index:100000!important}
+body.v22-profile-tab-active>#v22-auth-modal[aria-hidden="true"]{display:none!important}
+body.v22-profile-tab-active #v22-profile-tab-view{display:block!important}
+body.v22-profile-tab-active #v22-profile-tab-view #v22-watchlist-section,body.v22-profile-tab-active #v22-profile-tab-view #v22-profile-section{display:block!important}
+body.v22-profile-tab-active .bottom.mobile-exact-bottom{z-index:10000}
+</style>
+<script id="profile-tab-layout-fix-js">
+(function(){
+ function setupProfileTab(){
+   const watch=document.getElementById('v22-watchlist-section');
+   const profile=document.getElementById('v22-profile-section');
+   if(!watch||!profile)return;
+   let view=document.getElementById('v22-profile-tab-view');
+   if(!view){
+     view=document.createElement('section');view.id='v22-profile-tab-view';view.setAttribute('aria-label','Profile and Watchlist');
+     const title=document.createElement('div');title.className='v22-head';title.style.margin='0 0 16px';title.innerHTML='<div><h2 style="margin:0">Profile</h2><p style="margin:5px 0 0;opacity:.7">Your account and saved securities</p></div>';
+     view.appendChild(title);document.body.appendChild(view);
+   }
+   /* Profile/sign-in first, Watchlist second, Portfolio dashboard third. */
+   if(profile.parentElement!==view)view.insertBefore(profile,view.firstChild.nextSibling);
+   if(watch.parentElement!==view)view.appendChild(watch);
+   else if(profile.nextElementSibling!==watch)view.insertBefore(watch,profile.nextElementSibling);
+   const portfolio=document.getElementById('portfolioZone');
+   if(portfolio){
+     let dash=document.getElementById('profilePortfolioDash');
+     if(!dash){dash=document.createElement('section');dash.id='profilePortfolioDash';dash.innerHTML=`<div class="ppd-top"><div><div class="ppd-kicker">YOUR MONEY</div><h2>Portfolio</h2></div><button class="ppd-settings" type="button" aria-label="Portfolio settings" onclick="document.getElementById('pSymbol')?.focus()">⚙</button></div><div class="ppd-summary"><div class="ppd-label">TOTAL VALUE</div><div class="ppd-value" id="ppdValue">NPR —</div><div class="ppd-sub">Market value · based on available live prices</div><div class="ppd-divider"></div><div class="ppd-profit"><div><div class="ppd-label">UNREALIZED P&amp;L</div><strong id="ppdPL">—</strong></div><span class="ppd-sub" id="ppdPositions">0 holdings</span></div></div><div class="ppd-tabs"><button class="ppd-tab active" data-ppd="overview">Overview</button><button class="ppd-tab" data-ppd="holdings">Holdings</button></div><div id="ppdOverview"><div class="ppd-section-head"><h3>Allocation</h3><span id="ppdCount" style="color:#718078;font-size:13px">0 holdings</span></div><div class="ppd-card ppd-allocation-card"><div class="ppd-allocation"><div class="ppd-donut" id="ppdDonut"><div class="ppd-donut-inner">NPR<b id="ppdDonutValue">—</b></div></div><div class="ppd-legend" id="ppdLegend"><div class="ppd-empty">Add holdings to see allocation.</div></div></div></div><div class="ppd-section-head"><h3>Performance</h3><span style="color:#718078;font-size:13px">Current holdings</span></div><div class="ppd-card"><div id="ppdPerformance" class="ppd-empty">Performance will appear when holdings and live prices are available.</div></div></div><div id="ppdHoldingsView" hidden><div class="ppd-section-head"><h3>Holdings</h3><span id="ppdHoldingsCount" style="color:#718078;font-size:13px">0 holdings</span></div><div class="ppd-card" id="ppdHoldingList"><div class="ppd-empty">No holdings yet. Add a buy transaction below.</div></div></div>`;
+       dash.addEventListener('click',e=>{const b=e.target.closest('[data-ppd]');if(!b)return;dash.querySelectorAll('.ppd-tab').forEach(x=>x.classList.toggle('active',x===b));dash.querySelector('#ppdOverview').hidden=b.dataset.ppd!=='overview';dash.querySelector('#ppdHoldingsView').hidden=b.dataset.ppd!=='holdings'});
+       view.appendChild(dash);
+     }
+     if(portfolio.parentElement!==view)view.appendChild(portfolio);
+   }
+ }
+ window.setNav=function(btn,name){
+   document.querySelectorAll('.nav button').forEach(x=>x.classList.remove('active'));
+   if(btn)btn.classList.add('active');
+   if(name==='Markets'){document.body.classList.remove('v22-profile-tab-active');if(typeof npOpenAllMarket==='function')npOpenAllMarket();return;}
+   if(name==='Profile'){setupProfileTab();document.body.classList.add('v22-profile-tab-active');window.scrollTo(0,0);return;}
+   document.body.classList.remove('v22-profile-tab-active');
+   if(name!=='Home')toast(name+' workspace is available from Features.');
+ };
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',setupProfileTab);else setupProfileTab();
+})();
+</script>
+
 </body>
 </html><script>
 // NEPSE Pulse Professional Charting V1 extension
@@ -6620,7 +6872,7 @@ input,select{background:#fff!important;color:var(--text)!important}
       br.map(b=>'<tr><td><b>'+esc(b.broker)+'</b></td><td>Rs '+fmt(b.buyValue)+'</td><td>Rs '+fmt(b.sellValue)+'</td><td class="'+(b.netValue>=0?'npco-net-buy':'npco-net-sell')+'">'+(b.netValue>=0?'+':'')+'Rs '+fmt(b.netValue)+'</td><td>'+fmt(b.buyQty)+'</td><td>'+fmt(b.sellQty)+'</td><td>'+b.trades+'</td></tr>').join('')+
       '</tbody></table></div>';
     const totalBuy=br.reduce((s,b)=>s+b.buyValue,0), totalSell=br.reduce((s,b)=>s+b.sellValue,0), net=totalBuy-totalSell;
-    html='<section class="npco-day-panel"><div class="npco-day-head"><div><b>'+esc(symbol)+' · Daily Broker Analysis</b><small>'+(latestDay?'Trading day: '+esc(latestDay):'Current trading session')+' · Calculated from this company’s actual executed NEPSE floorsheet trades</small></div><span class="npco-day-badge">'+br.length+' brokers</span></div>'+
+    html='<section class="npco-day-panel"><div class="npco-day-head"><div><b>'+esc(symbol)+' · Daily Broker Analysis</b><small>'+(latestDay?'Trading day: '+esc(latestDay):'Current trading session')+' · Calculated from this company’s actual executed NEPSE floorsheet trades · Auto-refreshes every 30 seconds while open</small></div><div class="npco-day-actions"><span class="npco-day-badge">'+br.length+' brokers</span><button type="button" class="npco-day-refresh" onclick="showCompanyTab&&showCompanyTab(\'brokers\')">Refresh</button></div></div>'+
       '<div class="npco-day-stats"><div><small>Total Buy</small><b>Rs '+fmt(totalBuy)+'</b></div><div><small>Total Sell</small><b>Rs '+fmt(totalSell)+'</b></div><div><small>Net Flow</small><b class="'+(net>=0?'npco-net-buy':'npco-net-sell')+'">'+(net>=0?'+':'')+'Rs '+fmt(net)+'</b></div><div><small>Floorsheet Trades</small><b>'+rows.length+'</b></div></div>'+
       '<div class="npco-card npco-broker-chart"><div class="npco-section-title">Top Broker Buy vs Sell Flow</div><div class="npco-broker-legend"><span><i class="buy-dot"></i> Buy value</span><span><i class="sell-dot"></i> Sell value</span></div>'+ (graph||'<div class="npco-note">No broker rows returned.</div>') +'</div>'+
       (br.length?brokerTable:'<div class="npco-card npco-note">No verified broker activity was returned for '+esc(symbol)+' for the current trading day.</div>')+
@@ -6631,12 +6883,21 @@ input,select{background:#fff!important;color:var(--text)!important}
  window.showCompanyTab=show;
  function table(rows){if(!rows.length)return '<div class="npco-card npco-note">No rows returned by the data source.</div>';const keys=Object.keys(rows[0]).slice(0,8);return '<div class="npco-card npco-scroll"><table class="npco-table"><thead><tr>'+keys.map(k=>'<th>'+esc(k)+'</th>').join('')+'</tr></thead><tbody>'+rows.slice(0,250).map(r=>'<tr>'+keys.map(k=>'<td>'+esc(typeof r[k]==='object'?JSON.stringify(r[k]):r[k])+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>'}
  document.getElementById('npcoTabs').addEventListener('click',e=>{const b=e.target.closest('button[data-tab]');if(b)show(b.dataset.tab)});
- let depthTimer=null;
+ let depthTimer=null, companyDataTimer=null;
  document.getElementById('npcoTabs').addEventListener('click',e=>{
    const b=e.target.closest('button[data-tab]');
    if(!b)return;
    if(depthTimer){clearInterval(depthTimer);depthTimer=null;}
+   if(companyDataTimer){clearInterval(companyDataTimer);companyDataTimer=null;}
    if(b.dataset.tab==='depth') depthTimer=setInterval(()=>{if(document.querySelector('#npcoTabs button.active')?.dataset.tab==='depth')show('depth');},5000);
+   // Company floorsheet and broker analysis are fetched on tab selection.
+   // Refresh them periodically while visible so broker totals don't remain stale.
+   if(b.dataset.tab==='brokers' || b.dataset.tab==='floorsheet') {
+     const activeTab=b.dataset.tab;
+     companyDataTimer=setInterval(()=>{
+       if(document.querySelector('#npcoTabs button.active')?.dataset.tab===activeTab) show(activeTab);
+     },30000);
+   }
  });
  // Route existing company rows and search selections to the company page instead of Stock X-Ray.
  document.addEventListener('click',e=>{const row=e.target.closest('#pulseMoversRows .pulse-row,#pulseMoversRows .pulse-table-row,[data-symbol].pulse-table-row');if(row){const sym=row.dataset.symbol||row.querySelector('b')?.textContent?.trim()||row.querySelector('span')?.textContent?.trim();if(sym&&/^[A-Z0-9&.-]{2,12}$/.test(sym)){e.preventDefault();e.stopImmediatePropagation();npOpenCompany(sym)}}},true);
