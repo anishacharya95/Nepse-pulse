@@ -4303,7 +4303,7 @@ function find(sym){sym=String(sym||'').trim().toUpperCase();return allRows().fin
 function history(r){
   const h=r?.history||r?.priceHistory||r?.prices||r?.data;
   if(!Array.isArray(h))return [];
-  return h.map(x=>value(x,['price','close','ltp','lastPrice'])).filter(x=>x!=null);
+  return h.map(x=>value(x,['price','close','ltp','lastPrice','value','indexValue'])).filter(x=>x!=null);
 }
 function technical(r){
   const h=history(r), p=value(r,['price','ltp','lastPrice','close']);
@@ -4313,7 +4313,7 @@ function technical(r){
   let rsi=null;if(h.length>=2){const g=[],l=[];for(let i=1;i<h.length;i++){const d=h[i]-h[i-1];g.push(Math.max(d,0));l.push(Math.max(-d,0))}const n=Math.min(14,g.length),ag=g.slice(-n).reduce((a,b)=>a+b,0)/n,al=l.slice(-n).reduce((a,b)=>a+b,0)/n;rsi=al===0?100:100-(100/(1+ag/al))}
   const high=h.length?Math.max(...h):value(r,['52WeekHigh','fiftyTwoWeekHigh','yearHigh','high52']);
   const low=h.length?Math.min(...h):value(r,['52WeekLow','fiftyTwoWeekLow','yearLow','low52']);
-  return {h,p,sma20:sma(20),ema20:ema(20),ema50:ema(50),rsi,high,low};
+  return {h,p,sma20:sma(20)??value(r,['sma20','SMA20']),ema20:ema(20)??value(r,['ema20','EMA20']),ema50:ema(50)??value(r,['ema50','EMA50']),rsi:rsi??value(r,['rsi','rsi14','RSI14']),high:high??value(r,['high52','fiftyTwoWeekHigh']),low:low??value(r,['low52','fiftyTwoWeekLow'])};
 }
 function fundamentals(r){
   return {
@@ -4342,14 +4342,14 @@ function signal(t,d){
 }
 function render(){
   const r=selectedRecord;
-  if(!r){$('sx7Summary').innerHTML='<div class="sx7-stat" style="grid-column:1/-1"><div class="sx7-empty">Search for a security available in the current Central Feed.</div></div>';['sx7Overview','sx7Technical','sx7Fundamental','sx7Activity'].forEach(id=>$(id).innerHTML='');return}
+  if(!r){$('sx7Summary').innerHTML='<div class="sx7-stat" style="grid-column:1/-1"><div class="sx7-empty">Enter a NEPSE symbol above and tap Analyze Stock to load live research data.</div></div>';['sx7Overview','sx7Technical','sx7Fundamental','sx7Activity'].forEach(id=>$(id).innerHTML='');return}
   const d={p:value(r,['price','ltp','lastPrice','close']),ch:value(r,['changePercent','percentageChange','percentChange','changePct','change']),vol:value(r,['volume','totalTradedQuantity','quantity']),turn:value(r,['turnover','totalTurnover','value']),prev:value(r,['previousClose','previousPrice'])},t=technical(r),f=fundamentals(r);
   const cls=d.ch>0?'sx7-good':d.ch<0?'sx7-bad':'';
   $('sx7Summary').innerHTML=`<div class="sx7-stat"><div class="lab">${esc(selected)}</div><div class="val">${esc(text(r,['name','companyName','securityName'])||'Security')}</div><div class="sub">${esc(f.sector||'Sector unavailable')}</div></div><div class="sx7-stat"><div class="lab">Price</div><div class="val">${fmt(d.p)}</div><div class="sub">Previous ${fmt(d.prev)}</div></div><div class="sx7-stat"><div class="lab">Change</div><div class="val ${cls}">${d.ch==null?'—':(d.ch>0?'+':'')+fmt(d.ch)+'%'}</div><div class="sub">Current feed</div></div><div class="sx7-stat"><div class="lab">Volume</div><div class="val">${fmt(d.vol,0)}</div><div class="sub">Traded quantity</div></div><div class="sx7-stat"><div class="lab">Turnover</div><div class="val">${fmt(d.turn)}</div><div class="sub">Available value</div></div>`;
   const sig=signal(t,d);
   $('sx7Overview').innerHTML=`<div class="sx7-card"><h3>Signal dashboard</h3>${sig.length?sig.map(x=>`<div class="sx7-signal"><b class="${x[2]==='good'?'sx7-good':x[2]==='bad'?'sx7-bad':'sx7-neutral'}">${esc(x[0])}</b><p>${esc(x[1])}</p></div>`).join(''):'<div class="sx7-empty">Technical history is not available for this security.</div>'}</div><div class="sx7-card"><h3>Quick research</h3><div class="sx7-metrics"><div class="sx7-metric"><b>${fmt(t.rsi,1)}</b><span>RSI 14</span></div><div class="sx7-metric"><b>${fmt(t.sma20)}</b><span>SMA 20</span></div><div class="sx7-metric"><b>${fmt(t.ema20)}</b><span>EMA 20</span></div><div class="sx7-metric"><b>${fmt(t.ema50)}</b><span>EMA 50</span></div><div class="sx7-metric"><b>${fmt(t.high)}</b><span>Available high</span></div><div class="sx7-metric"><b>${fmt(t.low)}</b><span>Available low</span></div></div></div>`;
   $('sx7Technical').innerHTML=`<div class="sx7-card"><h3>Technical metrics</h3><div class="sx7-metrics"><div class="sx7-metric"><b>${fmt(t.rsi,1)}</b><span>RSI 14</span></div><div class="sx7-metric"><b>${fmt(t.sma20)}</b><span>SMA 20</span></div><div class="sx7-metric"><b>${fmt(t.ema20)}</b><span>EMA 20</span></div><div class="sx7-metric"><b>${fmt(t.ema50)}</b><span>EMA 50</span></div><div class="sx7-metric"><b>${fmt(t.high)}</b><span>High</span></div><div class="sx7-metric"><b>${fmt(t.low)}</b><span>Low</span></div></div><h4>History availability</h4><span class="sx7-chip">${t.h.length} usable price points</span></div><div class="sx7-card"><h3>Technical interpretation</h3>${sig.length?sig.map(x=>`<div class="sx7-signal"><b>${esc(x[0])}</b><p>${esc(x[1])}</p></div>`).join(''):'<div class="sx7-empty">Insufficient history for technical interpretation.</div>'}</div>`;
-  const fundRows=[['Market cap',f.marketCap],['Book value / BVPS',f.bookValue],['EPS',f.eps],['P/E',f.pe],['P/B',f.pb],['Dividend',f.dividend],['Promoter holding',f.promoter],['Public holding',f.publicShare],['Paid-up capital',f.paidUp],['Sector',f.sector]];
+  const fundRows=[['Market cap',f.marketCap],['Book value / BVPS',f.bookValue],['EPS',f.eps],['P/E',f.pe],['P/B',f.pb],['Dividend',f.dividend],['Promoter holding',f.promoter],['Public holding',f.publicShare],['Paid-up capital',f.paidUp],['ROE',f.roe],['Dividend yield',f.dividendYield],['Listed shares',f.listedShares],['Sector',f.sector]];
   $('sx7Fundamental').innerHTML=`<div class="sx7-card"><h3>Fundamental data</h3><div class="sx7-scroll"><table class="sx7-table"><tbody>${fundRows.map(x=>`<tr><td>${esc(x[0])}</td><td><b>${esc(x[1]??'—')}</b></td></tr>`).join('')}</tbody></table></div><div class="sx7-muted" style="margin-top:10px;font-size:10px">Only fields supplied by the connected feed are shown.</div></div><div class="sx7-card"><h3>Valuation context</h3><div class="sx7-metrics"><div class="sx7-metric"><b>${fmt(f.pe)}</b><span>P/E</span></div><div class="sx7-metric"><b>${fmt(f.pb)}</b><span>P/B</span></div><div class="sx7-metric"><b>${fmt(f.eps)}</b><span>EPS</span></div><div class="sx7-metric"><b>${fmt(f.bookValue)}</b><span>Book value</span></div></div><div class="sx7-hint">No valuation conclusion is generated when required feed fields are missing.</div></div>`;
   const trades=(feed.floorsheet||[]).filter(x=>String(x.symbol||x.ticker||x.securitySymbol||'').toUpperCase()===selected);
   const broker={};
@@ -4367,10 +4367,44 @@ function sync(x){
   if(selectedRecord)selectedRecord=find(selected)||selectedRecord;
   render();
 }
-function load(){
+async function load(){
   const sym=String($('sx7Symbol').value||'').trim().toUpperCase();
-  const r=find(sym);if(!r){toast('Choose a symbol available in the current Central Feed.');return}
-  selected=sym;selectedRecord=r;render();
+  if(!sym){toast('Enter a NEPSE symbol, for example NABIL.');return}
+  const button=$('sx7Load');button.disabled=true;button.textContent='Analyzing…';
+  selected=sym;selectedRecord=find(sym)||{symbol:sym,name:sym};render();
+  const base=String(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
+  try{
+    const requests=await Promise.allSettled([
+      fetch(base+'/api/stock-xray/'+encodeURIComponent(sym)+'?_xray='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw Error('Stock X-Ray HTTP '+r.status);return r.json()}),
+      fetch(base+'/api/technical/'+encodeURIComponent(sym)+'?_xray='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw Error('Technical API HTTP '+r.status);return r.json()}),
+      fetch(base+'/api/fundamentals/'+encodeURIComponent(sym)+'?_xray='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw Error('Fundamentals API HTTP '+r.status);return r.json()})
+    ]);
+    const xr=requests[0].status==='fulfilled'?requests[0].value:{};
+    const tr=requests[1].status==='fulfilled'?requests[1].value:{};
+    const fr=requests[2].status==='fulfilled'?requests[2].value:{};
+    const old=find(sym)||{symbol:sym,name:sym};
+    const fund=(fr&&Object.keys(fr).length?fr:(xr.fundamentals||{}));const valuation=fund.valuation||fund.fundamentals||xr.valuation||xr.fundamentals||{};const performance=fund.performance||xr.performance||{};const market=fund.market||xr.market||{};const publicData=fund.publicData||{};const fundRows=Array.isArray(fund.financials)?fund.financials:(Array.isArray(publicData.financials)?publicData.financials:[]);const latestFund=fundRows.length?fundRows[0]:{};const publicRows=[...(Array.isArray(publicData.financials)?publicData.financials:[]),...(Array.isArray(publicData.price)?publicData.price:[]),...(Array.isArray(publicData.security)?publicData.security:[]),...(Array.isArray(publicData.profiles)?publicData.profiles:[]),...(Array.isArray(publicData.highLow)?publicData.highLow:[])];const publicValue=(keys)=>{for(const row of publicRows){if(!row||typeof row!=='object')continue;for(const key of keys){const k=Object.keys(row).find(x=>x.toLowerCase().replace(/[^a-z0-9]/g,'')===key.toLowerCase().replace(/[^a-z0-9]/g,''));if(k&&row[k]!==null&&row[k]!==''&&row[k]!=='-')return row[k]}}return null};
+    const histObj=xr.history||{};const hist=Array.isArray(histObj)?histObj:(histObj.data||histObj.history||histObj.rows||[]);
+    const tech=(tr.technical||xr.technical?.technical||{});
+    selectedRecord={...old,...market,...valuation,...performance,
+      symbol:sym,name:old.name||old.companyName||fund.companyName||fund.name||sym,
+      price:old.price??old.ltp??market.ltp??market.price??valuation.ltp??tech.last,
+      changePercent:old.changePercent??old.percentageChange??market.changePercent??market.percentageChange,
+      volume:old.volume??market.volume??market.totalTradedQuantity,
+      turnover:old.turnover??market.turnover??market.totalTurnover,
+      previousClose:old.previousClose??market.previousClose,
+      sector:old.sector||fund.sector||fund.profile?.sector||fund.profile?.sectorName,
+      marketCap:valuation.marketCap??fund.marketCap??performance.marketCap??publicValue(['marketCap','marketCapitalization']),bookValue:valuation.bookValue??performance.bookValue??latestFund.bookValue??publicValue(['bookValue','book_value','netWorthPerShare']),eps:valuation.eps??performance.eps??latestFund.eps??publicValue(['eps','earningPerShare','earningsPerShare']),
+      pe:valuation.pe??performance.pe??latestFund.pe??publicValue(['pe','peRatio','priceEarningRatio']),pb:valuation.pb??valuation.pbv??performance.pb??performance.pbv??latestFund.pb??publicValue(['pb','pbv','pbRatio','priceBookRatio']),dividend:valuation.cashDividend??valuation.dividend??performance.cashDividend??performance.dividendYield??publicValue(['cashDividend','cashDividendPercent','cashDividendPercentage']),
+      promoterShare:valuation.promoterShare??performance.promoterShare??publicValue(['promoterShare','promoterHolding','promoterPercentage']),publicShare:valuation.publicShare??performance.publicShare??publicValue(['publicShare','publicHolding','publicPercentage']),paidUpCapital:valuation.paidUpCapital??performance.paidUpCapital??publicValue(['paidUpCapital','paidUp']),roe:valuation.roe??performance.roe??latestFund.roe??publicValue(['roe','returnOnEquity']),listedShares:valuation.listedShares??market.listedShares??publicValue(['listedShares','totalListedShares','totalShares']),dividendYield:valuation.dividendYield??performance.dividendYield??publicValue(['dividendYield','yield']),
+      history:hist.map(x=>typeof x==='number'?{close:x}:x),
+      rsi:tech.rsi14??tech.rsi,sma20:tech.sma20,ema20:tech.ema20,ema50:tech.ema50,sma50:tech.sma50,
+      _xray:{ok:!!(xr.ok||tr.ok||fr.ok),historySource:tr.historySource||histObj.source||'unavailable',errors:[...((xr.errors)||[]),...((tr.errors)||[]),...((fr.errors)||[])]}
+    };
+    render();
+    if(!selectedRecord._xray.ok)toast('No research data returned for '+sym+'. Check backend availability and symbol.');
+  }catch(e){console.warn('Stock X-Ray load failed',e);toast('Could not load Stock X-Ray data. Check backend connection.');render()}
+  finally{button.disabled=false;button.textContent='Analyze Stock'}
 }
 document.addEventListener('DOMContentLoaded',()=>{
   document.querySelectorAll('.sx7-tab').forEach(b=>b.addEventListener('click',()=>{
