@@ -3448,6 +3448,25 @@ async def api_public_fundamentals(symbol: str):
     return await get_public_fundamentals(symbol)
 
 
+@app.get("/api/dividend-history/{symbol}")
+async def api_dividend_history(symbol: str):
+    """Return the selected company's available all-years dividend archive."""
+    sym = symbol.upper().strip()
+    public = await get_public_fundamentals(sym)
+    rows = public.get("dividendHistory") or public.get("dividends") or []
+    def norm(v): return re.sub(r"[^a-z0-9]", "", str(v or "").lower())
+    cleaned=[]; seen=set()
+    for row in rows:
+        if not isinstance(row, dict): continue
+        row_sym = next((str(v).upper().strip() for k,v in row.items() if norm(k) in {"symbol","stocksymbol","ticker","securitysymbol","companysymbol","scrip","stockcode"} and v not in (None,"")), "")
+        if row_sym and row_sym != sym: continue
+        marker=json.dumps(row,sort_keys=True,default=str)
+        if marker not in seen: seen.add(marker); cleaned.append(row)
+    return {"ok":bool(cleaned),"symbol":sym,"count":len(cleaned),"data":cleaned,"dividendHistory":cleaned,
+            "source":(public.get("sources") or {}).get("dividends","public proposed-dividend archive"),"updatedAt":now_iso(),
+            "note":None if cleaned else "No matching rows were returned by the connected public archive."}
+
+
 @app.get("/api/stock-overview/{symbol}")
 async def api_stock_overview(symbol: str):
     """Single normalized payload for the Stock Info terminal.
