@@ -3331,7 +3331,12 @@ async def api_company(symbol: str):
 
 
 async def get_public_fundamentals(symbol: str):
-    """Merge openly published YONEPSE datasets for a symbol; absent fields stay null."""
+    """Collect public market, company financial, security and dividend records.
+
+    The YONEPSE financial file has appeared both as flat rows and as nested or
+    company-keyed objects. Normalize those shapes without dropping source rows.
+    Values not published by a source remain null; no financial values are guessed.
+    """
     symbol = symbol.upper().strip()
     key = f"public-fundamentals:{symbol}"
     async def load():
@@ -3346,41 +3351,96 @@ async def get_public_fundamentals(symbol: str):
         }
         async def fetch(label, path):
             try: return label, await yonepse_get(path)
-            except Exception: return label, None
+            except Exception as first_error:
+                # New folder-based endpoint names are canonical in the upstream
+                # project; try them explicitly if a legacy alias has moved.
+                aliases = {
+                    "nepse_data.json": "nepse_data.json",
+                    "company/profiles.json": "company/profiles.json",
+                    "company/financials.json": "company/financials.json",
+                    "other/securities.json": "other/securities.json",
+                    "proposed_dividend/history_all_years.json": "proposed_dividend/history_all_years.json",
+                    "proposed_dividend/latest_1y.json": "proposed_dividend/latest_1y.json",
+                    "market/top_stocks.json": "market/top_stocks.json",
+                }
+                try: return label, await yonepse_get(aliases[path])
+                except Exception: return label, None
         got = dict(await asyncio.gather(*(fetch(k,v) for k,v in paths.items())))
-        def rows(obj):
-            if isinstance(obj, list): return obj
-            if isinstance(obj, dict):
-                for k in ("data","results","items","content","stocks","companies"):
-                    if isinstance(obj.get(k), list): return obj[k]
-                # financials/profiles can be keyed by company symbol
-                if symbol in obj:
-                    v=obj[symbol]
-                    return v if isinstance(v,list) else [v]
-            return []
-        def sym(row):
-            return str(row.get("symbol") or row.get("stockSymbol") or row.get("ticker") or row.get("symbolCode") or "").upper()
+        def norm(v): return re.sub(r"[^a-z0-9]", "", str(v or "").lower())
+        symbol_keys = {"symbol", "stocksymbol", "ticker", "symbolcode", "securitysymbol", "companysymbol", "stockcode", "scrip"}
+        def row_symbol(row):
+            if not isinstance(row, dict): return ""
+            for k,v in row.items():
+                if norm(k) in symbol_keys and v not in (None, ""):
+                    return str(v).upper().strip()
+            return ""
         def matching(obj):
+            found=[]; seen=set()
+            def walk(node, inherited=False, depth=0):
+                if depth>12 or node is None: return
+                if isinstance(node, list):
+                    for item in node: walk(item, inherited, depth+1)
+                    return
+                if not isinstance(node, dict): return
+                own = row_symbol(node)==symbol
+                if own:
+                    marker=id(node)
+                    if marker not in seen: found.append(node); seen.add(marker)
+                # Dataset sometimes keys records by symbol, and financial report
+                # rows underneath that key omit their own symbol field.
+                for k,v in node.items():
+                    keyed = str(k).upper().strip()==symbol
+                    if keyed and isinstance(v, dict):
+                        marker=id(v)
+                        if marker not in seen: found.append(v); seen.add(marker)
+                    if isinstance(v,(dict,list)):
+                        before=len(found); walk(v, inherited or own or keyed, depth+1)
+                        if inherited or own or keyed:
+                            # Under a symbol-keyed company object, retain child
+                            # financial/dividend rows even if they omit symbol.
+                            if isinstance(v,list):
+                                for item in v:
+                                    if isinstance(item,dict) and id(item) not in seen:
+                                        found.append(item); seen.add(id(item))
+                            elif isinstance(v,dict) and id(v) not in seen and not row_symbol(v):
+                                found.append(v); seen.add(id(v))
+            walk(obj)
+            # If symbol was a top-level dictionary key, walk its value directly.
             if isinstance(obj,dict) and symbol in obj:
-                v=obj[symbol]; return v if isinstance(v,list) else [v]
-            return [x for x in rows(obj) if isinstance(x,dict) and sym(x)==symbol]
-        price=matching(got.get("prices"))
-        profile=matching(got.get("profiles"))
-        security=matching(got.get("securities"))
-        financial=matching(got.get("financials"))
+                v=obj[symbol]
+                if isinstance(v,list): found.extend(x for x in v if isinstance(x,dict) and x not in found)
+                elif isinstance(v,dict) and v not in found: found.append(v)
+            # A nested company payload can have symbol only on its parent; the
+            # inherited traversal above retains those children. Remove duplicates.
+            unique=[]; signatures=set()
+            for row in found:
+                sig=json.dumps(row,sort_keys=True,default=str)
+                if sig not in signatures: signatures.add(sig); unique.append(row)
+            return unique
+        price=matching(got.get("prices")); profile=matching(got.get("profiles"))
+        security=matching(got.get("securities")); financial=matching(got.get("financials"))
         dividends=matching(got.get("dividends"))+matching(got.get("dividendLatest"))
         hl=matching(got.get("highLow"))
-        # de-duplicate dividend records without discarding source fields
+        def field(row, *keys):
+            if not isinstance(row,dict): return None
+            wanted={norm(k) for k in keys}
+            for k,v in row.items():
+                if norm(k) in wanted and v not in (None, "", "-"): return v
+            return None
+        # Sort dividend rows chronologically where the source supplies a date;
+        # unknown dates are retained after dated records.
+        def date_key(row):
+            return str(field(row,"announcement_date","announcementDate","date","fiscal_year","fiscalYear") or "")
         seen=set(); div=[]
-        for d in dividends:
-            marker=str((d.get("fiscalYear"),d.get("bookCloseDate"),d.get("cashDividend"),d.get("bonusDividend"),d.get("date")))
+        for d in sorted(dividends,key=date_key,reverse=True):
+            marker=str((field(d,"fiscal_year","fiscalYear"),field(d,"announcement_date","announcementDate","date"),field(d,"cash_dividend","cashDividend"),field(d,"bonus_share","bonusDividend","bonusShare")))
             if marker not in seen: seen.add(marker); div.append(d)
         return {"ok":bool(price or profile or security or financial or div or hl),"symbol":symbol,
-                "price":price,"profile":profile,"security":security,"financials":financial,
-                "dividends":div,"highLow":hl,"sources":{"prices":"YONEPSE public static market feed",
-                "profile":"YONEPSE public company profiles","financials":"YONEPSE public financial reports",
-                "dividends":"YONEPSE public proposed-dividend archive","highLow":"YONEPSE market snapshot; 52-week fields only when present"},
-                "updatedAt":now_iso()}
+                "price":price,"profile":profile,"profiles":profile,"security":security,"securities":security,
+                "financials":financial,"dividends":div,"dividendHistory":div,"highLow":hl,
+                "sources":{"prices":"YONEPSE public market feed","profile":"YONEPSE public company profiles",
+                "financials":"YONEPSE public financial reports","dividends":"YONEPSE proposed-dividend archive",
+                "highLow":"YONEPSE market snapshot; 52-week fields only when present"},"updatedAt":now_iso()}
     return await cached(key,load)
 
 @app.get("/api/public/fundamentals/{symbol}")
@@ -3530,26 +3590,87 @@ async def api_stock_overview(symbol: str):
 
 @app.get("/api/fundamentals/{symbol}")
 async def api_fundamentals(symbol: str):
-    base=await get_fundamentals(symbol)
-    try:
-        public=await get_public_fundamentals(symbol)
-        base["publicData"]=public
-        # Fill only missing summary metrics from actual public rows.
-        def first(rows, keys):
-            for row in rows:
-                if isinstance(row,dict):
-                    for k in keys:
-                        v=row.get(k)
-                        if v not in (None, "", "-"): return num(v)
-            return None
-        val=base.setdefault("valuation",{})
-        pubrows=public.get("financials",[])+public.get("price",[])+public.get("highLow",[])
-        aliases={"eps":["eps","earningPerShare","earningsPerShare"],"bookValue":["bookValue","book_value","netWorthPerShare"],"pe":["pe","peRatio","priceEarningRatio"],"pb":["pb","pbv","pbRatio","priceBookRatio"],"marketCap":["marketCap","marketCapitalization"],"fiftyTwoWeekHigh":["fiftyTwoWeekHigh","high52","yearHigh"],"fiftyTwoWeekLow":["fiftyTwoWeekLow","low52","yearLow"]}
-        for field,keys in aliases.items():
-            if val.get(field) is None: val[field]=first(pubrows,keys)
-        base["publicSources"]=public.get("sources",{})
-    except Exception as exc:
-        base.setdefault("errors",[]).append(f"public datasets: {exc}")
+    symbol = symbol.upper().strip()
+    base, public = await asyncio.gather(get_fundamentals(symbol), get_public_fundamentals(symbol))
+    base = dict(base or {})
+    base["publicData"] = public
+    def norm(v): return re.sub(r"[^a-z0-9]", "", str(v or "").lower())
+    def rows(v):
+        if isinstance(v,list): return [x for x in v if isinstance(x,dict)]
+        if isinstance(v,dict):
+            for k in ("content","data","results","items","rows","reports","financials"):
+                if isinstance(v.get(k),list): return [x for x in v[k] if isinstance(x,dict)]
+            return [v]
+        return []
+    def first(objects, keys, skip_zero=False):
+        wanted={norm(k) for k in keys}
+        zero_candidate=None
+        for obj in objects:
+            if not isinstance(obj,dict): continue
+            for k,v in obj.items():
+                if norm(k) not in wanted or v in (None,"","-"): continue
+                parsed = None
+                if isinstance(v,(int,float)): parsed=num(v)
+                elif isinstance(v,str) and re.fullmatch(r"[-+]?\d[\d,]*(?:\.\d+)?%?",v.strip()):
+                    parsed=num(v.strip().rstrip("%"))
+                else: parsed=v
+                if skip_zero and isinstance(parsed,(int,float)) and parsed == 0:
+                    zero_candidate=parsed
+                    continue
+                return parsed
+        return zero_candidate
+    valuation=dict(base.get("valuation") or base.get("fundamentals") or {})
+    profile=base.get("profile") or base.get("detail") or {}
+    market=base.get("market") or {}
+    financials=rows(base.get("financials")) or rows(base.get("financialReports")) or rows(public.get("financials"))
+    prices=rows(public.get("price")); profiles=rows(public.get("profiles")); securities=rows(public.get("security")); dividends=rows(public.get("dividendHistory") or public.get("dividends"))
+    allrows=financials+prices+profiles+securities+rows(public.get("highLow"))+[profile,market,valuation]
+    aliases={
+      "eps":["eps","earningPerShare","earningsPerShare","earnings_per_share","basicEps","basicEPS"],
+      "bookValue":["bookValue","book_value","bookValuePerShare","book_value_per_share","netWorthPerShare","networthpershare","bvps"],
+      "pe":["pe","peRatio","pe_ratio","priceEarningRatio","priceEarningsRatio","priceToEarnings"],
+      "pb":["pb","pbv","pbRatio","pb_ratio","priceBookRatio","priceToBook","priceBookValue"],
+      "roe":["roe","returnOnEquity","return_on_equity"],
+      "marketCap":["marketCap","market_cap","marketCapitalization","marketCapitalizationValue","marCap"],
+      "listedShares":["listedShares","listed_shares","totalListedShares","numberOfListedShares","totalShares","shareOutstanding"],
+      "cashDividend":["cashDividend","cash_dividend","cashDividendPercent","cash_dividend_percent","cashPercentage","cash"],
+      "bonusDividend":["bonusDividend","bonus_dividend","bonusShare","bonus_share","bonusPercentage","bonus_share_percent"],
+      "dividendYield":["dividendYield","dividend_yield","yield"]
+    }
+    normalized={}
+    # Some NEPSE responses serialize missing fields as numeric zero. Treat zero
+    # as a placeholder for valuation/ownership metrics and continue searching
+    # the financial report + public company records before accepting it.
+    zero_is_missing={"eps","bookValue","pe","pb","roe","marketCap","listedShares"}
+    for field,keys in aliases.items():
+        existing=valuation.get(field)
+        if existing not in (None,"") and not (field in zero_is_missing and str(existing).strip() in ("0","0.0","0.00")):
+            normalized[field]=existing
+        else:
+            normalized[field]=first(allrows,keys,skip_zero=field in zero_is_missing)
+    # Market price is used only to derive standard valuation ratios when the
+    # source has not already supplied them. Negative/zero EPS or BVPS is not
+    # converted into a misleading positive valuation ratio.
+    ltp=first([market,valuation]+prices,["ltp","lastTradedPrice","lastPrice","close","closingPrice","price"])
+    if normalized["pe"] is None and ltp is not None and normalized["eps"] not in (None,0):
+        try: normalized["pe"]=float(ltp)/float(normalized["eps"])
+        except (TypeError,ValueError,ZeroDivisionError): pass
+    if normalized["pb"] is None and ltp is not None and normalized["bookValue"] not in (None,0):
+        try: normalized["pb"]=float(ltp)/float(normalized["bookValue"])
+        except (TypeError,ValueError,ZeroDivisionError): pass
+    if normalized["dividendYield"] is None and normalized["cashDividend"] is not None and ltp not in (None,0):
+        try: normalized["dividendYield"]=float(normalized["cashDividend"])/float(ltp)*100
+        except (TypeError,ValueError,ZeroDivisionError): pass
+    valuation.update(normalized)
+    base["valuation"]=valuation
+    base["performance"]={**(base.get("performance") or {}),**normalized}
+    base["financials"]=financials
+    base["dividends"]=dividends
+    base["dividendHistory"]=dividends
+    base["companyName"] = base.get("companyName") or first([profile]+profiles,["companyName","securityName","company_name","name"]) or symbol
+    base["sector"] = base.get("sector") or first([profile]+securities,["sectorName","sector","sectorDescription"])
+    base["sources"]={**(base.get("sources") or {}),**(public.get("sources") or {})}
+    base["fieldStatus"]={k:("available" if v not in (None,"") else "not-published-by-connected-source") for k,v in normalized.items()}
     return base
 
 
