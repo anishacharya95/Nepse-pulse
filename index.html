@@ -7411,80 +7411,103 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 
 
 <!-- Exclusive feature navigation: close stale feature surfaces before every route. -->
-<style id="pulse-exclusive-feature-navigation-css">
-  #v25DataShell, #v26Shell, #stockXRayModal, #tradersZoneModal, #traderModuleModal,
-  #npAllMarket, #pulseFeatureWorkspace { isolation:isolate; }
-  #v25DataShell, #v26Shell { position:fixed !important; inset:0 !important; z-index:2147483600 !important; }
-  #pulseFeatureWorkspace { z-index:2147483500 !important; }
-  #pulseFeatureWorkspace:not(.open), #stockXRayModal:not(.open), #tradersZoneModal:not(.open),
-  #traderModuleModal:not(.open), #npAllMarket:not(.open) { display:none !important; }
+
+<style id="pulse-exclusive-feature-navigation-css-v2">
+  /* One exclusive full-screen workspace; feature content behind it stays hidden. */
+  #pulseFeatureWorkspace { position:fixed!important; inset:0!important; z-index:99999!important; display:none!important; background:#eef6ff!important; align-items:stretch!important; justify-content:center!important; }
+  #pulseFeatureWorkspace.open { display:flex!important; }
+  #pulseFeatureWorkspace .pulse-feature-sheet { width:100%!important; max-width:none!important; height:100%!important; max-height:100%!important; margin:0!important; overflow:auto!important; border-radius:0!important; padding:12px 12px calc(18px + env(safe-area-inset-bottom))!important; background:#eef6ff!important; box-shadow:none!important; }
+  #pulseFeatureWorkspace .pulse-workspace-head { position:sticky!important; top:0!important; z-index:100000!important; background:#eef6ff!important; }
+  #pulseWorkspaceBody > * { display:block!important; }
+  #pulseWorkspaceBody > :not(.pulse-home-feature-module) { display:block!important; }
+  #stockXRayModal:not(.open), #tradersZoneModal:not(.open), #traderModuleModal:not(.open), #npAllMarket:not(.open) { display:none!important; }
 </style>
-<script id="pulse-exclusive-feature-navigation-js">
+<script id="pulse-exclusive-feature-navigation-js-v2">
 (function(){
   'use strict';
-  const byId=id=>document.getElementById(id);
-  function closeStaleSurfaces(keep){
-    // Close all feature overlays first. Keep is reserved for a router that explicitly owns a surface.
-    ['v25DataShell','v26Shell'].forEach(id=>{ if(id!==keep) byId(id)?.remove(); });
-    ['stockXRayModal','tradersZoneModal','traderModuleModal','npAllMarket'].forEach(id=>{
-      const el=byId(id); if(el){ el.classList.remove('open'); if(id==='npAllMarket') el.style.display='none'; }
-    });
-    const drawer=byId('featureDrawer'); drawer?.classList.remove('open');
-    const ws=byId('pulseFeatureWorkspace');
-    if(ws){ ws.classList.remove('open'); }
-    // A legacy feature must never remain mounted in the workspace when a different route opens.
-    const body=byId('pulseWorkspaceBody');
-    if(body){
-      [...body.children].forEach(el=>{
-        if(el.classList.contains('pulse-home-feature-module')){
-          el.classList.remove('pulse-feature-mounted');
-          // Return the section to the main document rather than leaving it attached to the hidden shell.
-          const main=document.querySelector('main');
-          if(main && el.parentNode===body) main.appendChild(el);
-        }
-      });
-      body.innerHTML='';
-    }
+  const $ = id => document.getElementById(id);
+  const workspace = $('pulseFeatureWorkspace');
+  const body = $('pulseWorkspaceBody');
+  const title = $('pulseWorkspaceTitle');
+  const original = new WeakMap();
+  const fallbackParent = () => document.querySelector('main') || document.body;
+
+  function remember(el){
+    if(!original.has(el)) original.set(el,{parent:el.parentNode,next:el.nextSibling});
   }
-  window.PULSE_CLOSE_STALE_FEATURES=closeStaleSurfaces;
-
-  // All navigation entry points share the same exclusivity rule.
-  const oldWorkspace=window.openFeatureWorkspace;
-  window.openFeatureWorkspace=function(id,label){
-    closeStaleSurfaces();
-    return typeof oldWorkspace==='function' ? oldWorkspace.apply(this,arguments) : undefined;
-  };
-  const oldModule=window.openModule;
-  window.openModule=function(name){
-    closeStaleSurfaces();
-    return typeof oldModule==='function' ? oldModule.apply(this,arguments) : undefined;
-  };
-  const oldXray=window.openStockXRay;
-  if(typeof oldXray==='function') window.openStockXRay=function(){ closeStaleSurfaces(); return oldXray.apply(this,arguments); };
-  const oldTraders=window.openTradersZone;
-  if(typeof oldTraders==='function') window.openTradersZone=function(){ closeStaleSurfaces(); return oldTraders.apply(this,arguments); };
-
-  // If a feature router is called directly (rather than from the drawer), clear prior shells too.
-  const oldV25=window.PULSE_V25_OPEN_FEATURE;
-  if(typeof oldV25==='function') window.PULSE_V25_OPEN_FEATURE=function(name){ closeStaleSurfaces(); return oldV25.apply(this,arguments); };
-  const oldV26=window.PULSE_V26_OPEN_FEATURE;
-  if(typeof oldV26==='function') window.PULSE_V26_OPEN_FEATURE=function(name){ closeStaleSurfaces(); return oldV26.apply(this,arguments); };
-
-  // Prevent a stale feature shell from being left behind when the user taps its Close/back control.
-  document.addEventListener('click',function(e){
-    const btn=e.target.closest('button'); if(!btn) return;
-    const label=(btn.textContent||'').trim().toLowerCase();
-    if(label==='close' || label==='←' || label==='‹'){
-      setTimeout(function(){
-        if(!byId('pulseFeatureWorkspace')?.classList.contains('open')){
-          byId('v25DataShell')?.remove(); byId('v26Shell')?.remove();
-          byId('stockXRayModal')?.classList.remove('open');
-          byId('tradersZoneModal')?.classList.remove('open');
-          byId('traderModuleModal')?.classList.remove('open');
-        }
-      },0);
+  function restore(el){
+    if(!el || !el.isConnected) return;
+    const saved=original.get(el);
+    let parent=saved && saved.parent && saved.parent.isConnected ? saved.parent : fallbackParent();
+    // Never restore a feature inside the workspace being cleared.
+    if(parent===body || parent===workspace) parent=fallbackParent();
+    if(saved && saved.next && saved.next.parentNode===parent) parent.insertBefore(el,saved.next);
+    else parent.appendChild(el);
+    el.classList.remove('pulse-feature-mounted');
+    el.style.removeProperty('display');
+  }
+  function closeExclusive(){
+    // Restore every feature that any earlier router may have left in the shared body.
+    if(body){
+      Array.from(body.children).forEach(el=>{
+        if(el.id || el.classList.contains('pulse-home-feature-module') || el.classList.contains('pulse-feature-mounted')) restore(el);
+      });
+      body.replaceChildren();
     }
-  },true);
+    // Also recover a feature mounted by a legacy handler outside the expected body.
+    document.querySelectorAll('.pulse-feature-mounted').forEach(el=>restore(el));
+    if(workspace) workspace.classList.remove('open');
+    ['v25DataShell','v26Shell'].forEach(id=>$(id)?.remove());
+    ['stockXRayModal','tradersZoneModal','traderModuleModal'].forEach(id=>$(id)?.classList.remove('open'));
+    const market=$('npAllMarket'); if(market){market.classList.remove('open'); market.style.display='none';}
+    $('featureDrawer')?.classList.remove('open');
+  }
+  function openExclusive(id,label){
+    closeExclusive();
+    const el=$(String(id||''));
+    if(!el){ if(typeof window.toast==='function') window.toast((label||id||'Feature')+' is not available in this build.'); return; }
+    if(!workspace || !body){
+      el.classList.add('pulse-feature-mounted');
+      el.style.removeProperty('display');
+      el.scrollIntoView({behavior:'auto',block:'start'});
+      return;
+    }
+    remember(el);
+    if(title) title.textContent=label||el.getAttribute('aria-label')||'Pulse Feature';
+    el.classList.add('pulse-feature-mounted');
+    el.style.removeProperty('display');
+    body.replaceChildren(el);
+    workspace.classList.add('open');
+    window.scrollTo(0,0);
+    window.dispatchEvent(new CustomEvent('pulse-feature-open',{detail:{id,label}}));
+  }
+  window.openFeatureWorkspace=openExclusive;
+  window.closeFeatureWorkspace=closeExclusive;
+  window.PULSE_CLOSE_STALE_FEATURES=closeExclusive;
+  // Other legacy entry points must funnel through the same exclusive workspace.
+  window.openModule=function(name){
+    const n=String(name||'');
+    const routes={
+      'Stock X-Ray':'stock-xray-v7', 'Sector Heatmap':'sector-breadth-v5',
+      'Market Structure':'sectorZone', 'Broker Analytics':'brokerZone',
+      'Floorsheet & Brokers':'floorsheet-broker-v4', 'Portfolio':'portfolioZone',
+      'Professional Charting':'professional-charting-v8', 'Live Market':'market-intelligence-v9',
+      'Command Center':'market-intelligence-v9', 'Screener & Quant':'screen-quant-v3',
+      'Alerts':'alerts-watchlist-v6'
+    };
+    if(routes[n]) return openExclusive(routes[n],n);
+    closeExclusive();
+    if(typeof window.toast==='function') window.toast(n+' is ready in the Pulse workspace.');
+  };
+  window.openStockXRay=function(){
+    const el=$('stock-xray-v7');
+    if(el) return openExclusive('stock-xray-v7','🩻 Stock X-Ray');
+    const legacy=$('stockXRayModal'); if(legacy){closeExclusive();legacy.classList.add('open');}
+  };
+  window.openTradersZone=function(){
+    if($('traders-zone-v5')) return openExclusive('traders-zone-v5','⚡ Traders Zone');
+    const legacy=$('tradersZoneModal'); if(legacy){closeExclusive();legacy.classList.add('open');}
+  };
+  document.addEventListener('keydown',e=>{if(e.key==='Escape' && workspace?.classList.contains('open')) closeExclusive();});
 })();
 </script>
-
