@@ -7422,6 +7422,36 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
   #pulseWorkspaceBody > :not(.pulse-home-feature-module) { display:block!important; }
   #stockXRayModal:not(.open), #tradersZoneModal:not(.open), #traderModuleModal:not(.open), #npAllMarket:not(.open) { display:none!important; }
 </style>
+<style id="pulse-feature-header-contrast-fix">
+
+/* High-contrast Stock X-Ray / feature workspace header for mobile. */
+#pulseFeatureWorkspace .pulse-workspace-head {
+  background: #eef6ff !important;
+  color: #111827 !important;
+  border-bottom: 1px solid #cbd5e1 !important;
+  box-shadow: 0 2px 8px rgba(15,23,42,.08) !important;
+}
+#pulseFeatureWorkspace .pulse-workspace-head h2,
+#pulseFeatureWorkspace #pulseWorkspaceTitle {
+  color: #111827 !important;
+  opacity: 1 !important;
+  text-shadow: none !important;
+}
+#pulseFeatureWorkspace .pulse-workspace-close {
+  color: #111827 !important;
+  background: #ffffff !important;
+  border: 1px solid #111827 !important;
+  border-radius: 10px !important;
+  font-weight: 700 !important;
+  opacity: 1 !important;
+  text-shadow: none !important;
+  box-shadow: 0 1px 3px rgba(15,23,42,.12) !important;
+}
+#pulseFeatureWorkspace .pulse-workspace-close:focus-visible {
+  outline: 3px solid #2563eb !important;
+  outline-offset: 2px !important;
+}
+</style>
 <script id="pulse-exclusive-feature-navigation-js-v2">
 (function(){
   'use strict';
