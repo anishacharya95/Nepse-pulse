@@ -1431,6 +1431,30 @@ body{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",san
 .pulse-feature-sheet {
   background:#eef7ff !important;
 }
+/* Layout fix: feature workspace must sit above the fixed mobile topbar. Otherwise
+   the first lines of Stock X-Ray are hidden behind the header on mobile. */
+.pulse-feature-workspace {
+  z-index: 10000 !important;
+  position: fixed !important;
+  inset: 0 !important;
+  overflow: hidden !important;
+}
+.pulse-feature-sheet {
+  min-height: 0 !important;
+  height: 100dvh !important;
+  max-height: 100dvh !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+  padding-top: max(12px, env(safe-area-inset-top)) !important;
+  scroll-padding-top: 16px;
+}
+.pulse-feature-sheet > .pulse-workspace-head {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 20 !important;
+}
+#pulseWorkspaceBody { padding-top: 8px !important; }
+#pulseWorkspaceBody > .pulse-feature-mounted { scroll-margin-top: 16px !important; }
 </style>
 <style id="npco-company-logo-style">.npco-company-logo{width:42px;height:42px;flex:0 0 42px;object-fit:contain;border-radius:50%;background:#fff;border:1px solid #dce5e9;padding:4px}.npco-company-logo-fallback{width:42px;height:42px;flex:0 0 42px;align-items:center;justify-content:center;border-radius:50%;background:#e8f3f6;color:#176b78;font-weight:800}#npCompanyPage .npco-header{gap:10px}</style><!-- TradingView Advanced Charts: official hosted runtime (latest) -->
 <script id="pulse-tradingview-hosted-runtime" type="text/javascript" src="https://charting-library.tradingview-widget.com/charting_library/charting_library.standalone.js"></script>
@@ -4292,8 +4316,22 @@ document.addEventListener('DOMContentLoaded',()=>{
 'use strict';
 const $=id=>document.getElementById(id);
 let feed={securities:[],liveMarket:[],floorsheet:[],status:'WAITING'}, selected='', selectedRecord=null;
+// Each search owns a sequence number: late responses from an older search must never overwrite a newer symbol.
+let requestSequence=0;
 
-function num(v){const n=Number(v);return Number.isFinite(n)?n:null}
+function num(v){if(v===null||v===undefined||v===''||typeof v==='boolean')return null;const n=typeof v==='number'?v:Number(String(v).replace(/,/g,'').trim());return Number.isFinite(n)?n:null}
+async function fetchJson(url,label,timeoutMs=12000){
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),timeoutMs);
+  try{
+    const response=await fetch(url,{cache:'no-store',headers:{Accept:'application/json'},signal:controller.signal});
+    if(!response.ok)throw new Error(label+' HTTP '+response.status);
+    return await response.json();
+  }catch(error){
+    if(error&&error.name==='AbortError')throw new Error(label+' timed out after '+Math.round(timeoutMs/1000)+' seconds');
+    throw error;
+  }finally{clearTimeout(timer)}
+}
 function fmt(v,d=2){const n=num(v);return n==null?'—':n.toLocaleString(undefined,{maximumFractionDigits:d})}
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function value(r,keys){for(const k of keys){const n=num(r?.[k]);if(n!=null)return n}return null}
@@ -4380,21 +4418,26 @@ function sync(x){
 async function load(){
   const sym=String($('sx7Symbol').value||'').trim().toUpperCase();
   if(!sym){toast('Enter a NEPSE symbol, for example NABIL.');return}
-  const button=$('sx7Load');button.disabled=true;button.textContent='Analyzing…';
+  const requestId=++requestSequence;
+  const button=$('sx7Load');
+  // Keep search usable while another symbol is loading; only the newest request can update the UI.
+  button.disabled=false;button.textContent='Analyzing '+sym+'…';
   selected=sym;selectedRecord=find(sym)||{symbol:sym,name:sym};render();
   const base=String(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
   $('sx7Status').textContent='LOADING '+sym; $('sx7Dot').style.background='#d29b19';
   try{
+    const stamp=Date.now();
     const requests=await Promise.allSettled([
-      fetch(base+'/api/stock-xray/'+encodeURIComponent(sym)+'?_xray='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw Error('Stock X-Ray HTTP '+r.status);return r.json()}),
-      fetch(base+'/api/technical/'+encodeURIComponent(sym)+'?_xray='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw Error('Technical API HTTP '+r.status);return r.json()}),
-      fetch(base+'/api/fundamentals/'+encodeURIComponent(sym)+'?_xray='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw Error('Fundamentals API HTTP '+r.status);return r.json()}),
-      fetch(base+'/api/public/fundamentals/'+encodeURIComponent(sym)+'?_xray='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw Error('Public fundamentals HTTP '+r.status);return r.json()}),
-      fetch(base+'/api/floorsheet-intelligence?symbol='+encodeURIComponent(sym)+'&months=1&detail_limit=10000&_xray='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw Error('Floorsheet intelligence HTTP '+r.status);return r.json()}),
-      fetch(base+'/api/company-floorsheet/'+encodeURIComponent(sym)+'?limit=100000&_xray='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw Error('Company floorsheet HTTP '+r.status);return r.json()}),
-      fetch(base+'/api/dividend-history/'+encodeURIComponent(sym)+'?_xray='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw Error('Dividend history HTTP '+r.status);return r.json()}),
-      fetch(base+'/api/market?_xray='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw Error('Market fallback HTTP '+r.status);return r.json()})
+      fetchJson(base+'/api/stock-xray/'+encodeURIComponent(sym)+'?_xray='+stamp,'Stock X-Ray'),
+      fetchJson(base+'/api/technical/'+encodeURIComponent(sym)+'?_xray='+stamp,'Technical API'),
+      fetchJson(base+'/api/fundamentals/'+encodeURIComponent(sym)+'?_xray='+stamp,'Fundamentals API'),
+      fetchJson(base+'/api/public/fundamentals/'+encodeURIComponent(sym)+'?_xray='+stamp,'Public fundamentals'),
+      fetchJson(base+'/api/floorsheet-intelligence?symbol='+encodeURIComponent(sym)+'&months=1&detail_limit=10000&_xray='+stamp,'Floorsheet intelligence'),
+      fetchJson(base+'/api/company-floorsheet/'+encodeURIComponent(sym)+'?limit=100000&_xray='+stamp,'Company floorsheet'),
+      fetchJson(base+'/api/dividend-history/'+encodeURIComponent(sym)+'?_xray='+stamp,'Dividend history'),
+      fetchJson(base+'/api/market?_xray='+stamp,'Market fallback')
     ]);
+    if(requestId!==requestSequence)return;
     const xr=requests[0].status==='fulfilled'?requests[0].value:{};
     const tr=requests[1].status==='fulfilled'?requests[1].value:{};
     const fr=requests[2].status==='fulfilled'?requests[2].value:{};
@@ -4432,8 +4475,12 @@ async function load(){
     const hasUseful=!!(selectedRecord.price!=null||selectedRecord.eps!=null||selectedRecord.bookValue!=null||selectedRecord.history?.length||selectedRecord.dividendHistory?.length||selectedRecord.activityFloorsheet?.length);
     $('sx7Status').textContent=hasUseful?'DATA LOADED · '+sym:'PARTIAL / NO SOURCE DATA · '+sym; $('sx7Dot').style.background=hasUseful?'#20a464':'#c0392b';
     if(!hasUseful)toast('The backend responded but returned no usable data for '+sym+'. Check Render deployment and source availability.');
-  }catch(e){console.warn('Stock X-Ray load failed',e);$('sx7Status').textContent='BACKEND CONNECTION FAILED';$('sx7Dot').style.background='#c0392b';toast('Could not load Stock X-Ray data: '+(e?.message||'backend connection failed'));render()}
-  finally{button.disabled=false;button.textContent='Analyze Stock'}
+  }catch(e){
+    if(requestId!==requestSequence)return;
+    console.warn('Stock X-Ray load failed',e);$('sx7Status').textContent='BACKEND CONNECTION FAILED';$('sx7Dot').style.background='#c0392b';toast('Could not load Stock X-Ray data: '+(e?.message||'backend connection failed'));render()
+  }finally{
+    if(requestId===requestSequence){button.disabled=false;button.textContent='Analyze Stock'}
+  }
 }
 document.addEventListener('DOMContentLoaded',()=>{
   document.querySelectorAll('.sx7-tab').forEach(b=>b.addEventListener('click',()=>{
