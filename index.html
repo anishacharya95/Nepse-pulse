@@ -7408,3 +7408,115 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 </script>
 </body>
 </html>
+
+
+<!-- Single-feature workspace isolation fix -->
+<style id="pulse-single-feature-view-isolation">
+/* A feature opens as a full-screen view, not a translucent sheet over other dashboard sections. */
+#pulseFeatureWorkspace.pulse-feature-workspace {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 2147483000 !important;
+  display: none;
+  align-items: stretch !important;
+  justify-content: stretch !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  background: #eef6ff !important;
+  opacity: 1 !important;
+  isolation: isolate !important;
+}
+#pulseFeatureWorkspace.pulse-feature-workspace.open { display: flex !important; }
+#pulseFeatureWorkspace .pulse-feature-sheet {
+  position: relative !important;
+  width: 100% !important;
+  max-width: none !important;
+  height: 100% !important;
+  height: 100dvh !important;
+  max-height: 100% !important;
+  margin: 0 !important;
+  padding: 0 12px calc(18px + env(safe-area-inset-bottom)) !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  background: #eef6ff !important;
+  color: #111827 !important;
+  overscroll-behavior: contain;
+}
+#pulseFeatureWorkspace .pulse-workspace-head {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 20 !important;
+  margin: 0 -12px 12px !important;
+  padding: 16px 14px !important;
+  min-height: 68px !important;
+  background: #064e4b !important;
+  color: #fff !important;
+  border-radius: 0 !important;
+  box-shadow: 0 1px 0 rgba(0,0,0,.08);
+}
+#pulseFeatureWorkspace .pulse-workspace-head h2 { color: #fff !important; }
+#pulseFeatureWorkspace .pulse-workspace-close {
+  color: #fff !important;
+  background: transparent !important;
+  border: 0 !important;
+  font-size: 18px !important;
+  padding: 8px 10px !important;
+}
+#pulseWorkspaceBody { min-width: 0 !important; width: 100% !important; }
+/* Feature modules are visible only inside the active workspace. */
+body:not(.v22-profile-tab-active) main > .pulse-home-feature-module,
+body:not(.v22-profile-tab-active) main > section.pulse-home-feature-module { display: none !important; }
+#pulseFeatureWorkspace .pulse-home-feature-module.pulse-feature-mounted { display: block !important; }
+/* Other legacy feature shells must not remain stacked when the main workspace is opened. */
+#v25DataShell, #v26Shell { z-index: 2147482000 !important; }
+@media(max-width:650px) {
+  #pulseFeatureWorkspace .pulse-feature-sheet { padding-left: 10px !important; padding-right: 10px !important; }
+  #pulseFeatureWorkspace .pulse-workspace-head { margin-left: -10px !important; margin-right: -10px !important; }
+}
+</style>
+<script id="pulse-single-feature-view-cleanup">
+(function(){
+  'use strict';
+  function closeLegacyShells(){
+    document.getElementById('v25DataShell')?.remove();
+    document.getElementById('v26Shell')?.remove();
+  }
+  function closeOtherSurfaces(){
+    closeLegacyShells();
+    const drawer=document.getElementById('featureDrawer');
+    if(drawer) drawer.classList.remove('open');
+    const allMarket=document.getElementById('npAllMarket');
+    if(allMarket) allMarket.classList.remove('open');
+  }
+  /* Keep the existing section router, but clean up stale/stacked views before each open. */
+  const previousOpen=window.openFeatureWorkspace;
+  window.openFeatureWorkspace=function(id,label){
+    closeOtherSurfaces();
+    if(document.getElementById('pulseFeatureWorkspace')?.classList.contains('open') && typeof window.closeFeatureWorkspace==='function'){
+      window.closeFeatureWorkspace();
+    }
+    return typeof previousOpen==='function' ? previousOpen.apply(this,arguments) : undefined;
+  };
+  const previousOpenModule=window.openModule;
+  window.openModule=function(name){
+    closeOtherSurfaces();
+    if(document.getElementById('pulseFeatureWorkspace')?.classList.contains('open') && typeof window.closeFeatureWorkspace==='function') window.closeFeatureWorkspace();
+    return typeof previousOpenModule==='function' ? previousOpenModule.apply(this,arguments) : undefined;
+  };
+  /* When a legacy data shell is opened by a feature router, make it the only visible feature surface. */
+  const watch=document.documentElement;
+  const observer=new MutationObserver(function(){
+    const v25=document.getElementById('v25DataShell'), v26=document.getElementById('v26Shell');
+    if(v25 && v26) v26.remove();
+    const ws=document.getElementById('pulseFeatureWorkspace');
+    if(ws?.classList.contains('open')){
+      document.getElementById('v25DataShell')?.remove();
+      document.getElementById('v26Shell')?.remove();
+    }
+  });
+  observer.observe(watch,{childList:true,subtree:true,attributes:true,attributeFilter:['class']});
+})();
+</script>
