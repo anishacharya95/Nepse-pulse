@@ -2609,9 +2609,26 @@ async def api_technical(symbol:str):
     return {"ok":bool(vals),"symbol":symbol.upper(),"historySource":h.get("source") if isinstance(h,dict) else None,"technical":technical_from(vals),"updatedAt":now_iso(),"errors":h.get("errors",[]) if isinstance(h,dict) else []}
 
 @app.get("/api/stock-xray/{symbol}")
-async def api_stock_xray(symbol:str):
-    f,h,t=await asyncio.gather(get_fundamentals(symbol),get_history(symbol),api_technical(symbol))
-    return {"ok":bool(f.get("ok") or h.get("ok") or t.get("ok")),"symbol":symbol.upper(),"fundamentals":f,"history":h,"technical":t,"updatedAt":now_iso()}
+async def api_stock_xray(symbol: str):
+    """Return a partial Stock X-Ray payload even when one upstream source fails."""
+    sym = symbol.upper().strip()
+    results = await asyncio.gather(
+        get_fundamentals(sym), get_history(sym), api_technical(sym),
+        return_exceptions=True,
+    )
+    f, h, t = results
+    errors = []
+    normalized = []
+    for label, result in zip(("fundamentals", "history", "technical"), results):
+        if isinstance(result, Exception):
+            errors.append(f"{label}: {type(result).__name__}: {result}")
+            normalized.append({"ok": False, "symbol": sym, "data": [], "errors": [str(result)]})
+        else:
+            normalized.append(result if isinstance(result, dict) else {"ok": False, "data": []})
+    f, h, t = normalized
+    return {"ok": bool(f.get("ok") or h.get("ok") or t.get("ok")), "symbol": sym,
+            "fundamentals": f, "history": h, "technical": t, "errors": errors,
+            "updatedAt": now_iso()}
 
 @app.get("/api/production/status")
 async def production_status():

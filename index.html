@@ -2489,7 +2489,7 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
   let watch=read(LS_W,[]);
   let alerts=read(LS_A,[]);
 
-  function num(v){const n=Number(v);return Number.isFinite(n)?n:null}
+  function num(v){if(v===null||v===undefined||v==='')return null;const raw=typeof v==='string'?v.replace(/,/g,'').replace(/%$/,'').trim():v;if(raw==='')return null;const n=Number(raw);return Number.isFinite(n)?n:null}
   function sym(r){return String(r.symbol||r.ticker||r.stockSymbol||r.securityName||'').toUpperCase()}
   function pick(r, keys){for(const k of keys){const n=num(r[k]);if(n!==null)return n}return null}
   function normalize(rows){
@@ -4298,12 +4298,12 @@ function fmt(v,d=2){const n=num(v);return n==null?'—':n.toLocaleString(undefin
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function value(r,keys){for(const k of keys){const n=num(r?.[k]);if(n!=null)return n}return null}
 function text(r,keys){for(const k of keys){if(r?.[k]!==undefined&&r?.[k]!==null&&String(r[k]).trim()!=='')return r[k]}return null}
-function allRows(){const x=[...(feed.liveMarket||[]),...(feed.securities||[])],seen=new Set(),out=[];for(const r of x){const s=String(r.symbol||r.ticker||r.securitySymbol||r.code||'').trim().toUpperCase();if(!s||seen.has(s))continue;seen.add(s);out.push({...r,symbol:s})}return out}
+function allRows(){const x=[...(feed.liveMarket||[]),...(feed.live||[]),...(feed.securities||[]),...(feed.companies||[])],seen=new Set(),out=[];for(const r of x){const s=String(r.symbol||r.ticker||r.securitySymbol||r.securitySymbolCode||r.stockSymbol||r.code||r.symbolCode||'').trim().toUpperCase();if(!s||seen.has(s))continue;seen.add(s);out.push({...r,symbol:s,name:r.name||r.companyName||r.company||r.securityName||r.company_name||s})}return out}
 function find(sym){sym=String(sym||'').trim().toUpperCase();return allRows().find(r=>r.symbol===sym)}
 function history(r){
   const h=r?.history||r?.priceHistory||r?.prices||r?.data;
   if(!Array.isArray(h))return [];
-  return h.map(x=>value(x,['price','close','ltp','lastPrice','value','indexValue'])).filter(x=>x!=null);
+  return h.map(x=>value(x,['price','close','ltp','lastPrice','lastTradedPrice','closePrice','closingPrice','value','indexValue'])).filter(x=>x!=null);
 }
 function technical(r){
   const h=history(r), p=value(r,['price','ltp','lastPrice','close']);
@@ -4348,7 +4348,7 @@ function signal(t,d){
 function render(){
   const r=selectedRecord;
   if(!r){$('sx7Summary').innerHTML='<div class="sx7-stat" style="grid-column:1/-1"><div class="sx7-empty">Enter a NEPSE symbol above and tap Analyze Stock to load live research data.</div></div>';['sx7Overview','sx7Technical','sx7Fundamental','sx7Activity'].forEach(id=>$(id).innerHTML='');return}
-  const d={p:value(r,['price','ltp','lastPrice','close']),ch:value(r,['changePercent','percentageChange','percentChange','changePct','change']),vol:value(r,['volume','totalTradedQuantity','quantity']),turn:value(r,['turnover','totalTurnover','value']),prev:value(r,['previousClose','previousPrice'])},t=technical(r),f=fundamentals(r);
+  const d={p:value(r,['price','ltp','lastPrice','lastTradedPrice','closePrice','closingPrice','close']),ch:value(r,['changePercent','percentageChange','percentChange','changePct','pct','pchange','change']),vol:value(r,['volume','totalTradedQuantity','totalTradeQuantity','quantity','tradedShares']),turn:value(r,['turnover','totalTurnover','totalTradedValue','totalTradeValue','value']),prev:value(r,['previousClose','previousPrice','prev','previousClosingPrice'])},t=technical(r),f=fundamentals(r);
   const cls=d.ch>0?'sx7-good':d.ch<0?'sx7-bad':'';
   $('sx7Summary').innerHTML=`<div class="sx7-stat"><div class="lab">${esc(selected)}</div><div class="val">${esc(text(r,['name','companyName','securityName'])||'Security')}</div><div class="sub">${esc(f.sector||'Sector unavailable')}</div></div><div class="sx7-stat"><div class="lab">Price</div><div class="val">${fmt(d.p)}</div><div class="sub">Previous ${fmt(d.prev)}</div></div><div class="sx7-stat"><div class="lab">Change</div><div class="val ${cls}">${d.ch==null?'—':(d.ch>0?'+':'')+fmt(d.ch)+'%'}</div><div class="sub">Current feed</div></div><div class="sx7-stat"><div class="lab">Volume</div><div class="val">${fmt(d.vol,0)}</div><div class="sub">Traded quantity</div></div><div class="sx7-stat"><div class="lab">Turnover</div><div class="val">${fmt(d.turn)}</div><div class="sub">Available value</div></div>`;
   const sig=signal(t,d);
@@ -4370,7 +4370,7 @@ function render(){
 }
 function sync(x){
   if(!x)return;
-  feed={...feed,...x,securities:x.securities||feed.securities||[],liveMarket:x.liveMarket||feed.liveMarket||[],floorsheet:x.floorsheet||feed.floorsheet||[]};
+  feed={...feed,...x,securities:x.securities||x.companies||feed.securities||feed.companies||[],companies:x.companies||feed.companies||[],liveMarket:x.liveMarket||x.live||feed.liveMarket||feed.live||[],live:x.live||feed.live||[],floorsheet:x.floorsheet||feed.floorsheet||[]};
   const rows=allRows();
   $('sx7Symbols').innerHTML=rows.slice(0,2000).map(r=>`<option value="${esc(r.symbol)}">${esc(text(r,['name','companyName','securityName'])||'')}</option>`).join('');
   status();
@@ -4383,6 +4383,7 @@ async function load(){
   const button=$('sx7Load');button.disabled=true;button.textContent='Analyzing…';
   selected=sym;selectedRecord=find(sym)||{symbol:sym,name:sym};render();
   const base=String(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
+  $('sx7Status').textContent='LOADING '+sym; $('sx7Dot').style.background='#d29b19';
   try{
     const requests=await Promise.allSettled([
       fetch(base+'/api/stock-xray/'+encodeURIComponent(sym)+'?_xray='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw Error('Stock X-Ray HTTP '+r.status);return r.json()}),
@@ -4390,7 +4391,9 @@ async function load(){
       fetch(base+'/api/fundamentals/'+encodeURIComponent(sym)+'?_xray='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw Error('Fundamentals API HTTP '+r.status);return r.json()}),
       fetch(base+'/api/public/fundamentals/'+encodeURIComponent(sym)+'?_xray='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw Error('Public fundamentals HTTP '+r.status);return r.json()}),
       fetch(base+'/api/floorsheet-intelligence?symbol='+encodeURIComponent(sym)+'&months=1&detail_limit=10000&_xray='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw Error('Floorsheet intelligence HTTP '+r.status);return r.json()}),
-      fetch(base+'/api/company-floorsheet/'+encodeURIComponent(sym)+'?limit=100000&_xray='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw Error('Company floorsheet HTTP '+r.status);return r.json()})
+      fetch(base+'/api/company-floorsheet/'+encodeURIComponent(sym)+'?limit=100000&_xray='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw Error('Company floorsheet HTTP '+r.status);return r.json()}),
+      fetch(base+'/api/dividend-history/'+encodeURIComponent(sym)+'?_xray='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw Error('Dividend history HTTP '+r.status);return r.json()}),
+      fetch(base+'/api/market?_xray='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw Error('Market fallback HTTP '+r.status);return r.json()})
     ]);
     const xr=requests[0].status==='fulfilled'?requests[0].value:{};
     const tr=requests[1].status==='fulfilled'?requests[1].value:{};
@@ -4398,18 +4401,22 @@ async function load(){
     const pr=requests[3].status==='fulfilled'?requests[3].value:{};
     const intel=requests[4].status==='fulfilled'?requests[4].value:{};
     const companyFs=requests[5].status==='fulfilled'?requests[5].value:{};
-    const old=find(sym)||{symbol:sym,name:sym};
-    const fund=(fr&&Object.keys(fr).length?fr:(xr.fundamentals||{}));const valuation=fund.valuation||fund.fundamentals||xr.valuation||xr.fundamentals||{};const performance=fund.performance||xr.performance||{};const market=fund.market||xr.market||{};const publicData=fund.publicData||pr||{};const fundRows=(Array.isArray(fund.financials)&&fund.financials.length?fund.financials:(Array.isArray(publicData.financials)?publicData.financials:[]));const latestFund=fundRows.length?fundRows[0]:{};const publicRows=[...(Array.isArray(publicData.financials)?publicData.financials:[]),...(Array.isArray(publicData.price)?publicData.price:[]),...(Array.isArray(publicData.security)?publicData.security:[]),...(Array.isArray(publicData.securities)?publicData.securities:[]),...(Array.isArray(publicData.profile)?publicData.profile:[]),...(Array.isArray(publicData.profiles)?publicData.profiles:[]),...(Array.isArray(publicData.highLow)?publicData.highLow:[])];const dividendHistory=(Array.isArray(fund.dividendHistory)&&fund.dividendHistory.length?fund.dividendHistory:(Array.isArray(fund.dividends)&&fund.dividends.length?fund.dividends:(Array.isArray(publicData.dividendHistory)&&publicData.dividendHistory.length?publicData.dividendHistory:(Array.isArray(publicData.dividends)?publicData.dividends:[]))));const publicValue=(keys)=>{for(const row of publicRows){if(!row||typeof row!=='object')continue;for(const key of keys){const k=Object.keys(row).find(x=>x.toLowerCase().replace(/[^a-z0-9]/g,'')===key.toLowerCase().replace(/[^a-z0-9]/g,''));if(k&&row[k]!==null&&row[k]!==''&&row[k]!=='-')return row[k]}}return null};
+    const divApi=requests[6].status==='fulfilled'?requests[6].value:{};
+    const marketApi=requests[7].status==='fulfilled'?requests[7].value:{};
+    const marketRows=Array.isArray(marketApi.data)?marketApi.data:(Array.isArray(marketApi.live)?marketApi.live:(Array.isArray(marketApi.liveMarket)?marketApi.liveMarket:(Array.isArray(marketApi.companies)?marketApi.companies:(Array.isArray(marketApi.stocks)?marketApi.stocks:[]))));
+    const marketMatch=marketRows.find(x=>String(x.symbol||x.ticker||x.securitySymbol||x.code||'').trim().toUpperCase()===sym)||{};
+    const old={...(find(sym)||{}),...marketMatch,symbol:sym,name:marketMatch.name||marketMatch.companyName||marketMatch.company||marketMatch.securityName||(find(sym)||{}).name||sym};
+    const fund=(fr&&Object.keys(fr).length?fr:(xr.fundamentals||{}));const valuation=fund.valuation||fund.fundamentals||xr.valuation||xr.fundamentals||{};const performance=fund.performance||xr.performance||{};const market=fund.market||xr.market||{};const publicData=fund.publicData||pr||{};const fundRows=(Array.isArray(fund.financials)&&fund.financials.length?fund.financials:(Array.isArray(publicData.financials)?publicData.financials:[]));const latestFund=fundRows.length?fundRows[0]:{};const publicRows=[...(Array.isArray(publicData.financials)?publicData.financials:[]),...(Array.isArray(publicData.price)?publicData.price:[]),...(Array.isArray(publicData.security)?publicData.security:[]),...(Array.isArray(publicData.securities)?publicData.securities:[]),...(Array.isArray(publicData.profile)?publicData.profile:[]),...(Array.isArray(publicData.profiles)?publicData.profiles:[]),...(Array.isArray(publicData.highLow)?publicData.highLow:[])];const dividendHistory=(Array.isArray(divApi.dividendHistory)&&divApi.dividendHistory.length?divApi.dividendHistory:(Array.isArray(divApi.data)&&divApi.data.length?divApi.data:(Array.isArray(fund.dividendHistory)&&fund.dividendHistory.length?fund.dividendHistory:(Array.isArray(fund.dividends)&&fund.dividends.length?fund.dividends:(Array.isArray(publicData.dividendHistory)&&publicData.dividendHistory.length?publicData.dividendHistory:(Array.isArray(publicData.dividends)?publicData.dividends:[]))))));const publicValue=(keys)=>{for(const row of publicRows){if(!row||typeof row!=='object')continue;for(const key of keys){const k=Object.keys(row).find(x=>x.toLowerCase().replace(/[^a-z0-9]/g,'')===key.toLowerCase().replace(/[^a-z0-9]/g,''));if(k&&row[k]!==null&&row[k]!==''&&row[k]!=='-')return row[k]}}return null};
     const useful=(...values)=>{let zero=null;for(const v of values){if(v===null||v===undefined||v===''||v==='-')continue;const n=typeof v==='number'?v:(typeof v==='string'&&v.trim()!==''?Number(v.replace(/,/g,'')):NaN);if(Number.isFinite(n)){if(n!==0)return v;zero=v;continue}return v}return zero};
     const histObj=xr.history||{};const hist=Array.isArray(histObj)?histObj:(histObj.data||histObj.history||histObj.rows||[]);
     const tech=(tr.technical||xr.technical?.technical||{});
     selectedRecord={...old,...market,...valuation,...performance,
       symbol:sym,name:old.name||old.companyName||fund.companyName||fund.name||sym,
-      price:old.price??old.ltp??market.ltp??market.price??valuation.ltp??tech.last,
-      changePercent:old.changePercent??old.percentageChange??market.changePercent??market.percentageChange,
-      volume:old.volume??market.volume??market.totalTradedQuantity,
-      turnover:old.turnover??market.turnover??market.totalTurnover,
-      previousClose:old.previousClose??market.previousClose,
+      price:old.price??old.ltp??old.lastTradedPrice??old.lastPrice??old.closePrice??market.ltp??market.price??valuation.ltp??tech.last,
+      changePercent:old.changePercent??old.percentageChange??old.pct??old.change??market.changePercent??market.percentageChange,
+      volume:old.volume??old.totalTradedQuantity??old.totalTradeQuantity??market.volume??market.totalTradedQuantity,
+      turnover:old.turnover??old.totalTradedValue??old.totalTradeValue??market.turnover??market.totalTurnover,
+      previousClose:old.previousClose??old.prev??old.previousPrice??market.previousClose,
       sector:old.sector||fund.sector||fund.profile?.sector||fund.profile?.sectorName,
       marketCap:useful(valuation.marketCap,performance.marketCap,market.marketCap,publicValue(['marketCap','market_cap','marketCapitalization'])),bookValue:useful(valuation.bookValue,performance.bookValue,latestFund.bookValue,latestFund.bookValuePerShare,publicValue(['bookValue','book_value','bookValuePerShare','netWorthPerShare','bvps'])),eps:useful(valuation.eps,performance.eps,latestFund.eps,latestFund.earningPerShare,publicValue(['eps','earningPerShare','earningsPerShare','basicEps'])),
       pe:useful(valuation.pe,performance.pe,latestFund.pe,publicValue(['pe','peRatio','priceEarningRatio','priceToEarnings'])),pb:useful(valuation.pb,valuation.pbv,performance.pb,performance.pbv,latestFund.pb,publicValue(['pb','pbv','pbRatio','priceBookRatio','priceToBook'])),dividend:valuation.cashDividend??valuation.dividend??performance.cashDividend??performance.dividend??publicValue(['cashDividend','cash_dividend','cashDividendPercent','cashDividendPercentage']),bonusDividend:valuation.bonusDividend??performance.bonusDividend??publicValue(['bonusDividend','bonus_dividend','bonusShare','bonus_share']),cashDividend:valuation.cashDividend??performance.cashDividend??publicValue(['cashDividend','cash_dividend','cashDividendPercent','cash_dividend_percent']),
@@ -4422,8 +4429,10 @@ async function load(){
       _xray:{ok:!!(xr.ok||tr.ok||fr.ok),historySource:tr.historySource||histObj.source||'unavailable',errors:[...((xr.errors)||[]),...((tr.errors)||[]),...((fr.errors)||[])]}
     };
     render();
-    if(!selectedRecord._xray.ok)toast('No research data returned for '+sym+'. Check backend availability and symbol.');
-  }catch(e){console.warn('Stock X-Ray load failed',e);toast('Could not load Stock X-Ray data. Check backend connection.');render()}
+    const hasUseful=!!(selectedRecord.price!=null||selectedRecord.eps!=null||selectedRecord.bookValue!=null||selectedRecord.history?.length||selectedRecord.dividendHistory?.length||selectedRecord.activityFloorsheet?.length);
+    $('sx7Status').textContent=hasUseful?'DATA LOADED · '+sym:'PARTIAL / NO SOURCE DATA · '+sym; $('sx7Dot').style.background=hasUseful?'#20a464':'#c0392b';
+    if(!hasUseful)toast('The backend responded but returned no usable data for '+sym+'. Check Render deployment and source availability.');
+  }catch(e){console.warn('Stock X-Ray load failed',e);$('sx7Status').textContent='BACKEND CONNECTION FAILED';$('sx7Dot').style.background='#c0392b';toast('Could not load Stock X-Ray data: '+(e?.message||'backend connection failed'));render()}
   finally{button.disabled=false;button.textContent='Analyze Stock'}
 }
 document.addEventListener('DOMContentLoaded',()=>{
