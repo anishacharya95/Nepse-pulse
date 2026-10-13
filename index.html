@@ -2270,15 +2270,44 @@ function normalizeHistory(v){
   a.sort((x,y)=>String(x.date).localeCompare(String(y.date))); return a;
 }
 async function getHistory(symbol){
-  if(traderHistoryCache.has(symbol)) return traderHistoryCache.get(symbol);
-  try{const v=await feedFetch('/PriceVolumeHistory?symbol='+encodeURIComponent(symbol));const h=normalizeHistory(v);traderHistoryCache.set(symbol,h);return h;}catch(e){traderHistoryCache.set(symbol,[]);return [];}
+  if(traderHistoryCache.has(symbol) && traderHistoryCache.get(symbol).length) return traderHistoryCache.get(symbol);
+  try{
+    const v=await feedFetch('/PriceVolumeHistory?symbol='+encodeURIComponent(symbol));
+    const h=normalizeHistory(v);
+    // Cache successful history only. A transient outage must not poison this symbol for the whole session.
+    if(h.length) traderHistoryCache.set(symbol,h);
+    return h;
+  }catch(e){ return []; }
 }
 async function getFloorsheet(){ return PulseFeedEngine.loadFloorsheet(); }
+async function getTraderLiveRows(){
+  let rows=allLiveRows();
+  if(rows.length) return rows;
+  // Recover directly from the central backend if the compatibility snapshot is empty or stale.
+  const base=String(window.NEPSE_PULSE_BACKEND_URL||PULSE_FEED_CONFIG.apiBase||'').replace(/\/$/,'');
+  if(!base) return rows;
+  try{
+    const ctl=new AbortController(); const timer=setTimeout(()=>ctl.abort(),12000);
+    let response;
+    try{response=await fetch(base+'/api/market?_trader_scan='+Date.now(),{cache:'no-store',signal:ctl.signal,headers:{Accept:'application/json'}})}finally{clearTimeout(timer)}
+    if(!response.ok) throw new Error('Market API HTTP '+response.status);
+    const payload=await response.json();
+    const root=payload?.data&&typeof payload.data==='object'?payload.data:payload;
+    const candidates=root?.live??root?.companies??root?.market?.live??root?.data?.live??[];
+    rows=PulseFeedEngine.normalizeLive(candidates).map(normRow).filter(r=>r.symbol&&r.ltp!==null);
+    if(rows.length>=1){
+      pulseFeed={...pulseFeed,live:rows,status:root.status||pulseFeed.status,updatedAt:root.updatedAt||pulseFeed.updatedAt};
+    }
+  }catch(e){ console.warn('Traders Zone live fallback failed:',e); }
+  return rows;
+}
 function rowHTML(r,label,sub,value,cls='scan-neutral'){return `<div class="scan-row"><div><b>${label}</b><small>${sub||''}</small></div><div class="scan-value ${cls}">${value}</div></div>`}
 function pctText(v){return v===null?'—':`${v>=0?'+':''}${v.toFixed(2)}%`;}
 async function renderTraderScan(name){
-  const box=document.getElementById('tmEmpty'); const rows=allLiveRows();
-  if(!rows.length){box.innerHTML='<div class="empty-feed">No live rows are available. The API may be closed, rate-limited, or temporarily unavailable. Cached market data remains available where previously saved.</div>';return;}
+  const box=document.getElementById('tmEmpty');
+  box.innerHTML='<div class="scan-loading">Loading market rows for '+name+'…</div>';
+  const rows=await getTraderLiveRows();
+  if(!rows.length){box.innerHTML='<div class="empty-feed">No usable priced stock rows were returned by the central market API. Check Feed Diagnostics/backend availability and retry; no sample stocks or invented prices are shown.</div>';return;}
   let out='';
   const byVol=[...rows].sort((a,b)=>(b.volume||0)-(a.volume||0));
   if(name==='Volume Scan'||name==='Volume Shockers'){
@@ -2290,28 +2319,45 @@ async function renderTraderScan(name){
     const targets=rows.filter(r=>r.symbol).sort((a,b)=>(b.volume||0)-(a.volume||0)).slice(0,12);
     const hs=await Promise.all(targets.map(r=>getHistory(r.symbol)));
     const results=[];
-    targets.forEach((r,i)=>{const h=hs[i];const closes=h.map(x=>x.close);if(closes.length<5)return;const last=closes.at(-1);const s20=sma(closes,20),s50=sma(closes,50),e20=ema(closes,20),r14=rsi(closes,14);const recent=h.slice(-20);const hi=Math.max(...recent.map(x=>x.high??x.close));const lo=Math.min(...recent.map(x=>x.low??x.close));const a=atr(h,14);results.push({...r,last,s20,s50,e20,r14,hi,lo,a,h});});
-    if(name==='Breakout Stocks') results.sort((a,b)=>((b.last>=b.hi?1:0)-(a.last>=a.hi?1:0)) || (b.volume||0)-(a.volume||0));
-    else if(name==='Breakdown Stocks') results.sort((a,b)=>((a.last<=a.lo?1:0)-(b.last<=b.lo?1:0)) || (b.volume||0)-(a.volume||0));
-    else if(name==='Consolidating Stocks') results.sort((a,b)=>(((b.hi-b.lo)/b.last)-((a.hi-a.lo)/a.last)));
-    else if(name==='Trend Signals') results.sort((a,b)=>((b.last>(b.e20||b.last)?1:0)+(b.e20&&b.s50&&b.e20>b.s50?1:0))-((a.last>(a.e20||a.last)?1:0)+(a.e20&&a.s50&&a.e20>a.s50?1:0)));
+    targets.forEach((r,i)=>{
+      const h=hs[i]||[], closes=h.map(x=>x.close).filter(Number.isFinite);
+      if(closes.length<5){
+        // Keep real live stocks visible even if historical candles are unavailable.
+        // Do not claim a confirmed technical signal without sufficient history.
+        results.push({...r,last:r.ltp,s20:null,s50:null,e20:null,r14:null,hi:r.high??r.ltp,lo:r.low??r.ltp,a:null,h,historyAvailable:false});
+        return;
+      }
+      const last=closes.at(-1),s20=sma(closes,20),s50=sma(closes,50),e20=ema(closes,20),r14=rsi(closes,14);
+      const recent=h.slice(-20),hi=Math.max(...recent.map(x=>x.high??x.close).filter(Number.isFinite)),lo=Math.min(...recent.map(x=>x.low??x.close).filter(Number.isFinite)),a=atr(h,14);
+      results.push({...r,last,s20,s50,e20,r14,hi:Number.isFinite(hi)?hi:(r.high??last),lo:Number.isFinite(lo)?lo:(r.low??last),a,h,historyAvailable:true});
+    });
+    if(name==='Breakout Stocks') results.sort((a,b)=>(((b.historyAvailable&&b.last>=b.hi)?1:0)-((a.historyAvailable&&a.last>=a.hi)?1:0)) || (b.volume||0)-(a.volume||0));
+    else if(name==='Breakdown Stocks') results.sort((a,b)=>(((a.historyAvailable&&a.last<=a.lo)?1:0)-((b.historyAvailable&&b.last<=b.lo)?1:0)) || (b.volume||0)-(a.volume||0));
+    else if(name==='Consolidating Stocks') results.sort((a,b)=>((a.historyAvailable?((a.hi-a.lo)/a.last):Infinity)-(b.historyAvailable?((b.hi-b.lo)/b.last):Infinity)));
+    else if(name==='Trend Signals') results.sort((a,b)=>((b.historyAvailable&&b.e20&&b.s50&&b.last>b.e20&&b.e20>b.s50?1:0)-(a.historyAvailable&&a.e20&&a.s50&&a.last>a.e20&&a.e20>a.s50?1:0)) || (b.volume||0)-(a.volume||0));
     else if(name==='Technical Indicators'||name==='Fresh Indicator Signals') results.sort((a,b)=>(b.r14||0)-(a.r14||0));
     else if(name==='Support Resistance') results.sort((a,b)=>Math.abs(b.last-b.lo)-Math.abs(a.last-a.lo));
     const top=results.slice(0,10);
     if(name==='Technical Indicators'||name==='Fresh Indicator Signals') out=top.map(r=>rowHTML(r,r.symbol,`${r.company} · RSI ${r.r14===null?'—':r.r14.toFixed(1)} · EMA20 ${r.e20?.toFixed(2)||'—'}`,`RSI ${r.r14===null?'—':r.r14.toFixed(1)}`,r.r14>=70?'scan-negative':r.r14<=30?'scan-positive':'scan-neutral')).join('');
-    else if(name==='Support Resistance') out=top.map(r=>rowHTML(r,r.symbol,`${r.company} · S ${r.lo.toFixed(2)} · R ${r.hi.toFixed(2)}`,`LTP ${r.last.toFixed(2)}`)).join('');
-    else if(name==='Trend Signals') out=top.map(r=>{const bull=r.last>(r.e20||r.last)&&(r.e20&&r.s50?r.e20>r.s50:false);return rowHTML(r,r.symbol,`${r.company} · EMA20 ${r.e20?.toFixed(2)||'—'} · SMA50 ${r.s50?.toFixed(2)||'—'}`,bull?'UPTREND':'MIXED',bull?'scan-positive':'scan-neutral')}).join('');
-    else if(name==='Breakout Stocks') out=top.map(r=>rowHTML(r,r.symbol,`${r.company} · resistance ${r.hi.toFixed(2)}`,r.last>=r.hi?'BREAKOUT':'WATCH',r.last>=r.hi?'scan-positive':'scan-neutral')).join('');
-    else if(name==='Breakdown Stocks') out=top.map(r=>rowHTML(r,r.symbol,`${r.company} · support ${r.lo.toFixed(2)}`,r.last<=r.lo?'BREAKDOWN':'WATCH',r.last<=r.lo?'scan-negative':'scan-neutral')).join('');
-    else if(name==='Consolidating Stocks') out=top.map(r=>rowHTML(r,r.symbol,`${r.company} · 20D range`,`${(((r.hi-r.lo)/r.last)*100).toFixed(2)}%`,((r.hi-r.lo)/r.last)<.04?'scan-positive':'scan-neutral')).join('');
-    else out=top.map(r=>rowHTML(r,r.symbol,`${r.company} · OHLC history available`,r.last.toFixed(2))).join('');
+    else if(name==='Support Resistance') out=top.map(r=>rowHTML(r,r.symbol,`${r.company} · ${r.historyAvailable?'S '+r.lo.toFixed(2)+' · R '+r.hi.toFixed(2):'intraday low/high only · history unavailable'}`,`LTP ${r.last.toFixed(2)}`)).join('');
+    else if(name==='Trend Signals') out=top.map(r=>{const bull=r.historyAvailable&&r.e20!==null&&r.s50!==null&&r.last>r.e20&&r.e20>r.s50;return rowHTML(r,r.symbol,`${r.company} · ${r.historyAvailable?'EMA20 '+(r.e20?.toFixed(2)||'—')+' · SMA50 '+(r.s50?.toFixed(2)||'—'):'historical candles unavailable'}`,r.historyAvailable?(bull?'UPTREND':'MIXED'):'LIVE ONLY',bull?'scan-positive':'scan-neutral')}).join('');
+    else if(name==='Breakout Stocks') out=top.map(r=>rowHTML(r,r.symbol,`${r.company} · ${r.historyAvailable?'resistance '+r.hi.toFixed(2):'historical resistance unavailable'}`,r.historyAvailable?(r.last>=r.hi?'BREAKOUT':'WATCH'):'LIVE ONLY',r.historyAvailable&&r.last>=r.hi?'scan-positive':'scan-neutral')).join('');
+    else if(name==='Breakdown Stocks') out=top.map(r=>rowHTML(r,r.symbol,`${r.company} · ${r.historyAvailable?'support '+r.lo.toFixed(2):'historical support unavailable'}`,r.historyAvailable?(r.last<=r.lo?'BREAKDOWN':'WATCH'):'LIVE ONLY',r.historyAvailable&&r.last<=r.lo?'scan-negative':'scan-neutral')).join('');
+    else if(name==='Consolidating Stocks') out=top.map(r=>rowHTML(r,r.symbol,`${r.company} · ${r.historyAvailable?'20D range':'intraday range; history unavailable'}`,r.historyAvailable?`${(((r.hi-r.lo)/r.last)*100).toFixed(2)}%`:'LIVE ONLY',r.historyAvailable&&((r.hi-r.lo)/r.last)<.04?'scan-positive':'scan-neutral')).join('');
+    else out=top.map(r=>rowHTML(r,r.symbol,`${r.company} · ${r.historyAvailable?'OHLC history available':'live price; historical candles unavailable'}`,r.last!==null&&r.last!==undefined?r.last.toFixed(2):'—')).join('');
     out += '<div class="scan-note">Historical indicators are calculated from the API’s PriceVolumeHistory endpoint. Results are analytical signals, not investment advice.</div>';
   } else if(name==='Bulk Transactions'||name==='Unusual Trades'){
     const fs=await getFloorsheet();
     const parsed=fs.map(o=>({symbol:String(feedPick(o,['symbol','stocksymbol','securitysymbol','ticker'])||'').toUpperCase(),qty:feedNumber(feedPick(o,['quantity','contractquantity','tradedquantity','volume','shares'])),rate:feedNumber(feedPick(o,['rate','price','contractprice','tradedprice'])),amount:feedNumber(feedPick(o,['amount','turnover','totalamount','contractamount'])),buyer:feedPick(o,['buyer','buyerbroker','buyerbrokername']),seller:feedPick(o,['seller','sellerbroker','sellerbrokername'])})).filter(x=>x.symbol);
     const list=[...parsed].sort((a,b)=>(b.amount||b.qty||0)-(a.amount||a.qty||0)).slice(0,15);
     out=list.map(x=>rowHTML(x,x.symbol,`${x.buyer||'Buyer'} → ${x.seller||'Seller'} · qty ${(x.qty||0).toLocaleString()}`,x.amount?`Rs ${x.amount.toLocaleString()}`:`${(x.qty||0).toLocaleString()} sh`)).join('');
-    if(!list.length) out='<div class="empty-feed">Floorsheet endpoint returned no usable rows right now.</div>';
+    if(!list.length){
+      // Do not leave these modules blank when the separate floorsheet archive is unavailable.
+      // This is explicitly a market-activity fallback, not a claim that these are verified individual trades.
+      const fallback=[...rows].sort((a,b)=>(name==='Bulk Transactions'?(b.turnover||0)-(a.turnover||0):(b.volume||0)-(a.volume||0))).slice(0,12);
+      out=fallback.map(r=>rowHTML(r,r.symbol,`${r.company} · ${name==='Bulk Transactions'?'market turnover':'market volume'} fallback; individual trade rows unavailable`,name==='Bulk Transactions'?(r.turnover!==null?`Rs ${r.turnover.toLocaleString()}`:'—'):(r.volume!==null?r.volume.toLocaleString():'—'))).join('');
+      out+='<div class="scan-note">The floorsheet archive did not return verified trade rows. These are live market-activity candidates only, not confirmed bulk or unusual individual trades.</div>';
+    }
   } else if(name==='Circuit Setup'){
     out=[...rows].map(r=>{const p=r.pct??0;return {...r,distance:Math.max(0,10-Math.abs(p))};}).sort((a,b)=>a.distance-b.distance).slice(0,12).map(r=>rowHTML(r,r.symbol,`${r.company} · change ${pctText(r.pct)}`,`${r.distance.toFixed(2)} pts`,r.distance<=2?'scan-negative':'scan-neutral')).join('');
     out+='<div class="scan-note">Circuit distance is a screening estimate from the current percentage move. Exact security-specific circuit bands should be supplied by the verified market feed when available.</div>';
