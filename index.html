@@ -2259,7 +2259,7 @@ function normRow(o){
   const pct=(change!==null && Math.abs(change)<1000) ? (Math.abs(change)<=20 ? change : (prev&&last ? ((last-prev)/prev)*100 : null)) : (prev&&last ? ((last-prev)/prev)*100 : null);
   return {raw:o,symbol,company,ltp:last,prev,open,high,low,volume,turnover,transactions,pct};
 }
-function allLiveRows(){return (pulseFeed.live||[]).map(normRow).filter(x=>x.symbol && x.ltp!==null);}
+function allLiveRows(){const primary=(pulseFeed.live||[]);const rows=primary.length?primary:(pulseFeed.companies||[]);return rows.map(normRow).filter(x=>x.symbol && x.ltp!==null);}
 function stat(arr,key){const a=arr.map(x=>Number(x[key])).filter(Number.isFinite); if(!a.length)return null; return {min:Math.min(...a),max:Math.max(...a),avg:a.reduce((s,v)=>s+v,0)/a.length};}
 function sma(vals,n){if(vals.length<n)return null;const a=vals.slice(-n);return a.reduce((s,v)=>s+v,0)/n;}
 function ema(vals,n){if(vals.length<n)return null;let e=vals.slice(0,n).reduce((s,v)=>s+v,0)/n;const k=2/(n+1);for(let i=n;i<vals.length;i++)e=vals[i]*k+e*(1-k);return e;}
@@ -2271,13 +2271,20 @@ function normalizeHistory(v){
 }
 async function getHistory(symbol){
   if(traderHistoryCache.has(symbol) && traderHistoryCache.get(symbol).length) return traderHistoryCache.get(symbol);
-  try{
-    const v=await feedFetch('/PriceVolumeHistory?symbol='+encodeURIComponent(symbol));
-    const h=normalizeHistory(v);
-    // Cache successful history only. A transient outage must not poison this symbol for the whole session.
-    if(h.length) traderHistoryCache.set(symbol,h);
-    return h;
-  }catch(e){ return []; }
+  const candidates=[
+    '/PriceVolumeHistory?symbol='+encodeURIComponent(symbol),
+    '/api/history/security/'+encodeURIComponent(symbol)+'?limit=5000'
+  ];
+  for(const path of candidates){
+    try{
+      const v=await feedFetch(path);
+      let h=normalizeHistory(v);
+      if(!h.length && v && typeof v==='object') h=normalizeHistory(v.data||v.rows||v.results||v.history||v.records||[]);
+      if(h.length){traderHistoryCache.set(symbol,h);return h;}
+    }catch(e){console.warn('History source failed for',symbol,path,e);}
+  }
+  // Do not cache empty history: retry on the next scan because the source may recover.
+  return [];
 }
 async function getFloorsheet(){ return PulseFeedEngine.loadFloorsheet(); }
 async function getTraderLiveRows(){
@@ -2307,7 +2314,7 @@ async function renderTraderScan(name){
   const box=document.getElementById('tmEmpty');
   box.innerHTML='<div class="scan-loading">Loading market rows for '+name+'…</div>';
   const rows=await getTraderLiveRows();
-  if(!rows.length){box.innerHTML='<div class="empty-feed">No usable priced stock rows were returned by the central market API. Check Feed Diagnostics/backend availability and retry; no sample stocks or invented prices are shown.</div>';return;}
+  if(!rows.length){box.innerHTML='<div class="empty-feed"><b>Market data could not be loaded.</b><br>This page may be opened as a downloaded content:// file, where browser requests can be blocked. Open the deployed GitHub Pages site instead, and confirm the Render backend is healthy. No sample stocks or invented prices are shown.</div>';return;}
   let out='';
   const byVol=[...rows].sort((a,b)=>(b.volume||0)-(a.volume||0));
   if(name==='Volume Scan'||name==='Volume Shockers'){
@@ -2316,9 +2323,9 @@ async function renderTraderScan(name){
   } else if(name==='Volatile Stocks'){
     out=[...rows].map(r=>({...r,range:r.high!==null&&r.low!==null&&r.ltp?r.high-r.low:null,rangePct:r.high&&r.low&&r.ltp?((r.high-r.low)/r.ltp)*100:null})).filter(r=>r.rangePct!==null).sort((a,b)=>b.rangePct-a.rangePct).slice(0,12).map(r=>rowHTML(r,r.symbol,`${r.company} · day range`,`${r.rangePct.toFixed(2)}%`,r.rangePct>5?'scan-positive':'scan-neutral')).join('');
   } else if(name==='Breakout Stocks'||name==='Breakdown Stocks'||name==='Support Resistance'||name==='Trend Signals'||name==='Technical Indicators'||name==='Fresh Indicator Signals'||name==='Consolidating Stocks'||name==='Candlestick Patterns'){
-    const targets=rows.filter(r=>r.symbol).sort((a,b)=>(b.volume||0)-(a.volume||0)).slice(0,12);
+    const targets=rows.filter(r=>r.symbol).sort((a,b)=>(b.volume||0)-(a.volume||0)).slice(0,60);
     const hs=await Promise.all(targets.map(r=>getHistory(r.symbol)));
-    const results=[];
+    let results=[];
     targets.forEach((r,i)=>{
       const h=hs[i]||[], closes=h.map(x=>x.close).filter(Number.isFinite);
       if(closes.length<5){
@@ -2331,18 +2338,41 @@ async function renderTraderScan(name){
       const recent=h.slice(-20),hi=Math.max(...recent.map(x=>x.high??x.close).filter(Number.isFinite)),lo=Math.min(...recent.map(x=>x.low??x.close).filter(Number.isFinite)),a=atr(h,14);
       results.push({...r,last,s20,s50,e20,r14,hi:Number.isFinite(hi)?hi:(r.high??last),lo:Number.isFinite(lo)?lo:(r.low??last),a,h,historyAvailable:true});
     });
-    if(name==='Breakout Stocks') results.sort((a,b)=>(((b.historyAvailable&&b.last>=b.hi)?1:0)-((a.historyAvailable&&a.last>=a.hi)?1:0)) || (b.volume||0)-(a.volume||0));
-    else if(name==='Breakdown Stocks') results.sort((a,b)=>(((a.historyAvailable&&a.last<=a.lo)?1:0)-((b.historyAvailable&&b.last<=b.lo)?1:0)) || (b.volume||0)-(a.volume||0));
-    else if(name==='Consolidating Stocks') results.sort((a,b)=>((a.historyAvailable?((a.hi-a.lo)/a.last):Infinity)-(b.historyAvailable?((b.hi-b.lo)/b.last):Infinity)));
-    else if(name==='Trend Signals') results.sort((a,b)=>((b.historyAvailable&&b.e20&&b.s50&&b.last>b.e20&&b.e20>b.s50?1:0)-(a.historyAvailable&&a.e20&&a.s50&&a.last>a.e20&&a.e20>a.s50?1:0)) || (b.volume||0)-(a.volume||0));
-    else if(name==='Technical Indicators'||name==='Fresh Indicator Signals') results.sort((a,b)=>(b.r14||0)-(a.r14||0));
-    else if(name==='Support Resistance') results.sort((a,b)=>Math.abs(b.last-b.lo)-Math.abs(a.last-a.lo));
+    // Use each scan's own qualifying conditions. Never show the same generic top-volume list as a signal.
+    const qualifiesBreakout = r => r.historyAvailable && r.h.length >= 21 && Number.isFinite(r.last) && Number.isFinite(r.resistance20) && r.last > r.resistance20;
+    const qualifiesBreakdown = r => r.historyAvailable && r.h.length >= 21 && Number.isFinite(r.last) && Number.isFinite(r.support20) && r.last < r.support20;
+    const freshSignal = r => {
+      if(!r.historyAvailable || r.h.length < 22 || r.r14===null || r.prevRsi===null || r.e20===null || r.prevE20===null) return null;
+      if(r.prevRsi>30 && r.r14<=30) return {label:'RSI crossed into oversold',kind:'scan-positive'};
+      if(r.prevRsi<70 && r.r14>=70) return {label:'RSI crossed into overbought',kind:'scan-negative'};
+      if(r.prevClose<=r.prevE20 && r.last>r.e20) return {label:'Price crossed above EMA20',kind:'scan-positive'};
+      if(r.prevClose>=r.prevE20 && r.last<r.e20) return {label:'Price crossed below EMA20',kind:'scan-negative'};
+      return null;
+    };
+    results.forEach(r=>{
+      const prior=r.h.slice(-21,-1);
+      const highs=prior.map(x=>x.high??x.close).filter(Number.isFinite), lows=prior.map(x=>x.low??x.close).filter(Number.isFinite);
+      r.resistance20=highs.length>=15?Math.max(...highs):null;
+      r.support20=lows.length>=15?Math.min(...lows):null;
+      const closes=r.h.map(x=>x.close).filter(Number.isFinite);
+      r.prevClose=closes.length>=2?closes[closes.length-2]:null;
+      r.prevE20=closes.length>=21?ema(closes.slice(0,-1),20):null;
+      r.prevRsi=closes.length>=16?rsi(closes.slice(0,-1),14):null;
+    });
+    if(name==='Breakout Stocks') results=results.filter(qualifiesBreakout).sort((a,b)=>(b.volume||0)-(a.volume||0));
+    else if(name==='Breakdown Stocks') results=results.filter(qualifiesBreakdown).sort((a,b)=>(b.volume||0)-(a.volume||0));
+    else if(name==='Consolidating Stocks') results=results.filter(r=>r.historyAvailable&&r.h.length>=20&&r.last>0&&((r.hi-r.lo)/r.last)<=0.04).sort((a,b)=>((a.hi-a.lo)/a.last)-((b.hi-b.lo)/b.last));
+    else if(name==='Trend Signals') results=results.filter(r=>r.historyAvailable&&r.e20!==null&&r.s50!==null&&r.last>r.e20&&r.e20>r.s50).sort((a,b)=>(b.volume||0)-(a.volume||0));
+    else if(name==='Fresh Indicator Signals') results=results.map(r=>({...r,fresh:freshSignal(r)})).filter(r=>r.fresh).sort((a,b)=>(b.volume||0)-(a.volume||0));
+    else if(name==='Technical Indicators') results=results.filter(r=>r.historyAvailable&&r.r14!==null&&r.e20!==null).sort((a,b)=>(b.r14||0)-(a.r14||0));
+    else if(name==='Support Resistance') results=results.filter(r=>r.historyAvailable&&r.support20!==null&&r.resistance20!==null).sort((a,b)=>Math.abs(b.last-b.support20)-Math.abs(a.last-a.support20));
     const top=results.slice(0,10);
-    if(name==='Technical Indicators'||name==='Fresh Indicator Signals') out=top.map(r=>rowHTML(r,r.symbol,`${r.company} · RSI ${r.r14===null?'—':r.r14.toFixed(1)} · EMA20 ${r.e20?.toFixed(2)||'—'}`,`RSI ${r.r14===null?'—':r.r14.toFixed(1)}`,r.r14>=70?'scan-negative':r.r14<=30?'scan-positive':'scan-neutral')).join('');
-    else if(name==='Support Resistance') out=top.map(r=>rowHTML(r,r.symbol,`${r.company} · ${r.historyAvailable?'S '+r.lo.toFixed(2)+' · R '+r.hi.toFixed(2):'intraday low/high only · history unavailable'}`,`LTP ${r.last.toFixed(2)}`)).join('');
+    if(name==='Technical Indicators') out=top.map(r=>rowHTML(r,r.symbol,`${r.company} · RSI ${r.r14.toFixed(1)} · EMA20 ${r.e20.toFixed(2)}`,`RSI ${r.r14.toFixed(1)}`,r.r14>=70?'scan-negative':r.r14<=30?'scan-positive':'scan-neutral')).join('');
+    else if(name==='Fresh Indicator Signals') out=top.map(r=>rowHTML(r,r.symbol,`${r.company} · ${r.fresh.label}`,`RSI ${r.r14.toFixed(1)}`,r.fresh.kind)).join('');
+    else if(name==='Support Resistance') out=top.map(r=>rowHTML(r,r.symbol,`${r.company} · S ${r.support20.toFixed(2)} · R ${r.resistance20.toFixed(2)}`,`LTP ${r.last.toFixed(2)}`)).join('');
     else if(name==='Trend Signals') out=top.map(r=>{const bull=r.historyAvailable&&r.e20!==null&&r.s50!==null&&r.last>r.e20&&r.e20>r.s50;return rowHTML(r,r.symbol,`${r.company} · ${r.historyAvailable?'EMA20 '+(r.e20?.toFixed(2)||'—')+' · SMA50 '+(r.s50?.toFixed(2)||'—'):'historical candles unavailable'}`,r.historyAvailable?(bull?'UPTREND':'MIXED'):'LIVE ONLY',bull?'scan-positive':'scan-neutral')}).join('');
-    else if(name==='Breakout Stocks') out=top.map(r=>rowHTML(r,r.symbol,`${r.company} · ${r.historyAvailable?'resistance '+r.hi.toFixed(2):'historical resistance unavailable'}`,r.historyAvailable?(r.last>=r.hi?'BREAKOUT':'WATCH'):'LIVE ONLY',r.historyAvailable&&r.last>=r.hi?'scan-positive':'scan-neutral')).join('');
-    else if(name==='Breakdown Stocks') out=top.map(r=>rowHTML(r,r.symbol,`${r.company} · ${r.historyAvailable?'support '+r.lo.toFixed(2):'historical support unavailable'}`,r.historyAvailable?(r.last<=r.lo?'BREAKDOWN':'WATCH'):'LIVE ONLY',r.historyAvailable&&r.last<=r.lo?'scan-negative':'scan-neutral')).join('');
+    else if(name==='Breakout Stocks') out=top.map(r=>rowHTML(r,r.symbol,`${r.company} · 20-session resistance ${r.resistance20.toFixed(2)} · LTP ${r.last.toFixed(2)}`,'BREAKOUT','scan-positive')).join('');
+    else if(name==='Breakdown Stocks') out=top.map(r=>rowHTML(r,r.symbol,`${r.company} · 20-session support ${r.support20.toFixed(2)} · LTP ${r.last.toFixed(2)}`,'BREAKDOWN','scan-negative')).join('');
     else if(name==='Consolidating Stocks') out=top.map(r=>rowHTML(r,r.symbol,`${r.company} · ${r.historyAvailable?'20D range':'intraday range; history unavailable'}`,r.historyAvailable?`${(((r.hi-r.lo)/r.last)*100).toFixed(2)}%`:'LIVE ONLY',r.historyAvailable&&((r.hi-r.lo)/r.last)<.04?'scan-positive':'scan-neutral')).join('');
     else out=top.map(r=>rowHTML(r,r.symbol,`${r.company} · ${r.historyAvailable?'OHLC history available':'live price; historical candles unavailable'}`,r.last!==null&&r.last!==undefined?r.last.toFixed(2):'—')).join('');
     out += '<div class="scan-note">Historical indicators are calculated from the API’s PriceVolumeHistory endpoint. Results are analytical signals, not investment advice.</div>';
@@ -2364,7 +2394,8 @@ async function renderTraderScan(name){
   } else if(name==='Players Choices'){
     out=[...rows].map(r=>({...r,score:(Math.abs(r.pct||0)*3)+Math.log10((r.volume||1)+1)*2+(r.turnover?Math.log10(r.turnover+1):0)})).sort((a,b)=>b.score-a.score).slice(0,10).map(r=>rowHTML(r,r.symbol,`${r.company} · ${pctText(r.pct)} · vol ${(r.volume||0).toLocaleString()}`,`Score ${r.score.toFixed(1)}`,r.pct>=0?'scan-positive':'scan-neutral')).join('');
   }
-  box.innerHTML=`<div class="scan-results">${out||'<div class="empty-feed">No qualifying securities were returned by this scan.</div>'}</div>`;
+  const noMatch=(name==='Breakout Stocks'||name==='Breakdown Stocks'||name==='Fresh Indicator Signals')?'No qualifying signals right now. These scans require sufficient historical candles and a confirmed condition; live-only stocks are intentionally excluded.':'No qualifying securities were returned by this scan.';
+  box.innerHTML=`<div class="scan-results">${out||'<div class="empty-feed">'+noMatch+'</div>'}</div>`;
 }
 
 const PULSE_AUTH_CONFIG = window.NEPSE_PULSE_AUTH || {supabaseUrl:'',supabaseAnonKey:''};
@@ -4786,7 +4817,7 @@ document.addEventListener('DOMContentLoaded',()=>{document.querySelectorAll('.mi
 <script id="pulse-technical-screener-v11-js">
 (function(){'use strict';
 const $=id=>document.getElementById(id); let all=[]; let preset='all'; let loaded=false;
-const base=()=>String(window.NEPSE_PULSE_BACKEND_URL||'').replace(/\/$/,'');
+const base=()=>String(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
 const n=v=>{const x=Number(v);return Number.isFinite(x)?x:null};
 const fmt=(v,d=2)=>{const x=n(v);return x==null?'—':x.toLocaleString(undefined,{maximumFractionDigits:d})};
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -6566,6 +6597,116 @@ body.v22-profile-tab-active .bottom.mobile-exact-bottom{z-index:10000}
 })();
 </script>
 
+
+<style id="pulse-home-market-unfreeze-fix">
+/* Recover the dashboard from stale Traders Zone / market overlays. */
+#traderModuleModal:not(.open), #tradersZoneModal:not(.open), #npAllMarket:not(.open), #pulseFeatureWorkspace:not(.open) { pointer-events:none !important; }
+#traderModuleModal.open, #tradersZoneModal.open, #npAllMarket.open, #pulseFeatureWorkspace.open { pointer-events:auto !important; }
+</style>
+<script id="pulse-home-market-unfreeze-fix-js">
+(function(){
+  function recoverOverlays(){
+    ['traderModuleModal','tradersZoneModal','npAllMarket','pulseFeatureWorkspace','featureDrawer'].forEach(function(id){
+      var el=document.getElementById(id);
+      if(el && (id==='traderModuleModal'||id==='tradersZoneModal'||id==='npAllMarket'||id==='pulseFeatureWorkspace'||id==='featureDrawer')) el.classList.remove('open');
+    });
+    // Only unlock the document after closing overlays; avoid leaving the page in a frozen scroll state.
+    document.body.style.removeProperty('overflow');
+    document.documentElement.style.removeProperty('overflow');
+    document.body.classList.remove('modal-open','no-scroll','scroll-locked');
+    document.querySelectorAll('.modal-backdrop,.overlay-backdrop').forEach(function(el){
+      if(!el.closest('.open')) el.style.pointerEvents='none';
+    });
+  }
+  var oldSetNav=window.setNav;
+  window.setNav=function(btn,name){
+    if(name==='Home'||name==='Markets'){
+      recoverOverlays();
+      // Hide stale modal states before switching the underlying page.
+      if(typeof window.PULSE_CLOSE_STALE_FEATURES==='function'){
+        try{window.PULSE_CLOSE_STALE_FEATURES()}catch(e){}
+      }
+    }
+    if(typeof oldSetNav==='function') return oldSetNav.apply(this,arguments);
+  };
+  var oldCloseTraderModule=window.closeTraderModule;
+  window.closeTraderModule=function(){
+    if(typeof oldCloseTraderModule==='function') oldCloseTraderModule.apply(this,arguments);
+    var el=document.getElementById('traderModuleModal'); if(el) el.classList.remove('open');
+    document.body.style.removeProperty('overflow'); document.documentElement.style.removeProperty('overflow');
+  };
+  var oldCloseTradersZone=window.closeTradersZone;
+  window.closeTradersZone=function(){
+    if(typeof oldCloseTradersZone==='function') oldCloseTradersZone.apply(this,arguments);
+    var el=document.getElementById('tradersZoneModal'); if(el) el.classList.remove('open');
+    document.body.style.removeProperty('overflow'); document.documentElement.style.removeProperty('overflow');
+  };
+  // Browser back/forward and page restore can retain a stale modal state on mobile browsers.
+  window.addEventListener('pageshow',function(){
+    setTimeout(function(){
+      var modalOpen=document.querySelector('#traderModuleModal.open, #tradersZoneModal.open');
+      if(!modalOpen){ document.body.style.removeProperty('overflow'); document.documentElement.style.removeProperty('overflow'); }
+    },0);
+  });
+})();
+</script>
+
+
+<!-- Final Home / Market navigation recovery: must run after all legacy routers. -->
+<style id="pulse-final-nav-recovery-css">
+#npAllMarket { pointer-events:auto; }
+#npAllMarket.open { display:flex !important; visibility:visible !important; pointer-events:auto !important; z-index:2147482000 !important; }
+#npAllMarket:not(.open) { pointer-events:none !important; }
+#traderModuleModal:not(.open), #tradersZoneModal:not(.open), #pulseFeatureWorkspace:not(.open), #featureDrawer:not(.open) { pointer-events:none !important; }
+#traderModuleModal.open, #tradersZoneModal.open, #pulseFeatureWorkspace.open, #featureDrawer.open { pointer-events:auto !important; }
+</style>
+<script id="pulse-final-nav-recovery-js">
+(function(){
+  'use strict';
+  function closeFeatureLayers(){
+    ['traderModuleModal','tradersZoneModal','stockXRayModal','pulseFeatureWorkspace','featureDrawer'].forEach(function(id){
+      var el=document.getElementById(id); if(el) el.classList.remove('open');
+    });
+    // Clear only the modal lock; do not hide the market screen that setNav may open next.
+    document.body.style.removeProperty('overflow');
+    document.documentElement.style.removeProperty('overflow');
+    document.body.classList.remove('modal-open','no-scroll','scroll-locked');
+    document.querySelectorAll('.modal-backdrop,.overlay-backdrop').forEach(function(el){
+      if(!el.closest('.open')) el.style.pointerEvents='none';
+    });
+  }
+  var priorSetNav=window.setNav;
+  window.setNav=function(btn,name){
+    if(name==='Home' || name==='Markets' || name==='Market'){
+      closeFeatureLayers();
+      // Prevent the exclusive workspace cleanup from leaving the Market container hidden.
+      var market=document.getElementById('npAllMarket');
+      if(market){market.classList.remove('open');market.style.removeProperty('display');market.style.removeProperty('visibility');}
+      if(typeof priorSetNav==='function') priorSetNav.apply(this,arguments);
+      if(name==='Markets' || name==='Market'){
+        var m=document.getElementById('npAllMarket');
+        if(m){m.style.removeProperty('display');m.style.removeProperty('visibility');m.classList.add('open');}
+        if(typeof window.npLoadAllMarket==='function') { try{window.npLoadAllMarket();}catch(e){} }
+      } else {
+        var m=document.getElementById('npAllMarket'); if(m){m.classList.remove('open');m.style.removeProperty('display');}
+        document.querySelectorAll('.nav button').forEach(function(x){x.classList.toggle('active',/Home/.test(x.textContent||''));});
+        window.scrollTo(0,0);
+      }
+      return;
+    }
+    if(typeof priorSetNav==='function') return priorSetNav.apply(this,arguments);
+  };
+  // Catch taps on the actual bottom-nav buttons as a safety net if a stale layer intercepts onclick.
+  document.addEventListener('click',function(e){
+    var b=e.target && e.target.closest && e.target.closest('.nav button, #v21-bottom-nav button');
+    if(!b) return;
+    var label=(b.textContent||'').trim();
+    if(/^Home$/i.test(label)){ closeFeatureLayers(); }
+    if(/^Market(s)?$/i.test(label)){ closeFeatureLayers(); }
+  },true);
+})();
+</script>
+
 </body>
 </html><script>
 // NEPSE Pulse Professional Charting V1 extension
@@ -7452,6 +7593,116 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',boot,{once:true}); else boot();
 })();
 </script>
+
+<style id="pulse-home-market-unfreeze-fix">
+/* Recover the dashboard from stale Traders Zone / market overlays. */
+#traderModuleModal:not(.open), #tradersZoneModal:not(.open), #npAllMarket:not(.open), #pulseFeatureWorkspace:not(.open) { pointer-events:none !important; }
+#traderModuleModal.open, #tradersZoneModal.open, #npAllMarket.open, #pulseFeatureWorkspace.open { pointer-events:auto !important; }
+</style>
+<script id="pulse-home-market-unfreeze-fix-js">
+(function(){
+  function recoverOverlays(){
+    ['traderModuleModal','tradersZoneModal','npAllMarket','pulseFeatureWorkspace','featureDrawer'].forEach(function(id){
+      var el=document.getElementById(id);
+      if(el && (id==='traderModuleModal'||id==='tradersZoneModal'||id==='npAllMarket'||id==='pulseFeatureWorkspace'||id==='featureDrawer')) el.classList.remove('open');
+    });
+    // Only unlock the document after closing overlays; avoid leaving the page in a frozen scroll state.
+    document.body.style.removeProperty('overflow');
+    document.documentElement.style.removeProperty('overflow');
+    document.body.classList.remove('modal-open','no-scroll','scroll-locked');
+    document.querySelectorAll('.modal-backdrop,.overlay-backdrop').forEach(function(el){
+      if(!el.closest('.open')) el.style.pointerEvents='none';
+    });
+  }
+  var oldSetNav=window.setNav;
+  window.setNav=function(btn,name){
+    if(name==='Home'||name==='Markets'){
+      recoverOverlays();
+      // Hide stale modal states before switching the underlying page.
+      if(typeof window.PULSE_CLOSE_STALE_FEATURES==='function'){
+        try{window.PULSE_CLOSE_STALE_FEATURES()}catch(e){}
+      }
+    }
+    if(typeof oldSetNav==='function') return oldSetNav.apply(this,arguments);
+  };
+  var oldCloseTraderModule=window.closeTraderModule;
+  window.closeTraderModule=function(){
+    if(typeof oldCloseTraderModule==='function') oldCloseTraderModule.apply(this,arguments);
+    var el=document.getElementById('traderModuleModal'); if(el) el.classList.remove('open');
+    document.body.style.removeProperty('overflow'); document.documentElement.style.removeProperty('overflow');
+  };
+  var oldCloseTradersZone=window.closeTradersZone;
+  window.closeTradersZone=function(){
+    if(typeof oldCloseTradersZone==='function') oldCloseTradersZone.apply(this,arguments);
+    var el=document.getElementById('tradersZoneModal'); if(el) el.classList.remove('open');
+    document.body.style.removeProperty('overflow'); document.documentElement.style.removeProperty('overflow');
+  };
+  // Browser back/forward and page restore can retain a stale modal state on mobile browsers.
+  window.addEventListener('pageshow',function(){
+    setTimeout(function(){
+      var modalOpen=document.querySelector('#traderModuleModal.open, #tradersZoneModal.open');
+      if(!modalOpen){ document.body.style.removeProperty('overflow'); document.documentElement.style.removeProperty('overflow'); }
+    },0);
+  });
+})();
+</script>
+
+
+<!-- Final Home / Market navigation recovery: must run after all legacy routers. -->
+<style id="pulse-final-nav-recovery-css">
+#npAllMarket { pointer-events:auto; }
+#npAllMarket.open { display:flex !important; visibility:visible !important; pointer-events:auto !important; z-index:2147482000 !important; }
+#npAllMarket:not(.open) { pointer-events:none !important; }
+#traderModuleModal:not(.open), #tradersZoneModal:not(.open), #pulseFeatureWorkspace:not(.open), #featureDrawer:not(.open) { pointer-events:none !important; }
+#traderModuleModal.open, #tradersZoneModal.open, #pulseFeatureWorkspace.open, #featureDrawer.open { pointer-events:auto !important; }
+</style>
+<script id="pulse-final-nav-recovery-js">
+(function(){
+  'use strict';
+  function closeFeatureLayers(){
+    ['traderModuleModal','tradersZoneModal','stockXRayModal','pulseFeatureWorkspace','featureDrawer'].forEach(function(id){
+      var el=document.getElementById(id); if(el) el.classList.remove('open');
+    });
+    // Clear only the modal lock; do not hide the market screen that setNav may open next.
+    document.body.style.removeProperty('overflow');
+    document.documentElement.style.removeProperty('overflow');
+    document.body.classList.remove('modal-open','no-scroll','scroll-locked');
+    document.querySelectorAll('.modal-backdrop,.overlay-backdrop').forEach(function(el){
+      if(!el.closest('.open')) el.style.pointerEvents='none';
+    });
+  }
+  var priorSetNav=window.setNav;
+  window.setNav=function(btn,name){
+    if(name==='Home' || name==='Markets' || name==='Market'){
+      closeFeatureLayers();
+      // Prevent the exclusive workspace cleanup from leaving the Market container hidden.
+      var market=document.getElementById('npAllMarket');
+      if(market){market.classList.remove('open');market.style.removeProperty('display');market.style.removeProperty('visibility');}
+      if(typeof priorSetNav==='function') priorSetNav.apply(this,arguments);
+      if(name==='Markets' || name==='Market'){
+        var m=document.getElementById('npAllMarket');
+        if(m){m.style.removeProperty('display');m.style.removeProperty('visibility');m.classList.add('open');}
+        if(typeof window.npLoadAllMarket==='function') { try{window.npLoadAllMarket();}catch(e){} }
+      } else {
+        var m=document.getElementById('npAllMarket'); if(m){m.classList.remove('open');m.style.removeProperty('display');}
+        document.querySelectorAll('.nav button').forEach(function(x){x.classList.toggle('active',/Home/.test(x.textContent||''));});
+        window.scrollTo(0,0);
+      }
+      return;
+    }
+    if(typeof priorSetNav==='function') return priorSetNav.apply(this,arguments);
+  };
+  // Catch taps on the actual bottom-nav buttons as a safety net if a stale layer intercepts onclick.
+  document.addEventListener('click',function(e){
+    var b=e.target && e.target.closest && e.target.closest('.nav button, #v21-bottom-nav button');
+    if(!b) return;
+    var label=(b.textContent||'').trim();
+    if(/^Home$/i.test(label)){ closeFeatureLayers(); }
+    if(/^Market(s)?$/i.test(label)){ closeFeatureLayers(); }
+  },true);
+})();
+</script>
+
 </body>
 </html>
 
@@ -7587,3 +7838,51 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
   document.addEventListener('keydown',e=>{if(e.key==='Escape' && workspace?.classList.contains('open')) closeExclusive();});
 })();
 </script>
+
+<style id="pulse-trader-scan-mobile-close-fix">
+/* Keep Traders Zone scans above the sticky site header and keep Close reachable on phones. */
+#traderModuleModal { z-index: 100001 !important; align-items: flex-start !important; padding-top: max(8px, env(safe-area-inset-top)) !important; }
+#traderModuleModal .module-sheet { position: relative !important; width: min(100%, 760px) !important; max-height: calc(100dvh - max(8px, env(safe-area-inset-top))) !important; margin: 0 auto !important; overflow-y: auto !important; padding-top: 14px !important; }
+#traderModuleModal .sheet-head { position: sticky !important; top: -14px !important; z-index: 100003 !important; padding: 10px 0 !important; background: #091221 !important; border-bottom: 1px solid #263650 !important; }
+#traderModuleModal .sheet-head .close { color: #fff !important; background: #17243a !important; border: 1px solid #8da0bd !important; opacity: 1 !important; font-weight: 700 !important; min-height: 40px !important; }
+</style>
+
+<style id="pulse-trader-module-fullscreen-fix">
+/* A Trader Zone scan is a dedicated screen, not a bottom-sheet overlay over Home. */
+#traderModuleModal {
+  position:fixed !important; inset:0 !important; z-index:2147483000 !important;
+  display:none; align-items:stretch !important; justify-content:stretch !important;
+  padding:0 !important; margin:0 !important;
+  background:#ffffff !important; background-color:#ffffff !important;
+  backdrop-filter:none !important; -webkit-backdrop-filter:none !important;
+  overflow:hidden !important;
+}
+#traderModuleModal.open { display:flex !important; }
+#traderModuleModal .module-sheet {
+  position:relative !important; flex:1 1 100% !important;
+  width:100% !important; max-width:none !important;
+  height:100vh !important; height:100dvh !important;
+  min-height:100vh !important; min-height:100dvh !important;
+  max-height:100vh !important; max-height:100dvh !important;
+  margin:0 !important; border-radius:0 !important; border:0 !important;
+  box-sizing:border-box !important; overflow-y:auto !important; overflow-x:hidden !important;
+  padding: max(12px, env(safe-area-inset-top)) 16px calc(18px + env(safe-area-inset-bottom)) !important;
+  background:#ffffff !important; color:#101828 !important;
+  box-shadow:none !important; overscroll-behavior:contain !important;
+}
+#traderModuleModal .sheet-head {
+  position:sticky !important; top:0 !important; z-index:20 !important;
+  display:flex !important; align-items:center !important; gap:12px !important;
+  margin:0 0 16px !important; padding:12px 0 !important;
+  background:#ffffff !important; color:#101828 !important;
+  border-bottom:1px solid #d0d5dd !important;
+}
+#traderModuleModal .sheet-head h2 { color:#101828 !important; flex:1 1 auto !important; }
+#traderModuleModal .sheet-head .close {
+  display:inline-flex !important; align-items:center !important; justify-content:center !important;
+  min-height:44px !important; padding:9px 16px !important;
+  color:#101828 !important; background:#ffffff !important;
+  border:1px solid #667085 !important; border-radius:10px !important;
+  opacity:1 !important; visibility:visible !important; font-weight:750 !important;
+}
+</style>
