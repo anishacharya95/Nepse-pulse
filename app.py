@@ -1871,12 +1871,22 @@ async def get_broker_analysis():
     return {"ok":False,"updatedAt":now_iso(),"data":[],"bySymbol":[],"sourceRows":0,"source":"NEPSE verified floorsheet","error":"No verified floorsheet rows returned"}
 
 async def get_history(symbol: str):
+    """Return normalized OHLCV rows for charting and technical indicators.
+
+    The production adapter can return NEPSE field names such as businessDate,
+    openPrice, highPrice, lowPrice, closePrice and totalTradedQuantity. The
+    technical indicator engine expects date/open/high/low/close/volume, so
+    normalize production rows before returning them.
+    """
     try:
-        rows = await production_call("history_ohlcv", symbol)
+        raw = await production_call("history_ohlcv", symbol)
+        rows = normalize_history_rows(raw)
+        # Do not report success for an unrecognized/empty payload; allow the
+        # existing multi-source history fallback to try other real sources.
         if rows:
             return {"ok": True, "symbol": symbol.upper(),
-                    "source": "nepse.py production history", "data": rows,
-                    "updatedAt": now_iso(), "errors": []}
+                    "source": "nepse.py production history (normalized OHLCV)",
+                    "data": rows, "updatedAt": now_iso(), "errors": []}
     except Exception as e:
         production_history_error = str(e)
     # Keep existing multi-source chart fallback.

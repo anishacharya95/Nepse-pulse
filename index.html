@@ -4829,56 +4829,47 @@ function setLoading(on,message='Loading live market rows and calculating indicat
 async function load(){
  if(isLoading)return;
  isLoading=true;const thisRequest=++requestNo;const started=Date.now();const dot=$('ts11Dot'),status=$('ts11Status');
- dot.style.background='#d29b19';status.textContent='SCANNING';setLoading(true,'Connecting to NEPSE Pulse and scanning stocks…');
- const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),45000);
+ dot.style.background='#d29b19';status.textContent='SCANNING';setLoading(true,'Connecting to NEPSE Pulse and loading live stocks…');
+ let lastError=null;
+ const norm=k=>String(k??'').toLowerCase().replace(/[^a-z0-9]/g,'');
+ const isObj=x=>x&&typeof x==='object'&&!Array.isArray(x);
+ const symbolKeys=['symbol','ticker','securitySymbol','stockSymbol','stock_symbol','symbolName','code','stockCode','scrip','securityCode'];
+ const extractRows=raw=>{
+  const hasSymbol=o=>isObj(o)&&symbolKeys.some(k=>{const v=Object.entries(o).find(([key])=>norm(key)===norm(k))?.[1];return v!==undefined&&v!==null&&String(v).trim()!==''});
+  if(Array.isArray(raw))return raw.filter(hasSymbol);
+  let best=[],seen=new Set();
+  const walk=(node,depth=0)=>{if(!node||typeof node!=='object'||depth>10||seen.has(node))return;seen.add(node);if(Array.isArray(node)){const a=node.filter(hasSymbol);if(a.length>best.length)best=a;for(const v of node)walk(v,depth+1);}else for(const v of Object.values(node))if(v&&typeof v==='object')walk(v,depth+1);};
+  walk(raw);return best;
+ };
+ const mapRows=rows=>rows.map(o=>{
+  const t=isObj(o.technicals)?o.technicals:o;const m=isObj(o.marketData)?o.marketData:(isObj(o.market_data)?o.market_data:o);
+  const pick=keys=>{for(const obj of [o,m,t])for(const k of keys){const found=Object.entries(obj||{}).find(([key,v])=>norm(key)===norm(k)&&v!==undefined&&v!==null&&v!=='');if(found)return found[1];}return null;};
+  return {...o,symbol:String(pick(symbolKeys)||'').toUpperCase().trim(),companyName:pick(['companyName','company','name','securityName','company_name','security_name'])||'',price:n(pick(['price','ltp','lastPrice','lastTradedPrice','close','closePrice','closingPrice'])),change:n(pick(['change','percentageChange','percentChange','percent_change','changePercent','perChange','pChange','changePercentage','change_percent','percentage_change'])),rsi:n(pick(['rsi'])),sma20:n(pick(['sma20'])),sma50:n(pick(['sma50'])),ema20:n(pick(['ema20'])),ema50:n(pick(['ema50'])),macd:n(pick(['macd'])),macdSignal:n(pick(['macdSignal','macd_signal'])),relativeVolume:n(pick(['relativeVolume','relative_volume'])),adx:n(pick(['adx'])),high52:n(pick(['high52','high52Week','high52week'])),historyPoints:n(pick(['historyPoints','history_points']))??0};
+ }).filter(x=>x.symbol);
  try{
-  const tf=encodeURIComponent($('ts11Tf').value||'D');let d=null;let lastError=null;
-  // Primary endpoint computes technical indicators and preserves live market rows.
-  try{const r=await fetch(base()+'/api/technical-screener?limit=150&technical=true&timeframe='+tf,{cache:'no-store',headers:{Accept:'application/json'},signal:controller.signal});if(!r.ok)throw new Error('technical-screener HTTP '+r.status);d=await r.json();}catch(e){lastError=e;}
-  if(thisRequest!==requestNo)return;
-  // Backend responses can be wrapped differently by the live-market provider.
-  // Search common envelope keys recursively instead of assuming data/results is a top-level array.
-  const extractRows=(raw)=>{
-   const norm=k=>String(k??'').toLowerCase().replace(/[^a-z0-9]/g,'');
-   const symbolKeys=new Set(['symbol','ticker','securitysymbol','stocksymbol','stocksymbol','symbolname','code','stockcode','scrip','securitycode']);
-   const isObj=x=>x&&typeof x==='object'&&!Array.isArray(x);
-   const valueFor=(obj,keys)=>{if(!isObj(obj))return null;const map=new Map(Object.entries(obj).map(([k,v])=>[norm(k),v]));for(const k of keys){const v=map.get(norm(k));if(v!==undefined&&v!==null&&String(v).trim()!=='')return v;}return null;};
-   const hasSymbol=x=>isObj(x)&&valueFor(x,[...symbolKeys])!==null;
-   if(Array.isArray(raw)&&raw.some(hasSymbol))return raw.filter(hasSymbol);
-   // API responses may wrap the list as {data:[...]}, {results:[...]}, or deeper envelopes.
-   const seen=new Set();let best=[];
-   const walk=(node,depth=0)=>{
-    if(!node||typeof node!=='object'||depth>12||seen.has(node))return;
-    seen.add(node);
-    if(Array.isArray(node)){
-     const candidate=node.filter(isObj);const matched=candidate.filter(hasSymbol);
-     if(matched.length>best.length)best=matched;
-     for(const item of node)walk(item,depth+1);
-     return;
-    }
-    for(const [key,value] of Object.entries(node)){
-     if(value&&typeof value==='object')walk(value,depth+1);
-    }
-   };
-   walk(raw);return best;
-  };
-  let rows=extractRows(d);
-  // If the technical endpoint is unavailable or returns no universe, recover actual live rows from the same backend.
-  if(!rows.some(o=>o&&String(Object.entries(o).find(([k,v])=>['symbol','ticker','securitysymbol','stocksymbol','code','scrip','securitycode'].includes(String(k).toLowerCase().replace(/[^a-z0-9]/g,''))&&v!=null&&String(v).trim()!=='')?.[1]??'').trim())){
-   for(const path of ['/LiveMarket','/api/market']){
-    try{const r=await fetch(base()+path,{cache:'no-store',headers:{Accept:'application/json'},signal:controller.signal});if(!r.ok)throw new Error(path+' HTTP '+r.status);const raw=await r.json();const candidate=extractRows(raw);if(candidate.some(o=>o&&Object.entries(o).some(([k,v])=>['symbol','ticker','securitysymbol','stocksymbol','symbolname','code','stockcode','scrip','securitycode'].includes(String(k).toLowerCase().replace(/[^a-z0-9]/g,''))&&v!==undefined&&v!==null&&String(v).trim()!==''))){rows=candidate;d={...(d||{}),count:candidate.length,universeCount:candidate.length,updatedAt:new Date().toISOString(),source:'Live market fallback: '+path};break;}}
-    catch(e){lastError=e;}
-   }
+  let rows=[],meta={};
+  // Fetch the known-fast live endpoint first. Do not let the slower indicator endpoint block all market rows.
+  for(const path of ['/LiveMarket','/api/market']){
+   const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),12000);
+   try{const r=await fetch(base()+path,{cache:'no-store',headers:{Accept:'application/json'},signal:controller.signal});if(!r.ok)throw new Error(path+' HTTP '+r.status);const raw=await r.json();const candidate=extractRows(raw);if(candidate.length){rows=candidate;meta={count:candidate.length,universeCount:candidate.length,updatedAt:new Date().toISOString(),source:'Live market: '+path};break;}}
+   catch(e){lastError=e;}finally{clearTimeout(timer);}
   }
   if(thisRequest!==requestNo)return;
-  all=rows.map(o=>{const t=o.technicals&&typeof o.technicals==='object'?o.technicals:o;const m=o.marketData&&typeof o.marketData==='object'?o.marketData:(o.market_data&&typeof o.market_data==='object'?o.market_data:o);const pick=(keys)=>{for(const k of keys){if(o[k]!==undefined&&o[k]!==null&&o[k]!=='')return o[k];if(m[k]!==undefined&&m[k]!==null&&m[k]!=='')return m[k];if(t[k]!==undefined&&t[k]!==null&&t[k]!=='')return t[k];}const wanted=keys.map(k=>k.toLowerCase());for(const obj of [o,m,t])for(const [k,v] of Object.entries(obj||{}))if(wanted.includes(k.toLowerCase())&&v!==undefined&&v!==null&&v!=='')return v;return null};return {...o,symbol:String(pick(['symbol','ticker','securitySymbol','stockSymbol','code','stock_symbol','scrip'])||'').toUpperCase().trim(),companyName:pick(['companyName','company','name','securityName','company_name','security_name'])||'',price:n(pick(['price','ltp','lastPrice','lastTradedPrice','close','closePrice','last_traded_price','closingPrice','ltp','lastTradedPrice'])),change:n(pick(['change','percentageChange','percentChange','percent_change','changePercent','perChange','pChange','changePercentage','change_percent','percentage_change','percentChange','percentageChange','perChange','pChange'])),rsi:n(pick(['rsi'])),sma20:n(pick(['sma20'])),sma50:n(pick(['sma50'])),ema20:n(pick(['ema20'])),ema50:n(pick(['ema50'])),macd:n(pick(['macd'])),macdSignal:n(pick(['macdSignal','macd_signal'])),relativeVolume:n(pick(['relativeVolume','relative_volume'])),adx:n(pick(['adx'])),high52:n(pick(['high52','high52Week','high52week'])),historyPoints:n(pick(['historyPoints','history_points']))??0};}).filter(x=>x.symbol);
-  loaded=true;dot.style.background=all.length?'#20a464':'#d29b19';status.textContent=all.length?(d&&d.source&&String(d.source).includes('fallback')?'LIVE ROWS · LIMITED TECHNICALS':'DATA READY'):'NO MARKET ROWS';
-  $('ts11Universe').textContent='Universe: '+fmt(d?.universeCount??d?.count??all.length,0)+' · loaded '+fmt(all.length,0);$('ts11Updated').textContent='Updated: '+new Date(d?.updatedAt||Date.now()).toLocaleTimeString();
-  if(!all.length){$('ts11Results').innerHTML='<tr><td colspan="13"><div class="ts11-empty">No market rows were returned by the screener or live-market endpoints. Please check the Render backend status and try again.</div></td></tr>';return;}
-  // Make first scan useful by default: live rows remain visible when candle history is unavailable.
-  render();
- }catch(e){if(thisRequest!==requestNo)return;dot.style.background='#c0392b';status.textContent='DATA UNAVAILABLE';$('ts11Universe').textContent='Universe: unavailable';$('ts11Updated').textContent='Updated: —';$('ts11Results').innerHTML='<tr><td colspan="13"><div class="ts11-empty">'+(e.name==='AbortError'?'Scan timed out after 45 seconds. Try again.':'Could not load market data: '+esc(e.message||'network error')+'. Check Render backend health and try again.')+'</div></td></tr>';console.warn('Technical screener',e,lastError);}
- finally{clearTimeout(timeout);const remain=600-(Date.now()-started);if(remain>0)await new Promise(resolve=>setTimeout(resolve,remain));if(thisRequest===requestNo){isLoading=false;setLoading(false);}}
+  if(rows.length){all=mapRows(rows);loaded=true;dot.style.background='#20a464';status.textContent='LIVE ROWS · LOADING INDICATORS';$('ts11Universe').textContent='Universe: '+fmt(meta.universeCount,0)+' · loaded '+fmt(all.length,0);$('ts11Updated').textContent='Updated: '+new Date().toLocaleTimeString();render();}
+  // Enrich the already-visible live rows with indicators. If this endpoint is slow or unavailable,
+  // keep the valid live market list rather than turning it into “NO MARKET ROWS”.
+  const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),18000);
+  try{
+   const tf=encodeURIComponent($('ts11Tf').value||'D');const r=await fetch(base()+'/api/technical-screener?limit=150&technical=true&timeframe='+tf,{cache:'no-store',headers:{Accept:'application/json'},signal:controller.signal});
+   if(!r.ok)throw new Error('technical-screener HTTP '+r.status);
+   const d=await r.json();const techRows=mapRows(extractRows(d));
+   if(techRows.length){const bySymbol=new Map(techRows.map(x=>[x.symbol,x]));all=all.map(x=>({...x,...(bySymbol.get(x.symbol)||{})}));meta={...meta,...d};}
+  }catch(e){lastError=e;}finally{clearTimeout(timer);}
+  if(thisRequest!==requestNo)return;
+  if(!all.length){dot.style.background='#c0392b';status.textContent='DATA UNAVAILABLE';$('ts11Universe').textContent='Universe: 0 · loaded 0';$('ts11Updated').textContent='Updated: —';$('ts11Results').innerHTML='<tr><td colspan="13"><div class="ts11-empty">Could not fetch live market rows. Please confirm the Render backend is awake and that its LiveMarket endpoint is reachable from this site.'+(lastError?' ('+esc(lastError.message||lastError)+')':'')+'</div></td></tr>';return;}
+  loaded=true;dot.style.background='#20a464';status.textContent=meta.source&&String(meta.source).includes('Live market')?'LIVE DATA READY':'DATA READY';$('ts11Universe').textContent='Universe: '+fmt(meta.universeCount??meta.count??all.length,0)+' · loaded '+fmt(all.length,0);$('ts11Updated').textContent='Updated: '+new Date(meta.updatedAt||Date.now()).toLocaleTimeString();render();
+ }catch(e){if(thisRequest!==requestNo)return;dot.style.background='#c0392b';status.textContent='DATA UNAVAILABLE';$('ts11Universe').textContent='Universe: unavailable';$('ts11Updated').textContent='Updated: —';$('ts11Results').innerHTML='<tr><td colspan="13"><div class="ts11-empty">Could not load market data: '+esc(e.message||'network error')+'. Check Render backend health and try again.</div></td></tr>';console.warn('Technical screener',e,lastError);}
+ finally{const remain=600-(Date.now()-started);if(remain>0)await new Promise(resolve=>setTimeout(resolve,remain));if(thisRequest===requestNo){isLoading=false;setLoading(false);}}
 }
 function reset(){['ts11Search','ts11RsiMin','ts11RsiMax','ts11RelVol','ts11MinCh','ts11NearHigh'].forEach(id=>$(id).value='');$('ts11SearchType').value='any';$('ts11Tf').value='D';$('ts11Trend').value='any';$('ts11MA').value='any';$('ts11Macd').value='any';$('ts11PriceSma').value='any';$('ts11Sort').value='score';$('ts11OnlyHistory').checked=false;preset='all';document.querySelectorAll('.ts11-preset').forEach(x=>x.classList.toggle('active',x.dataset.preset==='all'));if(loaded)render();else{$('ts11Status').textContent='READY';$('ts11Dot').style.background='#999';$('ts11Results').innerHTML='<tr><td colspan="13"><div class="ts11-empty">Press Run Scan when you are ready to scan the market.</div></td></tr>';}}
 function open(){const ws=$('pulseFeatureWorkspace'),body=$('pulseWorkspaceBody'),root=$('advanced-screener-v10'),title=$('pulseWorkspaceTitle');if(!ws||!body||!root)return;document.querySelectorAll('.pulse-feature-mounted').forEach(x=>{if(x!==root)x.classList.remove('pulse-feature-mounted')});root.classList.add('pulse-feature-mounted');root.style.removeProperty('display');body.appendChild(root);if(title)title.textContent='🔎 Technical Screener';ws.classList.add('open');if(!loaded&&!isLoading){$('ts11Status').textContent='READY';$('ts11Dot').style.background='#999';$('ts11Results').innerHTML='<tr><td colspan="13"><div class="ts11-empty">Set your conditions, then press Run Scan to load market data.</div></td></tr>';}}
