@@ -4839,35 +4839,39 @@ async function load(){
   // Backend responses can be wrapped differently by the live-market provider.
   // Search common envelope keys recursively instead of assuming data/results is a top-level array.
   const extractRows=(raw)=>{
-   const symbolKeys=['symbol','ticker','securitySymbol','stockSymbol','stock_symbol','symbolName','symbol_name','code','stockCode','stock_code','scrip','security_code','securityCode'];
+   const norm=k=>String(k??'').toLowerCase().replace(/[^a-z0-9]/g,'');
+   const symbolKeys=new Set(['symbol','ticker','securitysymbol','stocksymbol','stocksymbol','symbolname','code','stockcode','scrip','securitycode']);
    const isObj=x=>x&&typeof x==='object'&&!Array.isArray(x);
-   const score=arr=>arr.reduce((sum,x)=>sum+(isObj(x)&&symbolKeys.some(k=>x[k]!==undefined&&x[k]!==null&&String(x[k]).trim()!=='' )?1:0),0);
+   const valueFor=(obj,keys)=>{if(!isObj(obj))return null;const map=new Map(Object.entries(obj).map(([k,v])=>[norm(k),v]));for(const k of keys){const v=map.get(norm(k));if(v!==undefined&&v!==null&&String(v).trim()!=='')return v;}return null;};
+   const hasSymbol=x=>isObj(x)&&valueFor(x,[...symbolKeys])!==null;
+   if(Array.isArray(raw)&&raw.some(hasSymbol))return raw.filter(hasSymbol);
+   // API responses may wrap the list as {data:[...]}, {results:[...]}, or deeper envelopes.
    const seen=new Set();let best=[];
    const walk=(node,depth=0)=>{
-    if(!node||typeof node!=='object'||depth>9||seen.has(node))return;
+    if(!node||typeof node!=='object'||depth>12||seen.has(node))return;
     seen.add(node);
     if(Array.isArray(node)){
-     const candidate=node.filter(isObj);if(candidate.length&&score(candidate)>score(best))best=candidate;
+     const candidate=node.filter(isObj);const matched=candidate.filter(hasSymbol);
+     if(matched.length>best.length)best=matched;
      for(const item of node)walk(item,depth+1);
      return;
     }
-    const preferred=['data','results','rows','live','liveMarket','live_market','market','stocks','securities','items','payload','response','content','records','result'];
-    for(const key of preferred)if(node[key]!==undefined)walk(node[key],depth+1);
-    for(const [key,value] of Object.entries(node))if(!preferred.includes(key)&&value&&typeof value==='object')walk(value,depth+1);
+    for(const [key,value] of Object.entries(node)){
+     if(value&&typeof value==='object')walk(value,depth+1);
+    }
    };
-   walk(raw);
-   return best;
+   walk(raw);return best;
   };
   let rows=extractRows(d);
   // If the technical endpoint is unavailable or returns no universe, recover actual live rows from the same backend.
-  if(!rows.some(o=>o&&['symbol','ticker','securitySymbol','stockSymbol','stock_symbol','symbolName','symbol_name','code','stockCode','stock_code','scrip','security_code','securityCode'].some(k=>o[k]!==undefined&&o[k]!==null&&String(o[k]).trim()!==''))){
+  if(!rows.some(o=>o&&String(Object.entries(o).find(([k,v])=>['symbol','ticker','securitysymbol','stocksymbol','code','scrip','securitycode'].includes(String(k).toLowerCase().replace(/[^a-z0-9]/g,''))&&v!=null&&String(v).trim()!=='')?.[1]??'').trim())){
    for(const path of ['/LiveMarket','/api/market']){
-    try{const r=await fetch(base()+path,{cache:'no-store',headers:{Accept:'application/json'},signal:controller.signal});if(!r.ok)throw new Error(path+' HTTP '+r.status);const raw=await r.json();const candidate=extractRows(raw);if(candidate.some(o=>o&&['symbol','ticker','securitySymbol','stockSymbol','stock_symbol','symbolName','symbol_name','code','stockCode','stock_code','scrip','security_code','securityCode'].some(k=>o[k]!==undefined&&o[k]!==null&&String(o[k]).trim()!==''))){rows=candidate;d={...(d||{}),count:candidate.length,universeCount:candidate.length,updatedAt:new Date().toISOString(),source:'Live market fallback: '+path};break;}}
+    try{const r=await fetch(base()+path,{cache:'no-store',headers:{Accept:'application/json'},signal:controller.signal});if(!r.ok)throw new Error(path+' HTTP '+r.status);const raw=await r.json();const candidate=extractRows(raw);if(candidate.some(o=>o&&Object.entries(o).some(([k,v])=>['symbol','ticker','securitysymbol','stocksymbol','symbolname','code','stockcode','scrip','securitycode'].includes(String(k).toLowerCase().replace(/[^a-z0-9]/g,''))&&v!==undefined&&v!==null&&String(v).trim()!==''))){rows=candidate;d={...(d||{}),count:candidate.length,universeCount:candidate.length,updatedAt:new Date().toISOString(),source:'Live market fallback: '+path};break;}}
     catch(e){lastError=e;}
    }
   }
   if(thisRequest!==requestNo)return;
-  all=rows.map(o=>{const t=o.technicals&&typeof o.technicals==='object'?o.technicals:o;const m=o.marketData&&typeof o.marketData==='object'?o.marketData:(o.market_data&&typeof o.market_data==='object'?o.market_data:o);const pick=(keys)=>{for(const k of keys){if(o[k]!==undefined&&o[k]!==null&&o[k]!=='')return o[k];if(m[k]!==undefined&&m[k]!==null&&m[k]!=='')return m[k];if(t[k]!==undefined&&t[k]!==null&&t[k]!=='')return t[k];}return null};return {...o,symbol:String(pick(['symbol','ticker','securitySymbol','stockSymbol','code','stock_symbol','scrip'])||'').toUpperCase().trim(),companyName:pick(['companyName','company','name','securityName','company_name','security_name'])||'',price:n(pick(['price','ltp','lastPrice','lastTradedPrice','close','closePrice','last_traded_price','closingPrice'])),change:n(pick(['change','percentageChange','percentChange','percent_change','changePercent','perChange','pChange','changePercentage','change_percent','percentage_change'])),rsi:n(pick(['rsi'])),sma20:n(pick(['sma20'])),sma50:n(pick(['sma50'])),ema20:n(pick(['ema20'])),ema50:n(pick(['ema50'])),macd:n(pick(['macd'])),macdSignal:n(pick(['macdSignal','macd_signal'])),relativeVolume:n(pick(['relativeVolume','relative_volume'])),adx:n(pick(['adx'])),high52:n(pick(['high52','high52Week','high52week'])),historyPoints:n(pick(['historyPoints','history_points']))??0};}).filter(x=>x.symbol);
+  all=rows.map(o=>{const t=o.technicals&&typeof o.technicals==='object'?o.technicals:o;const m=o.marketData&&typeof o.marketData==='object'?o.marketData:(o.market_data&&typeof o.market_data==='object'?o.market_data:o);const pick=(keys)=>{for(const k of keys){if(o[k]!==undefined&&o[k]!==null&&o[k]!=='')return o[k];if(m[k]!==undefined&&m[k]!==null&&m[k]!=='')return m[k];if(t[k]!==undefined&&t[k]!==null&&t[k]!=='')return t[k];}const wanted=keys.map(k=>k.toLowerCase());for(const obj of [o,m,t])for(const [k,v] of Object.entries(obj||{}))if(wanted.includes(k.toLowerCase())&&v!==undefined&&v!==null&&v!=='')return v;return null};return {...o,symbol:String(pick(['symbol','ticker','securitySymbol','stockSymbol','code','stock_symbol','scrip'])||'').toUpperCase().trim(),companyName:pick(['companyName','company','name','securityName','company_name','security_name'])||'',price:n(pick(['price','ltp','lastPrice','lastTradedPrice','close','closePrice','last_traded_price','closingPrice','ltp','lastTradedPrice'])),change:n(pick(['change','percentageChange','percentChange','percent_change','changePercent','perChange','pChange','changePercentage','change_percent','percentage_change','percentChange','percentageChange','perChange','pChange'])),rsi:n(pick(['rsi'])),sma20:n(pick(['sma20'])),sma50:n(pick(['sma50'])),ema20:n(pick(['ema20'])),ema50:n(pick(['ema50'])),macd:n(pick(['macd'])),macdSignal:n(pick(['macdSignal','macd_signal'])),relativeVolume:n(pick(['relativeVolume','relative_volume'])),adx:n(pick(['adx'])),high52:n(pick(['high52','high52Week','high52week'])),historyPoints:n(pick(['historyPoints','history_points']))??0};}).filter(x=>x.symbol);
   loaded=true;dot.style.background=all.length?'#20a464':'#d29b19';status.textContent=all.length?(d&&d.source&&String(d.source).includes('fallback')?'LIVE ROWS · LIMITED TECHNICALS':'DATA READY'):'NO MARKET ROWS';
   $('ts11Universe').textContent='Universe: '+fmt(d?.universeCount??d?.count??all.length,0)+' · loaded '+fmt(all.length,0);$('ts11Updated').textContent='Updated: '+new Date(d?.updatedAt||Date.now()).toLocaleTimeString();
   if(!all.length){$('ts11Results').innerHTML='<tr><td colspan="13"><div class="ts11-empty">No market rows were returned by the screener or live-market endpoints. Please check the Render backend status and try again.</div></td></tr>';return;}
