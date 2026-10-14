@@ -4838,41 +4838,61 @@ async function load(){
  isLoading=true;const thisRequest=++requestNo;const started=Date.now();
  const dot=$('ts11Dot'),status=$('ts11Status');
  dot.style.background='#d29b19';status.textContent='SCANNING';
- setLoading(true,'Loading historical prices and calculating technical indicators…');
+ all=[];loaded=false;
+ setLoading(true,'Connecting to NEPSE and loading the first batch…');
  try{
   const tf=encodeURIComponent($('ts11Tf').value||'D');
-  const controller=new AbortController();
-  const timer=setTimeout(()=>controller.abort(),90000);
-  let response, payload;
-  try{
-   response=await fetch(base()+'/api/technical-screener?limit=100&technical=true&timeframe='+tf,{cache:'no-store',headers:{Accept:'application/json'},signal:controller.signal});
-   if(!response.ok)throw new Error('Technical Screener API returned HTTP '+response.status);
-   payload=await response.json();
-  }finally{clearTimeout(timer);}
+  const batchSize=6;let offset=0;let universeCount=null;let latestPayload=null;let hadBatchError=false;
+  // Small requests prevent a single large historical-data request from hanging.
+  // Render after every batch so useful rows remain visible while later batches load.
+  while(offset<500){
+   if(thisRequest!==requestNo)return;
+   setLoading(true,`Scanning stocks ${offset+1}${universeCount?'–'+Math.min(offset+batchSize,universeCount):'–'+(offset+batchSize)}${universeCount?' of '+universeCount:''}…`);
+   const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),45000);
+   let payload;
+   try{
+    const response=await fetch(base()+'/api/technical-screener?limit='+batchSize+'&offset='+offset+'&technical=true&timeframe='+tf,{cache:'no-store',headers:{Accept:'application/json'},signal:controller.signal});
+    if(!response.ok)throw new Error('Technical Screener API returned HTTP '+response.status);
+    payload=await response.json();
+   }finally{clearTimeout(timer);}
+   if(thisRequest!==requestNo)return;
+   latestPayload=payload;
+   const rawRows=Array.isArray(payload)?payload:(Array.isArray(payload?.data)?payload.data:(Array.isArray(payload?.results)?payload.results:(Array.isArray(payload?.rows)?payload.rows:extractRows(payload))));
+   const mapped=mapRows(rawRows);
+   if(universeCount==null)universeCount=Math.max(0,Number(payload.universeCount??payload.count??mapped.length)||0);
+   if(mapped.length){
+    const seen=new Set(all.map(x=>String(x.symbol||'').toUpperCase()));
+    for(const row of mapped){const sym=String(row.symbol||'').toUpperCase();if(sym&&!seen.has(sym)){all.push(row);seen.add(sym);}}
+    loaded=true;render();
+    $('ts11Universe').textContent='Universe: '+fmt(universeCount,0)+' · loaded '+fmt(all.length,0);
+    $('ts11Updated').textContent='Updated: '+new Date(payload.updatedAt||Date.now()).toLocaleTimeString();
+    const hasIndicators=all.some(x=>x.rsi!=null||x.sma20!=null||x.sma50!=null||x.ema20!=null||x.ema50!=null||x.macd!=null||x.relativeVolume!=null||x.adx!=null);
+    dot.style.background=hasIndicators?'#20a464':'#d29b19';status.textContent=hasIndicators?'SCANNING · INDICATORS READY':'SCANNING · LOADING INDICATORS';
+   }
+   if(!mapped.length||mapped.length<batchSize)break;
+   offset+=batchSize;
+   if(universeCount!=null&&offset>=universeCount)break;
+  }
   if(thisRequest!==requestNo)return;
-  // The backend already returns the live row and its calculated indicators together.
-  // Use that response directly; merging a separate live-market response can silently
-  // lose indicators when the two feeds use different symbols or naming conventions.
-  const rawRows=Array.isArray(payload)?payload:
-    (Array.isArray(payload?.data)?payload.data:
-    (Array.isArray(payload?.results)?payload.results:
-    (Array.isArray(payload?.rows)?payload.rows:extractRows(payload))));
-  all=mapRows(rawRows);
-  if(!all.length)throw new Error('The API returned JSON but no stock rows with recognizable symbols.');
-  loaded=true;
+  if(!all.length)throw new Error('The API returned no recognizable stock rows.');
   const hasIndicators=all.some(x=>x.rsi!=null||x.sma20!=null||x.sma50!=null||x.ema20!=null||x.ema50!=null||x.macd!=null||x.relativeVolume!=null||x.adx!=null);
   dot.style.background=hasIndicators?'#20a464':'#d29b19';
-  status.textContent=hasIndicators?'INDICATORS READY':'HISTORICAL INDICATORS MISSING';
-  $('ts11Universe').textContent='Universe: '+fmt(payload.universeCount??payload.count??all.length,0)+' · loaded '+fmt(all.length,0);
-  $('ts11Updated').textContent='Updated: '+new Date(payload.updatedAt||Date.now()).toLocaleTimeString();
+  status.textContent=hadBatchError?'PARTIAL RESULTS':(hasIndicators?'INDICATORS READY':'HISTORICAL INDICATORS MISSING');
+  $('ts11Universe').textContent='Universe: '+fmt(universeCount??all.length,0)+' · loaded '+fmt(all.length,0);
+  $('ts11Updated').textContent='Updated: '+new Date(latestPayload?.updatedAt||Date.now()).toLocaleTimeString();
   render();
-  if(!hasIndicators)console.warn('Technical Screener API returned rows without mapped indicators',payload);
  }catch(e){
   if(thisRequest!==requestNo)return;
-  dot.style.background='#c0392b';status.textContent='DATA UNAVAILABLE';
-  $('ts11Universe').textContent='Universe: unavailable';$('ts11Updated').textContent='Updated: —';
-  $('ts11Results').innerHTML='<tr><td colspan="13"><div class="ts11-empty">Could not load technical data. Please try Run Scan again.</div></td></tr>';
-  console.warn('Technical screener API failed',e);
+  if(all.length){
+   // Keep already fetched rows visible if a later batch times out.
+   loaded=true;dot.style.background='#d29b19';status.textContent='PARTIAL RESULTS';
+   $('ts11Universe').textContent='Partial scan · loaded '+fmt(all.length,0)+' stocks';render();
+  }else{
+   dot.style.background='#c0392b';status.textContent='DATA UNAVAILABLE';
+   $('ts11Universe').textContent='Universe: unavailable';$('ts11Updated').textContent='Updated: —';
+   $('ts11Results').innerHTML='<tr><td colspan="13"><div class="ts11-empty">Could not load market rows. Please try Run Scan again.</div></td></tr>';
+  }
+  console.warn('Technical screener batch scan failed',e);
  }finally{
   const remain=600-(Date.now()-started);if(remain>0)await new Promise(resolve=>setTimeout(resolve,remain));
   if(thisRequest===requestNo){isLoading=false;setLoading(false);}

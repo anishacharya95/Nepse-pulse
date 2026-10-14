@@ -3905,6 +3905,7 @@ def _technical_snapshot(rows: list[dict]):
 @app.get('/api/technical-screener')
 async def technical_screener(
     limit: int = Query(60, ge=1, le=500),
+    offset: int = Query(0, ge=0, le=10000),
     technical: bool = Query(True),
     timeframe: str = Query('D'),
     search: str = Query('', max_length=80),
@@ -3920,7 +3921,7 @@ async def technical_screener(
     tf = str(timeframe or 'D').upper()
     q = str(search or '').strip().upper()
     st = str(search_type or 'any').lower()
-    key = f'technical-screener:{limit}:{technical}:{tf}:{st}:{q}'
+    key = f'technical-screener:{limit}:{offset}:{technical}:{tf}:{st}:{q}'
 
     async def load():
         errors = []
@@ -3983,15 +3984,15 @@ async def technical_screener(
                                 pass
                 except Exception as exc:
                     errors.append(f'resolve search symbol: {exc}')
-        else:
-            live = sorted(live, key=turnover_key, reverse=True)[:limit]
-
-        # Preserve the true universe size before the responsive browser slice.
-        universe_count = len(live)
-        # Search results are intentionally small; all-stock scans are capped
-        # for responsiveness while still showing real live market rows.
+        # Count the complete filtered universe before taking this response's
+        # slice. The browser requests small offsets so each response stays fast.
         if q:
-            live = live[:max(1, min(limit, 25))]
+            universe_count = len(live)
+            live = live[offset:offset + max(1, min(limit, 25))]
+        else:
+            live = sorted(live, key=turnover_key, reverse=True)
+            universe_count = len(live)
+            live = live[offset:offset + limit]
 
         sem = asyncio.Semaphore(8)
         async def one(r):
