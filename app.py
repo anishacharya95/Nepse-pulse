@@ -2244,7 +2244,30 @@ async def get_floorsheet(symbol: Optional[str] = None):
 # Preserve original implementations as explicit fallbacks.
 @app.get("/api/company-floorsheet/{symbol}")
 async def api_company_floorsheet(symbol: str, limit: int = Query(100000, ge=1, le=100000)):
-    rows = await get_floorsheet(symbol.upper().strip())
+    wanted = symbol.upper().strip()
+    rows = await get_floorsheet(wanted)
+
+    # If the live company-specific provider is temporarily empty, serve the
+    # most recent persisted floorsheet rows for this symbol before returning
+    # an empty result. This avoids a false "could not fetch" state when the
+    # collector has already stored the trades locally.
+    if not rows:
+        try:
+            _floor_db_init()
+            with sqlite3.connect(FLOOR_CACHE_DB) as db:
+                latest = db.execute(
+                    "SELECT MAX(business_date) FROM floorsheet_raw WHERE UPPER(symbol)=?",
+                    (wanted,)
+                ).fetchone()
+            cached_day = str(latest[0])[:10] if latest and latest[0] else None
+            if cached_day:
+                cached_count = _floor_count(cached_day, wanted)
+                if cached_count:
+                    rows = _read_floor_rows(cached_day, wanted, limit=min(limit, cached_count), offset=0)
+        except Exception:
+            # Keep the endpoint available even if the local cache is not ready.
+            rows = rows or []
+
     rows = rows[:limit]
     return {
         "ok": bool(rows),

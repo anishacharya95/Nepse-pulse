@@ -1458,7 +1458,14 @@ body{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",san
 </style>
 <style id="npco-company-logo-style">.npco-company-logo{width:42px;height:42px;flex:0 0 42px;object-fit:contain;border-radius:50%;background:#fff;border:1px solid #dce5e9;padding:4px}.npco-company-logo-fallback{width:42px;height:42px;flex:0 0 42px;align-items:center;justify-content:center;border-radius:50%;background:#e8f3f6;color:#176b78;font-weight:800}#npCompanyPage .npco-header{gap:10px}</style><!-- TradingView Advanced Charts: official hosted runtime (latest) -->
 <script id="pulse-tradingview-hosted-runtime" type="text/javascript" src="https://charting-library.tradingview-widget.com/charting_library/charting_library.standalone.js"></script>
-<style id="npco-stock-info-final-fix">#npcoContent{display:block!important;visibility:visible!important}#npcoContent .npco-live-chart-card,#npcoContent .npco-fund-card,#npcoContent .npco-card{display:block!important;visibility:visible!important}#npcoContent .npco-fund-grid{display:grid!important}#npcoContent .npco-metric b,#npcoContent .npco-fund-item b{display:block!important;visibility:visible!important}.npco-company-chart{display:block!important;width:100%!important;height:220px!important}</style><style id="npco-premium-data-style">#npcoContent{display:block!important}.npco-section-title{font-size:15px;font-weight:850;margin-bottom:10px}.npco-live-chart-card{order:-1!important}.npco-source-note{margin-bottom:18px}.npco-metric{background:#f7fafc;border-radius:11px;padding:11px}.npco-metric b{display:block;margin-top:4px}</style></head>
+<style id="npco-stock-info-final-fix">#npcoContent{display:block!important;visibility:visible!important}#npcoContent .npco-live-chart-card,#npcoContent .npco-fund-card,#npcoContent .npco-card{display:block!important;visibility:visible!important}#npcoContent .npco-fund-grid{display:grid!important}#npcoContent .npco-metric b,#npcoContent .npco-fund-item b{display:block!important;visibility:visible!important}.npco-company-chart{display:block!important;width:100%!important;height:220px!important}</style><style id="npco-premium-data-style">#npcoContent{display:block!important}.npco-section-title{font-size:15px;font-weight:850;margin-bottom:10px}.npco-live-chart-card{order:-1!important}.npco-source-note{margin-bottom:18px}.npco-metric{background:#f7fafc;border-radius:11px;padding:11px}.npco-metric b{display:block;margin-top:4px}</style>
+<style id="npco-loading-animation-fix">
+.npco-loading-state{display:flex;align-items:center;gap:12px;min-height:58px;padding:16px 18px;border-radius:16px;background:#fff;border:1px solid #dce5ec;color:#536473}
+.npco-loading-spinner{width:22px;height:22px;flex:0 0 22px;border:3px solid #d8e6f0;border-top-color:#2879b8;border-radius:50%;animation:npcoSpin .8s linear infinite}
+@keyframes npcoSpin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.npco-loading-spinner{animation-duration:2s}}
+</style>
+</head>
 <body>
 <div id="nepse-pulse-splash" aria-label="NEPSE Pulse loading">
   <img src="splash.png" alt="NEPSE Pulse — Real Time Nepal Share Market">
@@ -4869,9 +4876,9 @@ async function load(){
    meta={...meta,...d};}
   }catch(e){lastError=e;}finally{clearTimeout(timer);}
   if(thisRequest!==requestNo)return;
-  if(!all.length){dot.style.background='#c0392b';status.textContent='DATA UNAVAILABLE';$('ts11Universe').textContent='Universe: 0 · loaded 0';$('ts11Updated').textContent='Updated: —';$('ts11Results').innerHTML='<tr><td colspan="13"><div class="ts11-empty">Could not fetch market data. Please try again later.'+(lastError?' ('+esc(lastError.message||lastError)+')':'')+'</div></td></tr>';return;}
-  loaded=true;dot.style.background='#20a464';const hasIndicators=all.some(x=>x.rsi!=null||x.sma20!=null||x.sma50!=null||x.ema20!=null||x.ema50!=null||x.macd!=null||x.relativeVolume!=null||x.adx!=null);status.textContent=hasIndicators?'DATA READY':'INDICATORS UNAVAILABLE';$('ts11Universe').textContent='Universe: '+fmt(meta.universeCount??meta.count??all.length,0)+' · loaded '+fmt(all.length,0);$('ts11Updated').textContent='Updated: '+new Date(meta.updatedAt||Date.now()).toLocaleTimeString();render();if(!hasIndicators){$('ts11Results').insertAdjacentHTML('beforebegin','<tr><td colspan=13><div class="ts11-empty">Technical indicator data could not be fetched. Please try again later.</div></td></tr>');}
- }catch(e){if(thisRequest!==requestNo)return;dot.style.background='#c0392b';status.textContent='DATA UNAVAILABLE';$('ts11Universe').textContent='Universe: unavailable';$('ts11Updated').textContent='Updated: —';$('ts11Results').innerHTML='<tr><td colspan="13"><div class="ts11-empty">Could not load market data: '+esc(e.message||'network error')+'. Check Render backend health and try again.</div></td></tr>';console.warn('Technical screener',e,lastError);}
+  if(!all.length){dot.style.background='#c0392b';status.textContent='DATA UNAVAILABLE';$('ts11Universe').textContent='Universe: 0 · loaded 0';$('ts11Updated').textContent='Updated: —';$('ts11Results').innerHTML='';return;}
+  loaded=true;dot.style.background='#20a464';const hasIndicators=all.some(x=>x.rsi!=null||x.sma20!=null||x.sma50!=null||x.ema20!=null||x.ema50!=null||x.macd!=null||x.relativeVolume!=null||x.adx!=null);status.textContent=hasIndicators?'DATA READY':'INDICATORS UNAVAILABLE';$('ts11Universe').textContent='Universe: '+fmt(meta.universeCount??meta.count??all.length,0)+' · loaded '+fmt(all.length,0);$('ts11Updated').textContent='Updated: '+new Date(meta.updatedAt||Date.now()).toLocaleTimeString();render();/* Keep the table clean when indicators are unavailable; render placeholders only. */
+ }catch(e){if(thisRequest!==requestNo)return;dot.style.background='#c0392b';status.textContent='DATA UNAVAILABLE';$('ts11Universe').textContent='Universe: unavailable';$('ts11Updated').textContent='Updated: —';$('ts11Results').innerHTML='';console.warn('Technical screener data unavailable',e,lastError);}
  finally{const remain=600-(Date.now()-started);if(remain>0)await new Promise(resolve=>setTimeout(resolve,remain));if(thisRequest===requestNo){isLoading=false;setLoading(false);}}
 }
 function reset(){['ts11Search','ts11RsiMin','ts11RsiMax','ts11RelVol','ts11MinCh','ts11NearHigh'].forEach(id=>$(id).value='');$('ts11SearchType').value='any';$('ts11Tf').value='D';$('ts11Trend').value='any';$('ts11MA').value='any';$('ts11Macd').value='any';$('ts11PriceSma').value='any';$('ts11Sort').value='score';$('ts11OnlyHistory').checked=false;preset='all';document.querySelectorAll('.ts11-preset').forEach(x=>x.classList.toggle('active',x.dataset.preset==='all'));if(loaded)render();else{$('ts11Status').textContent='READY';$('ts11Dot').style.background='#999';$('ts11Results').innerHTML='<tr><td colspan="13"><div class="ts11-empty">Press Run Scan when you are ready to scan the market.</div></td></tr>';}}
@@ -6922,7 +6929,8 @@ input,select{background:#fff!important;color:var(--text)!important}
  async function resolveSymbol(q){const up=q.trim().toUpperCase();if(/^[A-Z0-9&.-]{2,12}$/.test(up))return up;try{const d=await get('/CompanyList');const rows=arr(d);const hit=rows.find(r=>[r.companyName,r.securityName,r.name,r.company_name].some(v=>String(v||'').trim().toLowerCase()===q.trim().toLowerCase()));return String(hit?.symbol||hit?.symbolName||hit?.securitySymbol||hit?.security_code||'').toUpperCase()||up}catch(e){return up}}
  window.npCloseCompany=()=>root.classList.remove('open');
  window.npOpenCompany=async function(sym){symbol=String(sym||'').trim().toUpperCase();if(!symbol)return;cache={};root.classList.add('open');document.getElementById('npcoSymbol').textContent=symbol;document.getElementById('npcoName').textContent='Loading company data…';await show('info')};
- async function show(tab){document.querySelectorAll('#npcoTabs button').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));content.innerHTML='<div class="npco-card">Loading '+esc(tab)+'…</div>';try{
+ function npcoLoading(label){return '<div class="npco-loading-state" role="status" aria-live="polite"><span class="npco-loading-spinner" aria-hidden="true"></span><span>Loading '+esc(label)+'…</span></div>'}
+ async function show(tab){document.querySelectorAll('#npcoTabs button').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));content.innerHTML=npcoLoading(tab);try{
   const live=liveRow(symbol);let html='';
   if(tab==='info') {
     // Prefer the normalized endpoint, but NEVER let an older deployed backend
@@ -7151,7 +7159,11 @@ input,select{background:#fff!important;color:var(--text)!important}
         ' right now. The application will not substitute historical or fabricated orders.</div>';
     }
   } else if(tab==='floorsheet'){
-    const d=await get('/api/company-floorsheet/'+encodeURIComponent(symbol)+'?_t='+Date.now()).catch(()=>get('/FloorsheetOf?symbol='+encodeURIComponent(symbol)+'&_t='+Date.now()).catch(()=>null));
+    const timedFetch=(promise,ms=18000)=>Promise.race([promise,new Promise((_,reject)=>setTimeout(()=>reject(new Error('request timeout')),ms))]);
+    let d=null;
+    try{d=await timedFetch(get('/api/company-floorsheet/'+encodeURIComponent(symbol)+'?limit=5000&_t='+Date.now()));}catch(e){}
+    if(!d){try{d=await timedFetch(get('/FloorsheetOf?symbol='+encodeURIComponent(symbol)+'&_t='+Date.now()));}catch(e){}}
+    if(!d){html='<div class="npco-card npco-note">Could not fetch floorsheet data for '+esc(symbol)+'. Please try again later.</div>';content.innerHTML=html;return;}
     let all=arr(d?.data??d?.rows??d);
     const dayOf=r=>{
       const v=r?.businessDate??r?.tradeDate??r?.date??r?.calculationDate??r?.raw?.businessDate??r?.raw?.tradeDate??r?.raw?.date;
