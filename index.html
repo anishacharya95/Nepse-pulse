@@ -2054,7 +2054,20 @@ const PulseFeedEngine = (()=>{
     return false;
   };
   const setStatus=(s,e)=>{state.status=s;state.lastError=e||null;window.PULSE_FEED_STATUS=s;window.PULSE_FEED_TIMESTAMP=state.updatedAt||'—';emit()};
-  const applySnapshot=(d)=>{
+  const applySnapshot=(payload)=>{
+    // Some deployed API versions wrap the market snapshot in data/snapshot/market.
+    // Unwrap only object wrappers and preserve the actual live rows and metadata.
+    let d=payload;
+    for(let i=0;i<3&&d&&typeof d==='object'&&!Array.isArray(d);i++){
+      if(Array.isArray(d.live)||Array.isArray(d.liveMarket)||Array.isArray(d.LiveMarket)||Array.isArray(d.companies)||Array.isArray(d.stocks))break;
+      const next=[d.data,d.snapshot,d.market,d.result].find(x=>x&&typeof x==='object'&&!Array.isArray(x));
+      if(!next)break;d=next;
+    }
+    if(!d||typeof d!=='object')throw new Error('Market API returned an unexpected JSON shape');
+    if(!Array.isArray(d.live)){
+      const candidate=[d.liveMarket,d.LiveMarket,d.stocks,d.securities,d.rows,d.results,d.data?.live,d.market?.live].find(Array.isArray);
+      if(candidate)d={...d,live:candidate};
+    }
     const rows=normalizeLive(d.live);
     const usable=rows.filter(x=>x.ltp!==null);
     if(usable.length<20)throw new Error('NEPSE API returned insufficient live price rows ('+usable.length+')');
@@ -3339,24 +3352,30 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
     return null;
   }
   function normalize(o){
-    const symbol=text(field(o,['symbol','Symbol','ticker','Ticker','securitySymbol','security'])).toUpperCase();
-    const name=text(field(o,['companyName','CompanyName','name','Name','securityName','company']));
-    const price=n(field(o,['lastPrice','LastPrice','ltp','LTP','closePrice','ClosePrice','price','Price']));
-    const change=pct(field(o,['percentageChange','PercentageChange','percentChange','PercentChange','changePercent','ChangePercent','change','Change']));
-    const volume=n(field(o,['totalTradedQuantity','TotalTradedQuantity','volume','Volume','quantity','Quantity']));
-    const turnover=n(field(o,['totalTradedValue','TotalTradedValue','turnover','Turnover','value','Value']));
-    const history=field(o,['history','prices','priceHistory','PriceHistory']);
-    const tech=(o.technicals&&typeof o.technicals==='object')?o.technicals:((o.technical&&typeof o.technical==='object')?o.technical:{});
-    const get=(keys)=>{const a=field(o,keys);return a!==null?a:field(tech,keys)};
-    const rsiValue=n(get(['rsi','RSI','rsi14','relativeStrengthIndex']));
-    const trendValue=get(['trend','trendLabel','technicalTrend']);
-    const signalValue=get(['signal','technicalSignal','recommendation','tradeSignal']);
-    const pointChange=n(get(['pointChange','changeValue','priceChange','difference']));
-    const prev=n(get(['previousClose','previousClosingPrice','prevClose','previousPrice']));
-    const pct=change!==null?change:((pointChange!==null&&prev!==null&&prev!==0)?pointChange/prev*100:null);
-    return {raw:o,symbol,name,price,change:pct,volume,turnover,history,rsi:rsiValue,trend:trendValue,signal:signalValue,
-      sma20:n(get(['sma20','sma_20'])),ema20:n(get(['ema20','ema_20'])),ema50:n(get(['ema50','ema_50'])),
-      historyPoints:n(get(['historyPoints','history_points','historyCount']))};
+    if(!o||typeof o!=='object')return {raw:o,symbol:'',name:'',price:null,change:null,volume:null,turnover:null,history:[],rsi:null,trend:null,signal:null,sma20:null,ema20:null,ema50:null,historyPoints:0};
+    const nested=[o.technicals,o.technical,o.indicators,o.technicalIndicators,o.technical_indicators,o.indicator,o.metrics].filter(x=>x&&typeof x==='object'&&!Array.isArray(x));
+    const fieldDeep=(keys)=>{const direct=field(o,keys);if(direct!==null)return direct;for(const obj of nested){const v=field(obj,keys);if(v!==null)return v;}return null;};
+    const symbol=text(fieldDeep(['symbol','Symbol','ticker','Ticker','securitySymbol','security_symbol','stockSymbol','tradingSymbol','securityCode','security_code','code','scrip','security'])).toUpperCase();
+    const name=text(fieldDeep(['companyName','CompanyName','company_name','name','Name','securityName','security_name','company','issuerName']))||symbol;
+    const price=n(fieldDeep(['lastPrice','LastPrice','lastTradedPrice','last_traded_price','ltp','LTP','closePrice','ClosePrice','close_price','currentPrice','current_price','close','price','Price']));
+    let change=n(fieldDeep(['percentageChange','percentage_change','percentChange','percent_change','changePercent','change_percent','perChange','pChange','changePercentage','changePct','pctChange','pct_change']));
+    const volume=n(fieldDeep(['totalTradedQuantity','total_traded_quantity','totalTradeQuantity','totalTradeQty','volume','Volume','quantity','Quantity','shareVolume','tradedShares']));
+    const turnover=n(fieldDeep(['totalTradedValue','total_traded_value','totalTradeValue','turnover','Turnover','totalTurnover','amount','value','Value']));
+    const history=fieldDeep(['history','prices','priceHistory','price_history','PriceHistory','candles','ohlc']);
+    const rsiValue=n(fieldDeep(['rsi','RSI','rsi14','rsi_14','RSI14','relativeStrengthIndex','relative_strength_index']));
+    const trendValue=fieldDeep(['trend','trendLabel','trend_label','technicalTrend','technical_trend','direction','trendSignal']);
+    const signalValue=fieldDeep(['signal','technicalSignal','technical_signal','recommendation','tradeSignal','trade_signal','action']);
+    const pointChange=n(fieldDeep(['pointChange','point_change','changeValue','change_value','priceChange','price_change','difference']));
+    const prev=n(fieldDeep(['previousClose','previous_close','previousClosingPrice','previousDayClosePrice','previous_day_close_price','prevClose','prev_close','previousPrice']));
+    if(change===null&&pointChange!==null&&prev!==null&&prev!==0)change=pointChange/prev*100;
+    if(change===null&&price!==null&&prev!==null&&prev!==0)change=(price-prev)/prev*100;
+    const numberFor=(keys)=>n(fieldDeep(keys));
+    return {raw:o,symbol,name,price,change,volume,turnover,history,rsi:rsiValue,trend:trendValue,signal:signalValue,
+      sma20:numberFor(['sma20','sma_20','SMA20','sma20Value','sma_20_value']),sma50:numberFor(['sma50','sma_50','SMA50','sma50Value']),
+      ema20:numberFor(['ema20','ema_20','EMA20','ema20Value']),ema50:numberFor(['ema50','ema_50','EMA50','ema50Value']),
+      macd:numberFor(['macd','MACD']),macdSignal:numberFor(['macdSignal','macd_signal','macd_signal_line','signalLine']),
+      relativeVolume:numberFor(['relativeVolume','relative_volume','relVolume']),adx:numberFor(['adx','ADX']),
+      historyPoints:numberFor(['historyPoints','history_points','historyCount','history_count'])??(Array.isArray(history)?history.length:0)};
   }
 
   function historyFor(r){
@@ -3385,7 +3404,7 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
     const rawTrend=r.trend==null?'':String(r.trend).toLowerCase();
     const trend=rawTrend.includes('bull')?'bullish':rawTrend.includes('bear')?'bearish':rawTrend.includes('neutral')?'neutral':((e20!==null && e50!==null)?(e20>e50?'bullish':e20<e50?'bearish':'neutral'):(r.change!==null?(r.change>0?'bullish':r.change<0?'bearish':'neutral'):'unknown'));
     let signal=r.signal==null?'':String(r.signal);
-    if(!signal){if(rv!==null && rv<30)signal='Oversold';else if(rv!==null && rv>70)signal='Overbought';else if(e20!==null && e50!==null && e20>e50 && r.price!==null && r.price>e20)signal='Bullish';else if(e20!==null && e50!==null && e20<e50 && r.price!==null && r.price<e20)signal='Bearish';else if(r.change!==null && r.change>=4)signal='Momentum';else signal='Watch';}
+    if(!signal){if(rv!==null && rv<30)signal='Oversold';else if(rv!==null && rv>70)signal='Overbought';else if(r.macd!==null && r.macdSignal!==null && r.macd>r.macdSignal && trend==='bullish')signal='Bullish';else if(r.macd!==null && r.macdSignal!==null && r.macd<r.macdSignal && trend==='bearish')signal='Bearish';else if(e20!==null && e50!==null && e20>e50 && r.price!==null && r.price>e20)signal='Bullish';else if(e20!==null && e50!==null && e20<e50 && r.price!==null && r.price<e20)signal='Bearish';else if(r.change!==null && r.change>=4)signal='Momentum';else signal='Watch';}
     return {...r,rsi:rv,sma20:s20,ema20:e20,ema50:e50,trend,signal};
   }
 
@@ -3486,7 +3505,7 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
       const btn=q('sqRun'); if(btn.dataset.busy==='1')return; btn.dataset.busy='1'; const old=btn.innerHTML; btn.disabled=true; btn.innerHTML='<span class="sq-spinner" aria-hidden="true"></span>Scanning…'; q('sqFeedText').textContent='Scanning feed…'; q('sqFeedDot').style.background='#d29b19'; q('sqRows').innerHTML='<tr><td colspan="8" class="sq-empty"><span class="sq-spinner" aria-hidden="true"></span>Loading market rows and applying filters…</td></tr>';
       try{
         const base=String(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
-        const response=await fetch(base+'/api/technical-screener?limit=60&offset=0&technical=true&timeframe=D&_screener_run='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});
+        const response=await fetch(base+'/api/technical-screener?limit=10&offset=0&technical=true&timeframe=D&_screener_run='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});
         if(!response.ok)throw new Error('Technical Screener API HTTP '+response.status);
         const payload=await response.json();
         const marketRows=Array.isArray(payload?.data)?payload.data:(Array.isArray(payload?.results)?payload.results:(Array.isArray(payload?.rows)?payload.rows:[]));
@@ -3500,8 +3519,8 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
     ['sqSearch','sqMinChange','sqMaxChange','sqMinVolume','sqMinTurnover','sqRsi','sqTrend','sqSort'].forEach(id=>{const el=q(id);if(el&&!el.dataset.sqBound){el.dataset.sqBound='1';el.addEventListener('input',render);el.addEventListener('change',render);}});
     if(!window.__sqFeedListenersBound){window.__sqFeedListenersBound=true;window.addEventListener('pulse-central-snapshot',e=>sync(e.detail||{}));window.addEventListener('pulse-feed-update',()=>{const st=window.PULSE_FEED_ENGINE?.state?.();if(st)sync(st);});}
     const engine=window.PULSE_FEED_ENGINE||window.PULSE_FEED;const st=engine?.state?.();
-    if(st&&(st.live?.length||st.companies?.length||st.status==='LIVE'||st.status==='CACHED')) sync(st); else { q('sqFeedText').textContent='Connecting…'; }
-    q('sqFeedText').textContent='Connecting…';q('sqFeedDot').style.background='#d29b19';
+    if(st&&(st.live?.length||st.companies?.length||st.status==='LIVE'||st.status==='CACHED')) sync(st);
+    else { q('sqFeedText').textContent='Connecting…';q('sqFeedDot').style.background='#d29b19'; }
     // The dashboard can receive /api/market successfully even when an older
     // Central Feed status/event is stale. Verify the same endpoint directly and
     // adapt its common response shapes for this workspace only.
@@ -3509,13 +3528,31 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
     async function ensureScreenerSnapshot(force=false){
       if(directFeedAttempted&&!force)return;directFeedAttempted=true;
       const base=String(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
+      // Prefer the backend's technical endpoint: /api/screener-feed may contain
+      // prices only, which leaves RSI/Trend blank even when technicals are available.
+      try{
+        const technicalResponse=await fetch(base+'/api/technical-screener?limit=10&offset=0&technical=true&timeframe=D&_quant_boot='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});
+        if(technicalResponse.ok){
+          const technicalPayload=await technicalResponse.json();
+          const technicalRows=Array.isArray(technicalPayload?.data)?technicalPayload.data:(Array.isArray(technicalPayload?.results)?technicalPayload.results:(Array.isArray(technicalPayload?.rows)?technicalPayload.rows:[]));
+          if(technicalRows.length){
+            sync({status:'LIVE',live:technicalRows,companies:technicalRows,updatedAt:technicalPayload.updatedAt||new Date().toISOString(),source:technicalPayload.source});
+            q('sqFeedText').textContent='LIVE · '+technicalRows.length+' rows · indicators';q('sqFeedDot').style.background='#20a464';return;
+          }
+        }
+      }catch(technicalError){console.warn('Technical screener bootstrap failed; falling back to screener feed:',technicalError);}
       const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),22000);
       try{
         const response=await fetch(base+'/api/screener-feed?_screener='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'},signal:controller.signal});
         if(!response.ok)throw new Error('Market API returned HTTP '+response.status);
         const payload=await response.json();
-        const root=payload?.data&&typeof payload.data==='object'?payload.data:payload;
-        const candidates=[root.live,root.liveMarket,root.LiveMarket,root.companies,root.stocks,root.securities,root.data,root.results,root.rows,root.records];
+        let root=payload?.data&&typeof payload.data==='object'&&!Array.isArray(payload.data)?payload.data:payload;
+        for(let depth=0;depth<3&&root&&typeof root==='object'&&!Array.isArray(root);depth++){
+          if(['live','liveMarket','LiveMarket','companies','stocks','securities','results','rows','records'].some(k=>Array.isArray(root[k])))break;
+          const nested=[root.snapshot,root.market,root.result,root.response].find(v=>v&&typeof v==='object'&&!Array.isArray(v));
+          if(!nested)break;root=nested;
+        }
+        const candidates=[root.live,root.liveMarket,root.LiveMarket,root.companies,root.stocks,root.securities,root.data,root.results,root.rows,root.records,root.items,root.payload,root.marketData];
         let marketRows=candidates.find(Array.isArray)||[];
         if(!marketRows.length&&root&&typeof root==='object')marketRows=Object.values(root).find(Array.isArray)||[];
         marketRows=marketRows.filter(x=>x&&typeof x==='object');
@@ -4909,34 +4946,41 @@ function extractRows(payload, depth=0){
  return [];
 }
 function mapRows(rawRows){
- const read=(obj,keys)=>{for(const key of keys){const v=obj?.[key];if(v!==undefined&&v!==null&&v!=='' )return v;}return null;};
- const numeric=(v)=>{if(v===undefined||v===null||v==='')return null;const n=Number(v);return Number.isFinite(n)?n:null;};
+ const read=(obj,keys)=>{for(const key of keys){const v=obj?.[key];if(v!==undefined&&v!==null&&v!=='')return v;}return null;};
+ const numeric=(v)=>{if(v===undefined||v===null||v==='')return null;const n=Number(String(v).replace(/,/g,''));return Number.isFinite(n)?n:null;};
  return (Array.isArray(rawRows)?rawRows:[]).map(row=>{
   if(!row||typeof row!=='object')return null;
-  const tech=row.technicals&&typeof row.technicals==='object'?row.technicals:(row.technical&&typeof row.technical==='object'?row.technical:{});
-  const pick=(keys)=>{const v=read(row,keys);return v!==null?v:read(tech,keys);};
-  const symbol=String(pick(['symbol','ticker','securitySymbol','stockSymbol','code','security_code'])??'').trim().toUpperCase();
+  const techObjects=[row.technicals,row.technical,row.indicators,row.technicalIndicators,row.technical_indicators,row.indicator,row.metrics].filter(v=>v&&typeof v==='object'&&!Array.isArray(v));
+  const readAny=(keys)=>{const v=read(row,keys);if(v!==null)return v;for(const obj of techObjects){const nested=read(obj,keys);if(nested!==null)return nested;}return null;};
+  const symbol=String(readAny(['symbol','ticker','securitySymbol','security_symbol','stockSymbol','stock_symbol','code','securityCode','security_code','tradingSymbol','trading_symbol','scrip','security'])??'').trim().toUpperCase();
   if(!symbol)return null;
+  const price=numeric(readAny(['price','ltp','lastPrice','last_price','lastTradedPrice','last_traded_price','close','closePrice','close_price','currentPrice','current_price']));
+  let change=numeric(readAny(['percentageChange','percentage_change','percentChange','percent_change','changePercent','change_percent','perChange','pChange','changePercentage','changePct','pctChange','pct_change']));
+  const previous=numeric(readAny(['previousClose','previous_close','prevClose','prev_close','previousClosingPrice','previousDayClosePrice','previous_day_close_price','previousPrice']));
+  if(change===null){const abs=numeric(readAny(['pointChange','point_change','changeValue','change_value','priceChange','price_change','difference','change','Change']));if(abs!==null&&previous!==null&&previous!==0)change=abs/previous*100;else if(price!==null&&previous!==null&&previous!==0)change=(price-previous)/previous*100;}
+  const rsi=numeric(readAny(['rsi','rsi14','rsi_14','RSI','RSI14','relativeStrengthIndex','relative_strength_index']));
+  const trendValue=readAny(['trend','trendLabel','trend_label','technicalTrend','technical_trend','direction','trendSignal']);
+  const signalValue=readAny(['signal','technicalSignal','technical_signal','recommendation','tradeSignal','trade_signal','action']);
   return {...row,
    symbol,
-   companyName:pick(['companyName','company_name','company','securityName','name'])||symbol,
-   price:numeric(pick(['price','ltp','lastPrice','lastTradedPrice','close','closePrice'])),
-   change:numeric(pick(['change','percentageChange','percentChange','percent_change','changePercent','perChange','pChange','changePercentage'])),
-   rsi:numeric(pick(['rsi','RSI'])),
-   sma20:numeric(pick(['sma20','sma_20','SMA20'])),
-   sma50:numeric(pick(['sma50','sma_50','SMA50'])),
-   ema20:numeric(pick(['ema20','ema_20','EMA20'])),
-   ema50:numeric(pick(['ema50','ema_50','EMA50'])),
-   macd:numeric(pick(['macd','MACD'])),
-   macdSignal:numeric(pick(['macdSignal','macd_signal','macd_signal_line','signal'])),
-   relativeVolume:numeric(pick(['relativeVolume','relative_volume','relVolume'])),
-   adx:numeric(pick(['adx','ADX'])),
-   high52:numeric(pick(['high52','high52Week','high52week','high_52_week'])),
-   historyPoints:numeric(pick(['historyPoints','history_points','historyCount']))
+   companyName:readAny(['companyName','company_name','company','securityName','name'])||symbol,
+   price,change,rsi,
+   sma20:numeric(readAny(['sma20','sma_20','SMA20','sma20Value','sma_20_value'])),
+   sma50:numeric(readAny(['sma50','sma_50','SMA50','sma50Value'])),
+   ema20:numeric(readAny(['ema20','ema_20','EMA20'])),
+   ema50:numeric(readAny(['ema50','ema_50','EMA50'])),
+   macd:numeric(readAny(['macd','MACD'])),
+   macdSignal:numeric(readAny(['macdSignal','macd_signal','macd_signal_line','signalLine'])),
+   relativeVolume:numeric(readAny(['relativeVolume','relative_volume','relVolume'])),
+   adx:numeric(readAny(['adx','ADX'])),
+   high52:numeric(readAny(['high52','high52Week','high52week','high_52_week'])),
+   historyPoints:numeric(readAny(['historyPoints','history_points','historyCount','history_count']))??(Array.isArray(readAny(['history','prices','priceHistory','price_history','candles']))?readAny(['history','prices','priceHistory','price_history','candles']).length:0),
+   trend:trendValue==null?'':String(trendValue),
+   signal:signalValue==null?'':String(signalValue)
   };
  }).filter(Boolean);
 }
-function render(){const key=$('ts11Sort').value;const data=all.map(x=>({...x,_score:score(x)})).filter(passes);data.sort((a,b)=>((b[key]??-Infinity)-(a[key]??-Infinity)));const avg=data.length?data.reduce((s,x)=>s+(x.change||0),0)/data.length:0;const bull=data.filter(x=>trend(x)==='Bullish').length;const tech=data.filter(x=>(x.historyPoints||0)>=20).length;const shocks=data.filter(x=>(x.relativeVolume||0)>=1.5).length;$('ts11Summary').innerHTML=`<div class="ts11-stat"><b>${data.length}</b><span>Matches</span></div><div class="ts11-stat"><b>${fmt(avg,2)}%</b><span>Avg change</span></div><div class="ts11-stat"><b>${bull}</b><span>Bullish</span></div><div class="ts11-stat"><b>${shocks}</b><span>Vol shocks</span></div><div class="ts11-stat"><b>${tech}</b><span>With history</span></div>`;if(!data.length){$('ts11Results').innerHTML='<tr><td colspan="13"><div class="ts11-empty">No stocks match these conditions. Try unchecking “Require technical history” or clearing filters.</div></td></tr>';return}$('ts11Results').innerHTML=data.slice(0,500).map(x=>{const tr=trend(x),buy=x._score>=6;return`<tr data-symbol="${esc(x.symbol)}"><td><b>${esc(x.symbol)}</b><br><span style="font-size:9px;color:var(--muted)">${esc(x.companyName||x.name||'')}</span></td><td>${fmt(x.price)}</td><td class="${x.change>0?'ts11-up':x.change<0?'ts11-down':''}">${x.change==null?'—':(x.change>0?'+':'')+fmt(x.change)+'%'}</td><td>${fmt(x.rsi,1)}</td><td>${fmt(x.sma20)}</td><td>${fmt(x.sma50)}</td><td>${fmt(x.ema20)}</td><td>${fmt(x.ema50)}</td><td class="${x.macd!=null&&x.macdSignal!=null&&x.macd>x.macdSignal?'ts11-up':'ts11-down'}">${fmt(x.macd,3)}</td><td>${fmt(x.relativeVolume,2)}×</td><td>${fmt(x.adx,1)}</td><td>${fmt(x.high52)}</td><td><span class="ts11-chip ${buy?'buy':tr==='Bearish'?'sell':''}">${buy?'BUY SETUP':tr}</span><span class="ts11-chip">${x._score}</span></td></tr>`}).join('');document.querySelectorAll('#ts11Results tr[data-symbol]').forEach(row=>row.onclick=()=>{if(typeof window.openProfessionalChart==='function')window.openProfessionalChart(row.dataset.symbol);});}
+function render(){const key=$('ts11Sort').value;const data=all.map(x=>({...x,_score:score(x)})).filter(passes);data.sort((a,b)=>((b[key]??-Infinity)-(a[key]??-Infinity)));const avg=data.length?data.reduce((s,x)=>s+(x.change||0),0)/data.length:0;const bull=data.filter(x=>trend(x)==='Bullish').length;const tech=data.filter(x=>(x.historyPoints||0)>=20).length;const shocks=data.filter(x=>(x.relativeVolume||0)>=1.5).length;$('ts11Summary').innerHTML=`<div class="ts11-stat"><b>${data.length}</b><span>Matches</span></div><div class="ts11-stat"><b>${fmt(avg,2)}%</b><span>Avg change</span></div><div class="ts11-stat"><b>${bull}</b><span>Bullish</span></div><div class="ts11-stat"><b>${shocks}</b><span>Vol shocks</span></div><div class="ts11-stat"><b>${tech}</b><span>With history</span></div>`;if(!data.length){$('ts11Results').innerHTML='<tr><td colspan="13"><div class="ts11-empty">No stocks match these conditions. Try unchecking “Require technical history” or clearing filters.</div></td></tr>';return}$('ts11Results').innerHTML=data.slice(0,500).map(x=>{const tr=(x.trend&&String(x.trend).trim())?String(x.trend):trend(x),sig=(x.signal&&String(x.signal).trim())?String(x.signal):(x._score>=6?'BUY SETUP':tr),buy=x._score>=6;return`<tr data-symbol="${esc(x.symbol)}"><td><b>${esc(x.symbol)}</b><br><span style="font-size:9px;color:var(--muted)">${esc(x.companyName||x.name||'')}</span></td><td>${fmt(x.price)}</td><td class="${x.change>0?'ts11-up':x.change<0?'ts11-down':''}">${x.change==null?'—':(x.change>0?'+':'')+fmt(x.change)+'%'}</td><td>${fmt(x.rsi,1)}</td><td>${fmt(x.sma20)}</td><td>${fmt(x.sma50)}</td><td>${fmt(x.ema20)}</td><td>${fmt(x.ema50)}</td><td class="${x.macd!=null&&x.macdSignal!=null&&x.macd>x.macdSignal?'ts11-up':'ts11-down'}">${fmt(x.macd,3)}</td><td>${fmt(x.relativeVolume,2)}×</td><td>${fmt(x.adx,1)}</td><td>${fmt(x.high52)}</td><td><span class="ts11-chip ${buy?'buy':tr==='Bearish'?'sell':''}">${esc(sig)}</span><span class="ts11-chip">${x._score}</span></td></tr>`}).join('');document.querySelectorAll('#ts11Results tr[data-symbol]').forEach(row=>row.onclick=()=>{if(typeof window.openProfessionalChart==='function')window.openProfessionalChart(row.dataset.symbol);});}
 function setLoading(on,message='Loading live market rows and calculating indicators…'){const btn=$('ts11Run');if(btn){btn.disabled=on;btn.innerHTML=on?'<span class="ts11-spinner" aria-hidden="true"></span>Scanning…':'Run Scan'}if(on){$('ts11Results').innerHTML=`<tr><td colspan="13"><div class="ts11-loading" role="status" aria-live="polite"><span class="ts11-spinner" aria-hidden="true"></span><span>${esc(message)}</span></div></td></tr>`;$('ts11Summary').innerHTML='';}}
 async function load(){
  if(isLoading)return;
@@ -7978,29 +8022,49 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
  function historyOf(o){const h=first(o,['history','priceHistory','historicalPrices','historyPoints','closePrices','prices','series','chartData']);if(Array.isArray(h))return h.map(x=>num(typeof x==='object'?first(x,['close','ltp','price','value']):x)).filter(x=>x!==null);return [];}
  function rsiOf(prices){if(prices.length<15)return null;let gain=0,loss=0;for(let i=prices.length-14;i<prices.length;i++){const d=prices[i]-prices[i-1];if(d>0)gain+=d;else loss-=d;}gain/=14;loss/=14;if(loss===0)return gain===0?50:100;return 100-(100/(1+gain/loss));}
  function getRows(payload){
-   let root=payload&&payload.data&&typeof payload.data==='object'?payload.data:payload;
+   // The real Technical Screener response is {count, universeCount, data:[...] }.
+   // Do not mistake the data array for a wrapper object; doing so drops every row.
+   let rows=Array.isArray(payload?.data)?payload.data:[];
+   let root=payload&&payload.data&&typeof payload.data==='object'&&!Array.isArray(payload.data)?payload.data:payload;
    const keys=['live','liveMarket','LiveMarket','companies','stocks','securities','rows','records','items','results','data'];
-   let rows=[];for(const k of keys){if(Array.isArray(root&&root[k])){rows=root[k];break;}}
+   if(!rows.length){for(const k of keys){if(Array.isArray(root&&root[k])){rows=root[k];break;}}}
    if(!rows.length&&root&&typeof root==='object'){for(const v of Object.values(root)){if(Array.isArray(v)&&v.some(x=>x&&typeof x==='object')){rows=v;break;}}}
    return rows.filter(x=>x&&typeof x==='object').map(o=>{
      const symbol=cleanSymbol(first(o,['symbol','stockSymbol','securitySymbol','ticker','scrip','tradingSymbol','securityCode','code']));
      const name=first(o,['companyName','securityName','company','name','security','issuerName','company_name']);
      const price=num(first(o,['ltp','lastTradedPrice','lastPrice','closePrice','closingPrice','currentPrice','price']));
-     const prev=num(first(o,['previousClose','previousClosingPrice','prevClose','previousPrice','previousDayClose','closePricePrev']));
+     const prev=num(first(o,['previousClose','previousClosingPrice','prevClose','previousPrice','previousDayClose','previousDayClosePrice','previous_day_close_price','closePricePrev']));
      let changePct=num(first(o,['percentageChange','percentChange','changePercent','percentage_change','pctChange','pChange','perChange','changePercentage','percent_change','changePct']));
      const pointChange=num(first(o,['pointChange','changeValue','priceChange','difference','change']));
      if(changePct===null&&price!==null&&prev!==null&&prev!==0)changePct=(price-prev)/prev*100;
      if(changePct===null){const raw=num(first(o,['change','Change']));if(raw!==null&&Math.abs(raw)<=100)changePct=raw;}
-     const prices=historyOf(o);const rsi=num(first(o,['rsi','RSI','relativeStrengthIndex']))??rsiOf(prices);
-     const rawTrend=first(o,['trend','trendLabel','technicalTrend','direction']);
+     const prices=historyOf(o);const rsi=num(first(o,['rsi','rsi14','rsi_14','RSI','RSI14','relativeStrengthIndex']))??rsiOf(prices);
+     const tech=o.technicals||o.technical||o.indicators||o.technicalIndicators||o.technical_indicators||o.indicator||o.metrics||{};
+     const rawTrend=first(o,['trend','trendLabel','technicalTrend','technical_trend','direction','trendSignal'])??first(tech,['trend','trendLabel','technicalTrend','technical_trend','direction','trendSignal']);
      let trend=rawTrend==null?'—':String(rawTrend);
-     if(rawTrend==null&&prices.length>=20){const sma=prices.slice(-20).reduce((a,b)=>a+b,0)/20;trend=price!==null?(price>sma?'Bullish':price<sma?'Bearish':'Neutral'):'—';}
-     let signal=first(o,['signal','technicalSignal','recommendation','tradeSignal']);
-     if(signal==null&&rsi!==null){if(rsi<=30)signal='RSI Oversold';else if(rsi>=70)signal='RSI Overbought';else if(trend==='Bullish')signal='Bullish';else if(trend==='Bearish')signal='Bearish';}
+     if(rawTrend==null&&price!==null&&num(first(o,['sma20','sma_20','SMA20']))!==null&&num(first(o,['sma50','sma_50','SMA50']))!==null){const s20=num(first(o,['sma20','sma_20','SMA20'])),s50=num(first(o,['sma50','sma_50','SMA50']));trend=price>=s20&&s20>=s50?'Bullish':price<=s20&&s20<=s50?'Bearish':'Mixed';}
+     if(rawTrend==null&&trend==='—'&&prices.length>=20){const sma=prices.slice(-20).reduce((a,b)=>a+b,0)/20;trend=price!==null?(price>sma?'Bullish':price<sma?'Bearish':'Neutral'):'—';}
+     let signal=first(o,['signal','technicalSignal','technical_signal','recommendation','tradeSignal','trade_signal','action'])??first(tech,['signal','technicalSignal','technical_signal','recommendation','tradeSignal','trade_signal','action']);
+     if(signal==null&&rsi!==null){if(rsi<=30)signal='RSI Oversold';else if(rsi>=70)signal='RSI Overbought';else if(trend.toLowerCase().includes('bull'))signal='Bullish';else if(trend.toLowerCase().includes('bear'))signal='Bearish';else signal='Watch';}
      return {raw:o,symbol,name:name==null?'':String(name),price,change:changePct,pointChange,volume:num(first(o,['totalTradedQuantity','totalTradeQuantity','volume','quantity','shareVolume','tradedShares'])),turnover:num(first(o,['totalTradedValue','totalTradeValue','turnover','totalTurnover','amount','value'])),rsi,trend,signal:signal==null?'—':String(signal)};
    }).filter(x=>x.symbol||x.name||x.price!==null);
  }
- async function fetchRows(){let lastErr;for(const path of ['/api/screener-feed','/api/market']){try{const r=await fetch(base()+path+'?_sq='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});if(!r.ok)throw new Error(path+' returned HTTP '+r.status);const data=await r.json();const rows=getRows(data);if(rows.length)return {rows,data,path};lastErr=new Error(path+' returned JSON but no recognizable stock rows');}catch(e){lastErr=e;}}throw lastErr||new Error('Market feed unavailable');}
+ async function fetchRows(){
+   let lastErr;
+   // Technical endpoint must be first: /api/market and /api/screener-feed may
+   // contain price-only rows and overwrite the RSI/Trend/Signal columns.
+   for(const path of ['/api/technical-screener?limit=200&offset=0&technical=true&timeframe=D','/api/screener-feed','/api/market']){
+     try{
+       const r=await fetch(base()+path+(path.includes('?')?'&':'?')+'_sq='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});
+       if(!r.ok)throw new Error(path.split('?')[0]+' returned HTTP '+r.status);
+       const data=await r.json();
+       const rows=getRows(data);
+       if(rows.length)return {rows,data,path};
+       lastErr=new Error(path.split('?')[0]+' returned JSON but no recognizable stock rows');
+     }catch(e){lastErr=e;}
+   }
+   throw lastErr||new Error('Market feed unavailable');
+ }
  function paintStatus(text,ok){const t=byId('sqFeedText'),d=byId('sqFeedDot');if(t)t.textContent=text;if(d)d.style.background=ok?'#20a464':'#c43d3d';}
  function paintRows(rows){
    const body=byId('sqRows');if(!body)return;
