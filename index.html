@@ -4835,51 +4835,48 @@ function render(){const key=$('ts11Sort').value;const data=all.map(x=>({...x,_sc
 function setLoading(on,message='Loading live market rows and calculating indicators…'){const btn=$('ts11Run');if(btn){btn.disabled=on;btn.innerHTML=on?'<span class="ts11-spinner" aria-hidden="true"></span>Scanning…':'Run Scan'}if(on){$('ts11Results').innerHTML=`<tr><td colspan="13"><div class="ts11-loading" role="status" aria-live="polite"><span class="ts11-spinner" aria-hidden="true"></span><span>${esc(message)}</span></div></td></tr>`;$('ts11Summary').innerHTML='';}}
 async function load(){
  if(isLoading)return;
- isLoading=true;const thisRequest=++requestNo;const started=Date.now();const dot=$('ts11Dot'),status=$('ts11Status');
- dot.style.background='#d29b19';status.textContent='SCANNING';setLoading(true,'Connecting to NEPSE Pulse and loading live stocks…');
- let lastError=null;
- const norm=k=>String(k??'').toLowerCase().replace(/[^a-z0-9]/g,'');
- const isObj=x=>x&&typeof x==='object'&&!Array.isArray(x);
- const symbolKeys=['symbol','ticker','securitySymbol','stockSymbol','stock_symbol','symbolName','code','stockCode','scrip','securityCode'];
- const extractRows=raw=>{
-  const hasSymbol=o=>isObj(o)&&symbolKeys.some(k=>{const v=Object.entries(o).find(([key])=>norm(key)===norm(k))?.[1];return v!==undefined&&v!==null&&String(v).trim()!==''});
-  if(Array.isArray(raw))return raw.filter(hasSymbol);
-  let best=[],seen=new Set();
-  const walk=(node,depth=0)=>{if(!node||typeof node!=='object'||depth>10||seen.has(node))return;seen.add(node);if(Array.isArray(node)){const a=node.filter(hasSymbol);if(a.length>best.length)best=a;for(const v of node)walk(v,depth+1);}else for(const v of Object.values(node))if(v&&typeof v==='object')walk(v,depth+1);};
-  walk(raw);return best;
- };
- const mapRows=rows=>rows.map(o=>{
-  const t=isObj(o.technicals)?o.technicals:(isObj(o.technical)?o.technical:(isObj(o.indicators)?o.indicators:o));const m=isObj(o.marketData)?o.marketData:(isObj(o.market_data)?o.market_data:o);
-  const pick=keys=>{for(const obj of [o,m,t])for(const k of keys){const found=Object.entries(obj||{}).find(([key,v])=>norm(key)===norm(k)&&v!==undefined&&v!==null&&v!=='');if(found)return found[1];}return null;};
-  return {...o,symbol:String(pick(symbolKeys)||'').toUpperCase().trim(),companyName:pick(['companyName','company','name','securityName','company_name','security_name'])||'',price:n(pick(['price','ltp','lastPrice','lastTradedPrice','close','closePrice','closingPrice'])),change:n(pick(['change','percentageChange','percentChange','percent_change','changePercent','perChange','pChange','changePercentage','change_percent','percentage_change'])),rsi:n(pick(['rsi','rsi14','relativeStrengthIndex'])),sma20:n(pick(['sma20','sma_20','simpleMovingAverage20'])),sma50:n(pick(['sma50','sma_50','simpleMovingAverage50'])),ema20:n(pick(['ema20','ema_20','exponentialMovingAverage20'])),ema50:n(pick(['ema50','ema_50','exponentialMovingAverage50'])),macd:n(pick(['macd','macdLine'])),macdSignal:n(pick(['macdSignal','macd_signal','macdSignalLine','signalLine'])),relativeVolume:n(pick(['relativeVolume','relative_volume','relativeVol','volumeRatio','relativeVolume20'])),adx:n(pick(['adx','adx14'])),high52:n(pick(['high52','high52Week','high52week','fiftyTwoWeekHigh','fifty_two_week_high','52WeekHigh','yearHigh'])),historyPoints:n(pick(['historyPoints','history_points','historyLength','historyCount']))??0};
- }).filter(x=>x.symbol);
+ isLoading=true;const thisRequest=++requestNo;const started=Date.now();
+ const dot=$('ts11Dot'),status=$('ts11Status');
+ dot.style.background='#d29b19';status.textContent='SCANNING';
+ setLoading(true,'Loading historical prices and calculating technical indicators…');
  try{
-  let rows=[],meta={};
-  // Fetch the known-fast live endpoint first. Do not let the slower indicator endpoint block all market rows.
-  for(const path of ['/LiveMarket','/api/market']){
-   const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),12000);
-   try{const r=await fetch(base()+path,{cache:'no-store',headers:{Accept:'application/json'},signal:controller.signal});if(!r.ok)throw new Error(path+' HTTP '+r.status);const raw=await r.json();const candidate=extractRows(raw);if(candidate.length){rows=candidate;meta={count:candidate.length,universeCount:candidate.length,updatedAt:new Date().toISOString(),source:'Live market: '+path};break;}}
-   catch(e){lastError=e;}finally{clearTimeout(timer);}
-  }
-  if(thisRequest!==requestNo)return;
-  if(rows.length){all=mapRows(rows);loaded=true;dot.style.background='#20a464';status.textContent='LIVE ROWS · LOADING INDICATORS';$('ts11Universe').textContent='Universe: '+fmt(meta.universeCount,0)+' · loaded '+fmt(all.length,0);$('ts11Updated').textContent='Updated: '+new Date().toLocaleTimeString();render();}
-  // Enrich the already-visible live rows with indicators. If this endpoint is slow or unavailable,
-  // keep the valid live market list rather than turning it into “NO MARKET ROWS”.
-  const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),45000);
+  const tf=encodeURIComponent($('ts11Tf').value||'D');
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),90000);
+  let response, payload;
   try{
-   const tf=encodeURIComponent($('ts11Tf').value||'D');const r=await fetch(base()+'/api/technical-screener?limit=60&technical=true&timeframe='+tf,{cache:'no-store',headers:{Accept:'application/json'},signal:controller.signal});
-   if(!r.ok)throw new Error('technical-screener HTTP '+r.status);
-   const d=await r.json();const techRows=mapRows(extractRows(d));
-   if(techRows.length){const canon=v=>String(v??'').toUpperCase().replace(/[^A-Z0-9]/g,'');const bySymbol=new Map();const byName=new Map();for(const t of techRows){if(t.symbol)bySymbol.set(canon(t.symbol),t);const nm=canon(t.companyName||t.name||'');if(nm)byName.set(nm,t);}let matched=0;all=all.map(x=>{const t=bySymbol.get(canon(x.symbol))||byName.get(canon(x.companyName||x.name||''));if(!t)return x;matched++;const merged={...x};for(const k of ['companyName','price','change','rsi','sma20','sma50','ema20','ema50','macd','macdSignal','relativeVolume','adx','high52','historyPoints']){if(t[k]!==null&&t[k]!==undefined&&t[k]!==''&&!(typeof t[k]==='number'&&!Number.isFinite(t[k])))merged[k]=t[k];}return merged;});
-   // If the live endpoint's symbols don't match the indicator endpoint, keep valid calculated rows rather than displaying every indicator as blank.
-   if(matched===0&&techRows.some(x=>x.rsi!=null||x.ema20!=null||x.sma20!=null||x.macd!=null||x.adx!=null)){const existing=new Map(all.map(x=>[canon(x.symbol),x]));for(const t of techRows){const key=canon(t.symbol);if(key&&existing.has(key)){const x=existing.get(key);for(const k of ['rsi','sma20','sma50','ema20','ema50','macd','macdSignal','relativeVolume','adx','historyPoints'])if(t[k]!=null)x[k]=t[k];}else if(key){all.push(t);existing.set(key,t);}}}
-   meta={...meta,...d};}
-  }catch(e){lastError=e;}finally{clearTimeout(timer);}
+   response=await fetch(base()+'/api/technical-screener?limit=100&technical=true&timeframe='+tf,{cache:'no-store',headers:{Accept:'application/json'},signal:controller.signal});
+   if(!response.ok)throw new Error('Technical Screener API returned HTTP '+response.status);
+   payload=await response.json();
+  }finally{clearTimeout(timer);}
   if(thisRequest!==requestNo)return;
-  if(!all.length){dot.style.background='#c0392b';status.textContent='DATA UNAVAILABLE';$('ts11Universe').textContent='Universe: 0 · loaded 0';$('ts11Updated').textContent='Updated: —';$('ts11Results').innerHTML='';return;}
-  loaded=true;dot.style.background='#20a464';const hasIndicators=all.some(x=>x.rsi!=null||x.sma20!=null||x.sma50!=null||x.ema20!=null||x.ema50!=null||x.macd!=null||x.relativeVolume!=null||x.adx!=null);status.textContent=hasIndicators?'DATA READY':'INDICATORS UNAVAILABLE';$('ts11Universe').textContent='Universe: '+fmt(meta.universeCount??meta.count??all.length,0)+' · loaded '+fmt(all.length,0);$('ts11Updated').textContent='Updated: '+new Date(meta.updatedAt||Date.now()).toLocaleTimeString();render();/* Keep the table clean when indicators are unavailable; render placeholders only. */
- }catch(e){if(thisRequest!==requestNo)return;dot.style.background='#c0392b';status.textContent='DATA UNAVAILABLE';$('ts11Universe').textContent='Universe: unavailable';$('ts11Updated').textContent='Updated: —';$('ts11Results').innerHTML='';console.warn('Technical screener data unavailable',e,lastError);}
- finally{const remain=600-(Date.now()-started);if(remain>0)await new Promise(resolve=>setTimeout(resolve,remain));if(thisRequest===requestNo){isLoading=false;setLoading(false);}}
+  // The backend already returns the live row and its calculated indicators together.
+  // Use that response directly; merging a separate live-market response can silently
+  // lose indicators when the two feeds use different symbols or naming conventions.
+  const rawRows=Array.isArray(payload)?payload:
+    (Array.isArray(payload?.data)?payload.data:
+    (Array.isArray(payload?.results)?payload.results:
+    (Array.isArray(payload?.rows)?payload.rows:extractRows(payload))));
+  all=mapRows(rawRows);
+  if(!all.length)throw new Error('The API returned JSON but no stock rows with recognizable symbols.');
+  loaded=true;
+  const hasIndicators=all.some(x=>x.rsi!=null||x.sma20!=null||x.sma50!=null||x.ema20!=null||x.ema50!=null||x.macd!=null||x.relativeVolume!=null||x.adx!=null);
+  dot.style.background=hasIndicators?'#20a464':'#d29b19';
+  status.textContent=hasIndicators?'INDICATORS READY':'HISTORICAL INDICATORS MISSING';
+  $('ts11Universe').textContent='Universe: '+fmt(payload.universeCount??payload.count??all.length,0)+' · loaded '+fmt(all.length,0);
+  $('ts11Updated').textContent='Updated: '+new Date(payload.updatedAt||Date.now()).toLocaleTimeString();
+  render();
+  if(!hasIndicators)console.warn('Technical Screener API returned rows without mapped indicators',payload);
+ }catch(e){
+  if(thisRequest!==requestNo)return;
+  dot.style.background='#c0392b';status.textContent='DATA UNAVAILABLE';
+  $('ts11Universe').textContent='Universe: unavailable';$('ts11Updated').textContent='Updated: —';
+  $('ts11Results').innerHTML='<tr><td colspan="13"><div class="ts11-empty">Could not load technical data. Please try Run Scan again.</div></td></tr>';
+  console.warn('Technical screener API failed',e);
+ }finally{
+  const remain=600-(Date.now()-started);if(remain>0)await new Promise(resolve=>setTimeout(resolve,remain));
+  if(thisRequest===requestNo){isLoading=false;setLoading(false);}
+ }
 }
 function reset(){['ts11Search','ts11RsiMin','ts11RsiMax','ts11RelVol','ts11MinCh','ts11NearHigh'].forEach(id=>$(id).value='');$('ts11SearchType').value='any';$('ts11Tf').value='D';$('ts11Trend').value='any';$('ts11MA').value='any';$('ts11Macd').value='any';$('ts11PriceSma').value='any';$('ts11Sort').value='score';$('ts11OnlyHistory').checked=false;preset='all';document.querySelectorAll('.ts11-preset').forEach(x=>x.classList.toggle('active',x.dataset.preset==='all'));if(loaded)render();else{$('ts11Status').textContent='READY';$('ts11Dot').style.background='#999';$('ts11Results').innerHTML='<tr><td colspan="13"><div class="ts11-empty">Press Run Scan when you are ready to scan the market.</div></td></tr>';}}
 function open(){const ws=$('pulseFeatureWorkspace'),body=$('pulseWorkspaceBody'),root=$('advanced-screener-v10'),title=$('pulseWorkspaceTitle');if(!ws||!body||!root)return;document.querySelectorAll('.pulse-feature-mounted').forEach(x=>{if(x!==root)x.classList.remove('pulse-feature-mounted')});root.classList.add('pulse-feature-mounted');root.style.removeProperty('display');body.appendChild(root);if(title)title.textContent='🔎 Technical Screener';ws.classList.add('open');if(!loaded&&!isLoading){$('ts11Status').textContent='READY';$('ts11Dot').style.background='#999';$('ts11Results').innerHTML='<tr><td colspan="13"><div class="ts11-empty">Set your conditions, then press Run Scan to load market data.</div></td></tr>';}}
