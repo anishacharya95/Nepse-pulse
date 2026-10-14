@@ -2241,53 +2241,61 @@ async def get_floorsheet(symbol: Optional[str] = None):
 
     return []
 
-# Preserve original implementations as explicit fallbacks.
+# Company floorsheet endpoint: serve cached rows immediately, then use the
+# existing bounded page loader. Do not call get_floorsheet() here: that helper
+# walks up to hundreds of pages and multiple providers, which can leave this
+# single-company request pending for a long time while swallowing provider errors.
 @app.get("/api/company-floorsheet/{symbol}")
 async def api_company_floorsheet(symbol: str, limit: int = Query(100000, ge=1, le=100000)):
-    """Company floorsheet endpoint: isolate provider failures and use local stored trades."""
-    wanted = str(symbol or "").upper().strip()
-    rows = []
-    source = "NEPSE executed floorsheet"
-    errors = []
+    wanted = symbol.upper().strip()
+
+    # Fast path: use the newest cached business date for this company.
     try:
-        rows = await get_floorsheet(wanted)
+        _floor_db_init()
+        with sqlite3.connect(FLOOR_CACHE_DB) as db:
+            latest = db.execute(
+                "SELECT MAX(business_date) FROM floorsheet_raw WHERE symbol=?", (wanted,)
+            ).fetchone()
+        day = str(latest[0])[:10] if latest and latest[0] else None
+        if day:
+            cached_count = _floor_count(day, wanted)
+            if cached_count:
+                rows = _read_floor_rows(day, wanted, limit=min(limit, 100000), offset=0)
+                return {
+                    "ok": True, "symbol": wanted, "source": "NEPSE Pulse stored floorsheet cache",
+                    "businessDate": day, "data": rows, "floorsheet": rows,
+                    "count": len(rows), "total": cached_count, "updatedAt": now_iso(),
+                }
+    except Exception:
+        # A cache read failure should not prevent the live fallback.
+        pass
+
+    # Use the normal page endpoint rather than the exhaustive all-pages loader.
+    # Bound the wait so a slow upstream provider cannot leave the browser blank.
+    try:
+        result = await asyncio.wait_for(
+            api_floorsheet(symbol=wanted, limit=min(limit, 100000), page=0, size=min(max(limit, 1), 500)),
+            timeout=25.0,
+        )
+        if isinstance(result, dict):
+            result["symbol"] = wanted
+            result.setdefault("source", "NEPSE executed floorsheet / paged daily session")
+            result.setdefault("updatedAt", now_iso())
+            return result
+    except asyncio.TimeoutError:
+        return JSONResponse(status_code=504, content={
+            "ok": False, "symbol": wanted, "data": [], "floorsheet": [], "count": 0,
+            "error": "Company floorsheet data source timed out; no cached rows were available.",
+            "updatedAt": now_iso(),
+        })
     except Exception as exc:
-        errors.append(f"provider: {type(exc).__name__}")
+        return JSONResponse(status_code=502, content={
+            "ok": False, "symbol": wanted, "data": [], "floorsheet": [], "count": 0,
+            "error": f"Company floorsheet data source failed: {type(exc).__name__}",
+            "updatedAt": now_iso(),
+        })
 
-    # Use the local collector cache when upstream endpoints fail or return an
-    # empty result. This avoids turning transient provider errors into HTTP 500.
-    if not rows:
-        try:
-            rows = _read_floor_rows(symbol=wanted, limit=limit)
-            if rows:
-                source = "Stored floorsheet cache"
-        except Exception as exc:
-            errors.append(f"cache: {type(exc).__name__}")
-
-    # Some providers only return a complete market feed; try it once and filter
-    # locally by symbol, but never return trades for another company.
-    if not rows:
-        for path in ("/Floorsheet",):
-            try:
-                raw = await public_get(path, None)
-                candidate = floor_rows(raw)
-                rows = [r for r in candidate if str(r.get("symbol") or "").upper().strip() == wanted]
-                if rows:
-                    source = "NEPSE floorsheet filtered by symbol"
-                    break
-            except Exception as exc:
-                errors.append(f"{path}: {type(exc).__name__}")
-
-    rows = [r for r in rows if str(r.get("symbol") or "").upper().strip() == wanted][:limit]
-    return {
-        "ok": bool(rows),
-        "symbol": wanted,
-        "source": source if rows else "No floorsheet rows available",
-        "data": rows,
-        "count": len(rows),
-        "updatedAt": now_iso(),
-        "errors": errors,
-    }
+    return {"ok": False, "symbol": wanted, "data": [], "floorsheet": [], "count": 0, "updatedAt": now_iso()}
 
 @app.get("/api/floorsheet-cache")
 async def api_floorsheet_cache(
