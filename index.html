@@ -4842,7 +4842,7 @@ async function load(){
  setLoading(true,'Connecting to NEPSE and loading the first batch…');
  try{
   const tf=encodeURIComponent($('ts11Tf').value||'D');
-  const batchSize=6;let offset=0;let universeCount=null;let latestPayload=null;let hadBatchError=false;
+  const batchSize=5;let offset=0;let universeCount=null;let latestPayload=null;let hadBatchError=false;
   // Small requests prevent a single large historical-data request from hanging.
   // Render after every batch so useful rows remain visible while later batches load.
   while(offset<500){
