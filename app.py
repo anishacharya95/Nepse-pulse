@@ -100,6 +100,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Keep the in-process cache bounded for Render's 512 MB free instance.
+# Large historical OHLC responses can otherwise accumulate across symbols and
+# scan offsets until the worker is killed by the memory limit.
+CACHE_MAX_ENTRIES = int(os.getenv("CACHE_MAX_ENTRIES", "45"))
 CACHE: dict[str, tuple[float, Any]] = {}
 LOCKS: dict[str, asyncio.Lock] = {}
 
@@ -312,7 +316,22 @@ def cache_get(key: str):
 
 
 def cache_set(key: str, value: Any):
-    CACHE[key] = (time.time(), value)
+    now = time.time()
+    # Remove expired entries first, regardless of namespace.
+    for old_key, (created, _old_value) in list(CACHE.items()):
+        ttl = CACHE_TTL.get(old_key.split(":", 1)[0], 60)
+        if now - created > ttl:
+            CACHE.pop(old_key, None)
+            LOCKS.pop(old_key, None)
+    # Refresh insertion order and evict the oldest cached values when full.
+    CACHE.pop(key, None)
+    while len(CACHE) >= max(10, CACHE_MAX_ENTRIES):
+        oldest = next(iter(CACHE), None)
+        if oldest is None:
+            break
+        CACHE.pop(oldest, None)
+        LOCKS.pop(oldest, None)
+    CACHE[key] = (now, value)
     return value
 
 
@@ -320,6 +339,13 @@ async def cached(key: str, loader):
     hit = cache_get(key)
     if hit is not None:
         return hit
+    # Bound lock bookkeeping too; only discard unlocked locks.
+    if len(LOCKS) > max(60, CACHE_MAX_ENTRIES * 2):
+        for lock_key, old_lock in list(LOCKS.items()):
+            if not old_lock.locked():
+                LOCKS.pop(lock_key, None)
+            if len(LOCKS) <= max(60, CACHE_MAX_ENTRIES * 2):
+                break
     lock = LOCKS.setdefault(key, asyncio.Lock())
     async with lock:
         hit = cache_get(key)
@@ -4016,7 +4042,8 @@ async def technical_screener(
             universe_count = len(live)
             live = live[offset:offset + limit]
 
-        sem = asyncio.Semaphore(8)
+        # Low concurrency limits peak memory on Render's 512 MB instance.
+        sem = asyncio.Semaphore(3)
         async def one(r):
             symbol = symbol_of(r)
             if not symbol:
@@ -4030,7 +4057,19 @@ async def technical_screener(
                         # Cache normalized OHLCV per symbol/timeframe so repeat scans
                         # reuse recent history instead of calling upstream providers again.
                         async def load_technical_history():
-                            return await get_history(symbol)
+                            response = await get_history(symbol)
+                            if not isinstance(response, dict):
+                                return {"data": [], "source": None}
+                            history_rows = response.get("data", [])
+                            if not isinstance(history_rows, list):
+                                history_rows = []
+                            # Indicators use at most 252 daily observations. Keep
+                            # a bounded tail instead of retaining huge API payloads.
+                            return {
+                                "data": history_rows[-300:],
+                                "source": response.get("source"),
+                                "updatedAt": response.get("updatedAt"),
+                            }
                         h = await cached(f'technical-history:{tf}:{symbol}', load_technical_history)
                         rows = h.get('data', []) if isinstance(h, dict) else []
                         rows = _aggregate_technical_history(rows, tf)
