@@ -8101,6 +8101,12 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
     if(!nested&&(title||desc||Object.keys(v).length>1))out.push({...v,__source:source});
   }
   function openEvents(kind){
+    // Close legacy feature/Command Center workspaces first so this screen is
+    // the active page, not an overlay on top of a stale workspace.
+    try{
+      if(typeof window.PULSE_CLOSE_STALE_FEATURES==='function') window.PULSE_CLOSE_STALE_FEATURES();
+      else if(typeof window.closeFeatureWorkspace==='function') window.closeFeatureWorkspace();
+    }catch(_){}
     const ipo=kind==='ipo', root=ensureShell();root.dataset.kind=kind;root.style.display='block';
     root.querySelector('#pulseIndTitle').textContent=ipo?'IPO Center — Upcoming Issues':'Corporate Actions — Upcoming Events';
     const body=root.querySelector('#pulseIndBody');body.innerHTML='<div style="background:#fff;border:1px solid #dce5ec;border-radius:12px;padding:16px"><b>Loading '+(ipo?'primary-market issues':'corporate events')+'…</b><p style="color:#617586;margin-bottom:0">Checking connected public notices and disclosures. Only source-returned records are shown.</p></div>';
@@ -8124,8 +8130,28 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
     }).catch(e=>{body.innerHTML='<div style="background:#fff;padding:16px;border-radius:12px">Could not load records: '+esc(e.message)+'</div>'});
   }
   window.PULSE_OPEN_MARKET_EVENTS=openEvents;
-  window.openModule=function(name){const n=String(name||'').toLowerCase();if(n.includes('corporate action'))return openEvents('corporate');if(n.includes('ipo')||n.includes('primary market'))return openEvents('ipo');};
-  window.openFeatureWorkspace=function(id,title){const label=String(title||'')+' '+String(id||'');if(/corporate\s*actions?/i.test(label))return openEvents('corporate');if(/ipo|primary\s*market/i.test(label))return openEvents('ipo');};
-  document.addEventListener('click',function(ev){const el=ev.target&&ev.target.closest?ev.target.closest('button,a,[role="button"]'):null;if(!el)return;const label=(el.innerText||el.textContent||'').replace(/\s+/g,' ').trim();if(/corporate actions?/i.test(label)){ev.preventDefault();ev.stopImmediatePropagation();openEvents('corporate')}else if(/ipo center|ipo\s*&\s*primary market|primary market/i.test(label)){ev.preventDefault();ev.stopImmediatePropagation();openEvents('ipo')}},true);
+  // Preserve every unrelated feature's existing router. Only intercept the
+  // two features handled by this workspace.
+  const previousOpenModule=typeof window.openModule==='function'?window.openModule:null;
+  const previousOpenFeatureWorkspace=typeof window.openFeatureWorkspace==='function'?window.openFeatureWorkspace:null;
+  window.openModule=function(name){
+    const n=String(name||'').toLowerCase();
+    if(n.includes('corporate action'))return openEvents('corporate');
+    if(n.includes('ipo')||n.includes('primary market'))return openEvents('ipo');
+    return previousOpenModule?previousOpenModule.apply(this,arguments):undefined;
+  };
+  window.openFeatureWorkspace=function(id,title){
+    const label=String(title||'')+' '+String(id||'');
+    if(/corporate\s*actions?/i.test(label))return openEvents('corporate');
+    if(/ipo|primary\s*market/i.test(label))return openEvents('ipo');
+    return previousOpenFeatureWorkspace?previousOpenFeatureWorkspace.apply(this,arguments):undefined;
+  };
+  document.addEventListener('click',function(ev){
+    const el=ev.target&&ev.target.closest?ev.target.closest('button,a,[role="button"],.feature-item'):null;
+    if(!el)return;
+    const label=((el.innerText||el.textContent||'')+' '+(el.getAttribute('aria-label')||'')+' '+(el.dataset&&((el.dataset.feature||'')+' '+(el.dataset.module||''))||'')).replace(/\s+/g,' ').trim();
+    if(/corporate actions?/i.test(label)){ev.preventDefault();ev.stopImmediatePropagation();openEvents('corporate')}
+    else if(/ipo center|ipo\s*&\s*primary market|primary market/i.test(label)){ev.preventDefault();ev.stopImmediatePropagation();openEvents('ipo')}
+  },true);
 })();
 </script>

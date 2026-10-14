@@ -2906,6 +2906,71 @@ async def production_reports():
 async def production_events():
     return await production_call("events")
 
+
+@app.get("/api/production/announcements")
+async def production_announcements():
+    """Return NEPSE announcements when the SDK exposes them.
+
+    SDK versions differ, so fall back to the existing notices/disclosures/events
+    feeds instead of returning a 404 or failing the whole screen. Each row is
+    tagged with its source; no synthetic announcements are created.
+    """
+    async def load():
+        errors = []
+
+        # Prefer a dedicated announcement/exchange-message method if the
+        # installed production SDK version supports one.
+        for method in ("announcements", "exchange_messages", "exchangeMessages"):
+            try:
+                payload = await production_call(method)
+                if payload is not None and payload != [] and payload != {}:
+                    return {
+                        "ok": True,
+                        "source": method,
+                        "data": payload,
+                        "updatedAt": now_iso(),
+                        "errors": errors,
+                    }
+            except Exception as exc:
+                errors.append(f"{method}: {type(exc).__name__}: {exc}")
+
+        # Compatibility fallback: announcement-like records are commonly
+        # included in the already-supported notices, disclosures and events.
+        collected = []
+        for method, label in (
+            ("notices", "Public notices"),
+            ("disclosures", "Disclosures"),
+            ("events", "Events"),
+            ("reports", "Reports"),
+        ):
+            try:
+                payload = await production_call(method)
+                rows = deep_rows(
+                    payload,
+                    ("announcements", "exchangeMessages", "notices", "disclosures",
+                     "events", "reports", "content", "data", "results", "items",
+                     "records", "rows"),
+                )
+                if not rows and isinstance(payload, list):
+                    rows = [row for row in payload if isinstance(row, dict)]
+                for row in rows:
+                    item = dict(row)
+                    item.setdefault("_announcementSource", label)
+                    collected.append(item)
+            except Exception as exc:
+                errors.append(f"{label}: {type(exc).__name__}: {exc}")
+
+        return {
+            "ok": bool(collected),
+            "source": "NEPSE notices/disclosures/events fallback",
+            "data": collected,
+            "count": len(collected),
+            "updatedAt": now_iso(),
+            "errors": errors,
+        }
+
+    return await cached("announcements:all", load)
+
 # TradingView UDF-shaped adapter for the NEPSE Pulse chart frontend.
 # The adapter is backed by the same NEPSE history layer used by the rest of
 # the app. TradingView supplies the chart engine; NEPSE Pulse supplies data.
