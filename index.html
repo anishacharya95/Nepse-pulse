@@ -3471,20 +3471,78 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
     render();
   }
 
-  document.addEventListener('DOMContentLoaded',()=>{
-    document.querySelectorAll('[data-sq-preset]').forEach(b=>b.addEventListener('click',()=>preset(b.dataset.sqPreset)));
-    q('sqRun').addEventListener('click',render);
-    q('sqReset').addEventListener('click',()=>preset('all'));
-    q('sqRefresh').addEventListener('click',()=>window.PULSE_FEED?.refresh?.());
-    ['sqSearch','sqMinChange','sqMaxChange','sqMinVolume','sqMinTurnover','sqRsi','sqTrend','sqSort'].forEach(id=>q(id).addEventListener('change',render));
-    window.addEventListener('pulse-central-snapshot',e=>sync(e.detail||{}));
-    window.addEventListener('pulse-feed-update',()=>{
-      const st=window.PULSE_FEED_ENGINE?.state?.();
-      if(st)sync(st);
-    });
-    const st=window.PULSE_FEED_ENGINE?.state?.();
-    if(st)sync(st);
-  });
+  function initScreenerFeed(){
+    if(!q('sqFeedText'))return;
+    document.querySelectorAll('[data-sq-preset]').forEach(b=>{if(!b.dataset.sqBound){b.dataset.sqBound='1';b.addEventListener('click',()=>preset(b.dataset.sqPreset));}});
+    const bind=(id,fn)=>{const el=q(id);if(el&&!el.dataset.sqBound){el.dataset.sqBound='1';el.addEventListener('click',fn);}};
+    bind('sqRun',async()=>{
+      const btn=q('sqRun'); if(btn.dataset.busy==='1')return; btn.dataset.busy='1'; const old=btn.innerHTML; btn.disabled=true; btn.innerHTML='<span class="sq-spinner" aria-hidden="true"></span>Scanning…'; q('sqFeedText').textContent='Scanning feed…'; q('sqFeedDot').style.background='#d29b19'; q('sqRows').innerHTML='<tr><td colspan="8" class="sq-empty"><span class="sq-spinner" aria-hidden="true"></span>Loading market rows and applying filters…</td></tr>';
+      try{
+        const base=String(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
+        const response=await fetch(base+'/api/screener-feed?_screener_run='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});
+        if(!response.ok)throw new Error('Market API HTTP '+response.status);
+        const payload=await response.json(); const root=payload?.data&&typeof payload.data==='object'?payload.data:payload;
+        const candidates=[root.live,root.liveMarket,root.LiveMarket,root.companies,root.stocks,root.securities,root.data,root.results,root.rows,root.records];
+        let marketRows=candidates.find(Array.isArray)||[]; if(!marketRows.length&&root&&typeof root==='object')marketRows=Object.values(root).find(Array.isArray)||[];
+        marketRows=marketRows.filter(x=>x&&typeof x==='object'); if(!marketRows.length)throw new Error('API returned JSON but no market rows; inspect /api/market live field');
+        sync({...root,status:root.stale?'CACHED':'LIVE',live:marketRows,companies:Array.isArray(root.companies)?root.companies:marketRows,updatedAt:root.updatedAt||new Date().toISOString()});
+        q('sqFeedText').textContent=(root.stale?'CACHED':'LIVE')+' · '+marketRows.length+' rows'; q('sqFeedDot').style.background=root.stale?'#d29b19':'#20a464'; render();
+      }catch(e){q('sqFeedText').textContent='Feed error';q('sqFeedDot').style.background='#c43d3d';q('sqRows').innerHTML='<tr><td colspan="8" class="sq-empty">Scan failed: '+esc(e?.message||e)+'</td></tr>';}
+      finally{btn.dataset.busy='0';btn.disabled=false;btn.innerHTML=old;}
+    });bind('sqReset',()=>preset('all'));
+    bind('sqRefresh',async()=>{q('sqFeedText').textContent='Connecting…';q('sqFeedDot').style.background='#d29b19';try{const engine=window.PULSE_FEED_ENGINE||window.PULSE_FEED;if(engine?.refresh)await engine.refresh();const st=engine?.state?.();if(st)sync(st);else{q('sqFeedText').textContent='Feed unavailable';q('sqRows').innerHTML='<tr><td colspan="8" class="sq-empty">The Central Feed did not return a status. Check the backend connection and reload.</td></tr>';}}catch(e){q('sqFeedText').textContent='Feed error';q('sqRows').innerHTML='<tr><td colspan="8" class="sq-empty">Feed request failed: '+esc(e?.message||e)+'</td></tr>';}});
+    ['sqSearch','sqMinChange','sqMaxChange','sqMinVolume','sqMinTurnover','sqRsi','sqTrend','sqSort'].forEach(id=>{const el=q(id);if(el&&!el.dataset.sqBound){el.dataset.sqBound='1';el.addEventListener('input',render);el.addEventListener('change',render);}});
+    if(!window.__sqFeedListenersBound){window.__sqFeedListenersBound=true;window.addEventListener('pulse-central-snapshot',e=>sync(e.detail||{}));window.addEventListener('pulse-feed-update',()=>{const st=window.PULSE_FEED_ENGINE?.state?.();if(st)sync(st);});}
+    const engine=window.PULSE_FEED_ENGINE||window.PULSE_FEED;const st=engine?.state?.();
+    if(st&&(st.live?.length||st.companies?.length||st.status==='LIVE'||st.status==='CACHED')) sync(st); else { q('sqFeedText').textContent='Connecting…'; }
+    q('sqFeedText').textContent='Connecting…';q('sqFeedDot').style.background='#d29b19';
+    // The dashboard can receive /api/market successfully even when an older
+    // Central Feed status/event is stale. Verify the same endpoint directly and
+    // adapt its common response shapes for this workspace only.
+    let directFeedAttempted=false;
+    async function ensureScreenerSnapshot(force=false){
+      if(directFeedAttempted&&!force)return;directFeedAttempted=true;
+      const base=String(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
+      const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),22000);
+      try{
+        const response=await fetch(base+'/api/screener-feed?_screener='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'},signal:controller.signal});
+        if(!response.ok)throw new Error('Market API returned HTTP '+response.status);
+        const payload=await response.json();
+        const root=payload?.data&&typeof payload.data==='object'?payload.data:payload;
+        const candidates=[root.live,root.liveMarket,root.LiveMarket,root.companies,root.stocks,root.securities,root.data,root.results,root.rows,root.records];
+        let marketRows=candidates.find(Array.isArray)||[];
+        if(!marketRows.length&&root&&typeof root==='object')marketRows=Object.values(root).find(Array.isArray)||[];
+        marketRows=marketRows.filter(x=>x&&typeof x==='object');
+        if(!marketRows.length)throw new Error('API returned JSON, but no stock rows were found in the response');
+        const adapted={...root,status:root.status==='CACHED'?'CACHED':'LIVE',live:marketRows,companies:Array.isArray(root.companies)?root.companies:marketRows,updatedAt:root.updatedAt||new Date().toISOString()};
+        sync(adapted);
+        q('sqFeedText').textContent=(adapted.status==='CACHED'?'CACHED':'LIVE')+' · '+marketRows.length+' rows';
+        q('sqFeedDot').style.background=adapted.status==='CACHED'?'#d29b19':'#20a464';
+      }catch(e){
+        const current=engine?.state?.();
+        if(current&&(current.live?.length||current.companies?.length))sync(current);
+        else {q('sqFeedText').textContent='Feed error';q('sqFeedDot').style.background='#c43d3d';q('sqRows').innerHTML='<tr><td colspan="8" class="sq-empty">Could not connect screener to the market feed: '+esc(e?.message||e)+'</td></tr>';}
+      }finally{clearTimeout(timer)}
+    }
+    if(engine?.refresh)Promise.resolve(engine.refresh()).then(()=>{const next=engine.state?.();if(next&&(next.live?.length||next.companies?.length))sync(next);else void ensureScreenerSnapshot();}).catch(()=>void ensureScreenerSnapshot());
+    else void ensureScreenerSnapshot();
+    if(!window.__sqDirectRetryBound){window.__sqDirectRetryBound=true;window.addEventListener('pulse-feed-update',()=>{const next=engine?.state?.();if(next&&(next.live?.length||next.companies?.length))sync(next);});}
+    if(!window.__sqFeedRetryTimer){window.__sqFeedRetryTimer=setInterval(()=>{if(!q('sqFeedText'))return;const label=q('sqFeedText').textContent||'';if((label==='Waiting for feed'||label==='Connecting…'||label==='Feed unavailable')&&!document.hidden)void ensureScreenerSnapshot(true);},12000);}
+  }
+  // Screener is mounted dynamically by the workspace router, often AFTER DOMContentLoaded.
+  // Retry initialization when its panel is inserted; the function's data-sqBound guards
+  // make this safe and prevent duplicate click/event handlers.
+  function bootScreenerWhenMounted(){
+    if(q('sqFeedText')) initScreenerFeed();
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',bootScreenerWhenMounted,{once:true});
+  else bootScreenerWhenMounted();
+  if(window.MutationObserver){
+    const sqMountObserver=new MutationObserver(()=>{if(q('sqFeedText')) bootScreenerWhenMounted();});
+    sqMountObserver.observe(document.documentElement,{childList:true,subtree:true});
+  }
+  // If the feed engine reports status before the workspace is opened, paint it immediately on open.
+  window.addEventListener('pulse-central-snapshot',()=>{if(q('sqFeedText'))bootScreenerWhenMounted();});
 })();
 </script>
 
@@ -3592,6 +3650,8 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
  .fs-page-actions{display:flex;gap:8px}
  .fs-page-actions button{border:1px solid rgba(127,127,127,.25);background:rgba(127,127,127,.07);color:inherit;border-radius:9px;padding:9px 12px;font:inherit;cursor:pointer}
  .fs-page-actions button:disabled{opacity:.35;cursor:not-allowed}
+
+.sq-spinner{display:inline-block;width:14px;height:14px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:sqSpin .7s linear infinite;vertical-align:-2px;margin-right:7px}@keyframes sqSpin{to{transform:rotate(360deg)}}
 </style>
 
 <script id="pulse-v4-floorsheet-engine">
