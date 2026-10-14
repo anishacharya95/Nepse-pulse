@@ -3808,7 +3808,9 @@ def _ts_rsi(a: list[float], n: int = 14):
         gains = (gains * (n - 1) + max(d, 0)) / n
         losses = (losses * (n - 1) + max(-d, 0)) / n
     if losses == 0:
-        return 100.0
+        return 50.0 if gains == 0 else 100.0
+    if gains == 0:
+        return 0.0
     return 100 - (100 / (1 + gains / losses))
 
 def _ts_macd(a: list[float]):

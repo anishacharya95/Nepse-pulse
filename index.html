@@ -3346,7 +3346,17 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
     const volume=n(field(o,['totalTradedQuantity','TotalTradedQuantity','volume','Volume','quantity','Quantity']));
     const turnover=n(field(o,['totalTradedValue','TotalTradedValue','turnover','Turnover','value','Value']));
     const history=field(o,['history','prices','priceHistory','PriceHistory']);
-    return {raw:o,symbol,name,price,change,volume,turnover,history};
+    const tech=(o.technicals&&typeof o.technicals==='object')?o.technicals:((o.technical&&typeof o.technical==='object')?o.technical:{});
+    const get=(keys)=>{const a=field(o,keys);return a!==null?a:field(tech,keys)};
+    const rsiValue=n(get(['rsi','RSI','rsi14','relativeStrengthIndex']));
+    const trendValue=get(['trend','trendLabel','technicalTrend']);
+    const signalValue=get(['signal','technicalSignal','recommendation','tradeSignal']);
+    const pointChange=n(get(['pointChange','changeValue','priceChange','difference']));
+    const prev=n(get(['previousClose','previousClosingPrice','prevClose','previousPrice']));
+    const pct=change!==null?change:((pointChange!==null&&prev!==null&&prev!==0)?pointChange/prev*100:null);
+    return {raw:o,symbol,name,price,change:pct,volume,turnover,history,rsi:rsiValue,trend:trendValue,signal:signalValue,
+      sma20:n(get(['sma20','sma_20'])),ema20:n(get(['ema20','ema_20'])),ema50:n(get(['ema50','ema_50'])),
+      historyPoints:n(get(['historyPoints','history_points','historyCount']))};
   }
 
   function historyFor(r){
@@ -3371,14 +3381,11 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
   }
   function metrics(r){
     const h=historyFor(r);
-    const e20=ema(h,20), e50=ema(h,50), s20=sma(h,20), rv=rsi(h);
-    const trend=(e20!==null && e50!==null)?(e20>e50?'bullish':'bearish'):(r.change!==null?(r.change>0?'bullish':r.change<0?'bearish':'neutral'):'unknown');
-    let signal='Watch';
-    if(rv!==null && rv<30)signal='Oversold';
-    else if(rv!==null && rv>70)signal='Overbought';
-    else if(e20!==null && e50!==null && e20>e50 && r.price!==null && r.price>e20)signal='Bullish';
-    else if(e20!==null && e50!==null && e20<e50 && r.price!==null && r.price<e20)signal='Bearish';
-    else if(r.change!==null && r.change>=4)signal='Momentum';
+    const e20=r.ema20!==null?r.ema20:ema(h,20), e50=r.ema50!==null?r.ema50:ema(h,50), s20=r.sma20!==null?r.sma20:sma(h,20), rv=r.rsi!==null?r.rsi:rsi(h);
+    const rawTrend=r.trend==null?'':String(r.trend).toLowerCase();
+    const trend=rawTrend.includes('bull')?'bullish':rawTrend.includes('bear')?'bearish':rawTrend.includes('neutral')?'neutral':((e20!==null && e50!==null)?(e20>e50?'bullish':e20<e50?'bearish':'neutral'):(r.change!==null?(r.change>0?'bullish':r.change<0?'bearish':'neutral'):'unknown'));
+    let signal=r.signal==null?'':String(r.signal);
+    if(!signal){if(rv!==null && rv<30)signal='Oversold';else if(rv!==null && rv>70)signal='Overbought';else if(e20!==null && e50!==null && e20>e50 && r.price!==null && r.price>e20)signal='Bullish';else if(e20!==null && e50!==null && e20<e50 && r.price!==null && r.price<e20)signal='Bearish';else if(r.change!==null && r.change>=4)signal='Momentum';else signal='Watch';}
     return {...r,rsi:rv,sma20:s20,ema20:e20,ema50:e50,trend,signal};
   }
 
@@ -3479,14 +3486,13 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
       const btn=q('sqRun'); if(btn.dataset.busy==='1')return; btn.dataset.busy='1'; const old=btn.innerHTML; btn.disabled=true; btn.innerHTML='<span class="sq-spinner" aria-hidden="true"></span>Scanning…'; q('sqFeedText').textContent='Scanning feed…'; q('sqFeedDot').style.background='#d29b19'; q('sqRows').innerHTML='<tr><td colspan="8" class="sq-empty"><span class="sq-spinner" aria-hidden="true"></span>Loading market rows and applying filters…</td></tr>';
       try{
         const base=String(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
-        const response=await fetch(base+'/api/screener-feed?_screener_run='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});
-        if(!response.ok)throw new Error('Market API HTTP '+response.status);
-        const payload=await response.json(); const root=payload?.data&&typeof payload.data==='object'?payload.data:payload;
-        const candidates=[root.live,root.liveMarket,root.LiveMarket,root.companies,root.stocks,root.securities,root.data,root.results,root.rows,root.records];
-        let marketRows=candidates.find(Array.isArray)||[]; if(!marketRows.length&&root&&typeof root==='object')marketRows=Object.values(root).find(Array.isArray)||[];
-        marketRows=marketRows.filter(x=>x&&typeof x==='object'); if(!marketRows.length)throw new Error('API returned JSON but no market rows; inspect /api/market live field');
-        sync({...root,status:root.stale?'CACHED':'LIVE',live:marketRows,companies:Array.isArray(root.companies)?root.companies:marketRows,updatedAt:root.updatedAt||new Date().toISOString()});
-        q('sqFeedText').textContent=(root.stale?'CACHED':'LIVE')+' · '+marketRows.length+' rows'; q('sqFeedDot').style.background=root.stale?'#d29b19':'#20a464'; render();
+        const response=await fetch(base+'/api/technical-screener?limit=60&offset=0&technical=true&timeframe=D&_screener_run='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});
+        if(!response.ok)throw new Error('Technical Screener API HTTP '+response.status);
+        const payload=await response.json();
+        const marketRows=Array.isArray(payload?.data)?payload.data:(Array.isArray(payload?.results)?payload.results:(Array.isArray(payload?.rows)?payload.rows:[]));
+        if(!marketRows.length)throw new Error('Technical API returned no rows. Check /api/technical-screener response.');
+        sync({status:'LIVE',live:marketRows,companies:marketRows,updatedAt:payload.updatedAt||new Date().toISOString(),source:payload.source});
+        q('sqFeedText').textContent='LIVE · '+marketRows.length+' rows · indicators'; q('sqFeedDot').style.background='#20a464'; render();
       }catch(e){q('sqFeedText').textContent='Feed error';q('sqFeedDot').style.background='#c43d3d';q('sqRows').innerHTML='<tr><td colspan="8" class="sq-empty">Scan failed: '+esc(e?.message||e)+'</td></tr>';}
       finally{btn.dataset.busy='0';btn.disabled=false;btn.innerHTML=old;}
     });bind('sqReset',()=>preset('all'));
