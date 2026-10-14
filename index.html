@@ -7951,6 +7951,73 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 })();
 </script>
 
+
+<!-- Final Screener & Quant direct-feed bridge: normalized fields and technical metrics. -->
+<style id="sq-direct-feed-bridge-style">
+#screen-quant-v3 .sq-direct-spinner{display:inline-block!important;width:16px!important;height:16px!important;border:2px solid currentColor!important;border-bottom-color:transparent!important;border-radius:50%!important;animation:sqDirectSpin .65s linear infinite!important;vertical-align:-3px!important;margin-right:8px!important;flex:0 0 auto}
+#screen-quant-v3 .sq-scan-loading{display:inline-flex!important;align-items:center!important;justify-content:center!important;gap:5px}
+#screen-quant-v3 #sqRun:disabled{opacity:.8;cursor:progress}
+@keyframes sqDirectSpin{to{transform:rotate(360deg)}}
+</style>
+<script id="sq-direct-feed-bridge-final">
+(function(){
+ 'use strict';
+ const byId=id=>document.getElementById(id);
+ const base=()=>String(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
+ const esc=v=>String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+ const first=(o,keys)=>{if(!o||typeof o!=='object')return null;const m={};Object.keys(o).forEach(k=>m[k.toLowerCase().replace(/[^a-z0-9]/g,'')]=o[k]);for(const k of keys){const v=m[k.toLowerCase().replace(/[^a-z0-9]/g,'')];if(v!==undefined&&v!==null&&v!=='')return v;}return null;};
+ const num=v=>{if(v==null||v==='')return null;const n=Number(String(v).replace(/,/g,'').replace(/%$/,''));return Number.isFinite(n)?n:null;};
+ const fmt=v=>v==null?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:2});
+ const cleanSymbol=v=>{if(v==null)return '';const s=String(v).trim().toUpperCase();return /^[A-Z][A-Z0-9&._-]{0,19}$/.test(s)?s:'';};
+ function historyOf(o){const h=first(o,['history','priceHistory','historicalPrices','historyPoints','closePrices','prices','series','chartData']);if(Array.isArray(h))return h.map(x=>num(typeof x==='object'?first(x,['close','ltp','price','value']):x)).filter(x=>x!==null);return [];}
+ function rsiOf(prices){if(prices.length<15)return null;let gain=0,loss=0;for(let i=prices.length-14;i<prices.length;i++){const d=prices[i]-prices[i-1];if(d>0)gain+=d;else loss-=d;}gain/=14;loss/=14;if(loss===0)return gain===0?50:100;return 100-(100/(1+gain/loss));}
+ function getRows(payload){
+   let root=payload&&payload.data&&typeof payload.data==='object'?payload.data:payload;
+   const keys=['live','liveMarket','LiveMarket','companies','stocks','securities','rows','records','items','results','data'];
+   let rows=[];for(const k of keys){if(Array.isArray(root&&root[k])){rows=root[k];break;}}
+   if(!rows.length&&root&&typeof root==='object'){for(const v of Object.values(root)){if(Array.isArray(v)&&v.some(x=>x&&typeof x==='object')){rows=v;break;}}}
+   return rows.filter(x=>x&&typeof x==='object').map(o=>{
+     const symbol=cleanSymbol(first(o,['symbol','stockSymbol','securitySymbol','ticker','scrip','tradingSymbol','securityCode','code']));
+     const name=first(o,['companyName','securityName','company','name','security','issuerName','company_name']);
+     const price=num(first(o,['ltp','lastTradedPrice','lastPrice','closePrice','closingPrice','currentPrice','price']));
+     const prev=num(first(o,['previousClose','previousClosingPrice','prevClose','previousPrice','previousDayClose','closePricePrev']));
+     let changePct=num(first(o,['percentageChange','percentChange','changePercent','percentage_change','pctChange','pChange','perChange','changePercentage','percent_change','changePct']));
+     const pointChange=num(first(o,['pointChange','changeValue','priceChange','difference','change']));
+     if(changePct===null&&price!==null&&prev!==null&&prev!==0)changePct=(price-prev)/prev*100;
+     if(changePct===null){const raw=num(first(o,['change','Change']));if(raw!==null&&Math.abs(raw)<=100)changePct=raw;}
+     const prices=historyOf(o);const rsi=num(first(o,['rsi','RSI','relativeStrengthIndex']))??rsiOf(prices);
+     const rawTrend=first(o,['trend','trendLabel','technicalTrend','direction']);
+     let trend=rawTrend==null?'—':String(rawTrend);
+     if(rawTrend==null&&prices.length>=20){const sma=prices.slice(-20).reduce((a,b)=>a+b,0)/20;trend=price!==null?(price>sma?'Bullish':price<sma?'Bearish':'Neutral'):'—';}
+     let signal=first(o,['signal','technicalSignal','recommendation','tradeSignal']);
+     if(signal==null&&rsi!==null){if(rsi<=30)signal='RSI Oversold';else if(rsi>=70)signal='RSI Overbought';else if(trend==='Bullish')signal='Bullish';else if(trend==='Bearish')signal='Bearish';}
+     return {raw:o,symbol,name:name==null?'':String(name),price,change:changePct,pointChange,volume:num(first(o,['totalTradedQuantity','totalTradeQuantity','volume','quantity','shareVolume','tradedShares'])),turnover:num(first(o,['totalTradedValue','totalTradeValue','turnover','totalTurnover','amount','value'])),rsi,trend,signal:signal==null?'—':String(signal)};
+   }).filter(x=>x.symbol||x.name||x.price!==null);
+ }
+ async function fetchRows(){let lastErr;for(const path of ['/api/screener-feed','/api/market']){try{const r=await fetch(base()+path+'?_sq='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});if(!r.ok)throw new Error(path+' returned HTTP '+r.status);const data=await r.json();const rows=getRows(data);if(rows.length)return {rows,data,path};lastErr=new Error(path+' returned JSON but no recognizable stock rows');}catch(e){lastErr=e;}}throw lastErr||new Error('Market feed unavailable');}
+ function paintStatus(text,ok){const t=byId('sqFeedText'),d=byId('sqFeedDot');if(t)t.textContent=text;if(d)d.style.background=ok?'#20a464':'#c43d3d';}
+ function paintRows(rows){
+   const body=byId('sqRows');if(!body)return;
+   const search=(byId('sqSearch')?.value||'').trim().toLowerCase();const min=num(byId('sqMinChange')?.value),max=num(byId('sqMaxChange')?.value),minVol=num(byId('sqMinVolume')?.value),minTurn=num(byId('sqMinTurnover')?.value);
+   let filtered=rows.filter(r=>{const hay=((r.symbol||'')+' '+(r.name||'')).toLowerCase();return (!search||hay.includes(search))&&(min===null||(r.change!==null&&r.change>=min))&&(max===null||(r.change!==null&&r.change<=max))&&(minVol===null||(r.volume!==null&&r.volume>=minVol))&&(minTurn===null||(r.turnover!==null&&r.turnover>=minTurn));});
+   const sort=byId('sqSort')?.value||'change';const key=sort==='volume'?'volume':sort==='turnover'?'turnover':sort==='price'?'price':'change';filtered.sort((a,b)=>(b[key]??-Infinity)-(a[key]??-Infinity));
+   body.innerHTML=filtered.length?filtered.slice(0,200).map(r=>'<tr><td class="sq-symbol">'+esc(r.symbol||r.name||'—')+'</td><td>'+fmt(r.price)+'</td><td>'+(r.change===null?'—':fmt(r.change)+'%')+'</td><td>'+fmt(r.volume)+'</td><td>'+fmt(r.turnover)+'</td><td>'+fmt(r.rsi)+'</td><td><span class="sq-tag">'+esc(r.trend)+'</span></td><td><span class="sq-tag">'+esc(r.signal)+'</span></td></tr>').join(''):'<tr><td colspan="8" class="sq-empty">No stocks match these filters.</td></tr>';
+   if(byId('sqCount'))byId('sqCount').textContent=filtered.length;if(byId('sqResultMeta'))byId('sqResultMeta').textContent=filtered.length+' matches · '+rows.length+' feed rows';
+   const changes=filtered.map(x=>x.change).filter(x=>x!==null),rsis=filtered.map(x=>x.rsi).filter(x=>x!==null),turns=filtered.map(x=>x.turnover).filter(x=>x!==null);
+   if(byId('sqAvgChange'))byId('sqAvgChange').textContent=changes.length?fmt(changes.reduce((a,b)=>a+b,0)/changes.length)+'%':'—';
+   if(byId('sqAvgRsi'))byId('sqAvgRsi').textContent=rsis.length?fmt(rsis.reduce((a,b)=>a+b,0)/rsis.length):'—';
+   if(byId('sqTotalTurnover'))byId('sqTotalTurnover').textContent=turns.length?fmt(turns.reduce((a,b)=>a+b,0)):'—';
+   if(byId('sqSignal'))byId('sqSignal').textContent=rows.length+' live feed rows loaded';
+ }
+ let loading=false;async function load(showLoading){if(loading)return;loading=true;const btn=byId('sqRun'),old=btn?btn.innerHTML:'';if(showLoading&&btn){btn.disabled=true;btn.innerHTML='<span class="sq-direct-spinner" aria-hidden="true"></span>Scanning…';btn.classList.add('sq-scan-loading');}paintStatus(showLoading?'Scanning feed…':'Connecting…',false);if(showLoading&&byId('sqRows'))byId('sqRows').innerHTML='<tr><td colspan="8" class="sq-empty"><span class="sq-direct-spinner" aria-hidden="true"></span>Loading live market rows and calculating available indicators…</td></tr>';try{const result=await fetchRows();window.__sqDirectLastRows=result.rows;paintRows(result.rows);const technical=result.rows.filter(r=>r.rsi!==null).length;paintStatus('LIVE · '+result.rows.length+' rows · '+technical+' with RSI',true);}catch(e){paintStatus('Feed error',false);if(byId('sqRows'))byId('sqRows').innerHTML='<tr><td colspan="8" class="sq-empty">Could not load market feed: '+esc(e&&e.message||e)+'</td></tr>';}finally{loading=false;if(showLoading&&btn){btn.disabled=false;btn.innerHTML=old;btn.classList.remove('sq-scan-loading');}}}
+ document.addEventListener('click',function(ev){const b=ev.target&&ev.target.closest?ev.target.closest('#sqRun,[data-action="run-screen"],button'):null;if(!b)return;const label=(b.id+' '+(b.textContent||'')).toLowerCase();if(b.id==='sqRun'||(/run\s*(screen|scan)/.test(label)&&!!document.getElementById('screen-quant-v3'))){if(!document.getElementById('screen-quant-v3')?.contains(b))return;ev.preventDefault();ev.stopImmediatePropagation();void load(true);}},true);
+ document.addEventListener('input',function(ev){if(ev.target&&/^sq(Search|MinChange|MaxChange|MinVolume|MinTurnover|Rsi|Trend|Sort)$/.test(ev.target.id)&&window.__sqDirectLastRows)paintRows(window.__sqDirectLastRows);});
+ async function boot(){if(!byId('sqFeedText'))return;try{const x=await fetchRows();window.__sqDirectLastRows=x.rows;paintRows(x.rows);paintStatus('LIVE · '+x.rows.length+' rows · '+x.rows.filter(r=>r.rsi!==null).length+' with RSI',true);}catch(e){paintStatus('Feed error',false);}}
+ function mounted(){if(byId('sqFeedText')&&!window.__sqDirectBooted){window.__sqDirectBooted=true;void boot();}}
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',mounted,{once:true});else mounted();if(window.MutationObserver)new MutationObserver(mounted).observe(document.documentElement,{childList:true,subtree:true});window.addEventListener('pageshow',mounted);
+})();
+</script>
+
 </body>
 </html>
 
