@@ -4831,6 +4831,46 @@ const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 function score(x){let s=0;if(x.rsi!=null){if(x.rsi>50)s+=1;if(x.rsi>=55&&x.rsi<=70)s+=2;if(x.rsi<30)s+=1}if(x.price!=null&&x.sma20!=null)s+=x.price>=x.sma20?2:-1;if(x.sma20!=null&&x.sma50!=null)s+=x.sma20>=x.sma50?2:-1;if(x.ema20!=null&&x.ema50!=null)s+=x.ema20>=x.ema50?2:-1;if(x.macd!=null&&x.macdSignal!=null)s+=x.macd>=x.macdSignal?2:-1;if(x.relativeVolume!=null&&x.relativeVolume>=1.5)s+=2;if(x.adx!=null&&x.adx>=25)s+=1;return s}
 function trend(x){if(x.price!=null&&x.sma20!=null&&x.sma50!=null){if(x.price>=x.sma20&&x.sma20>=x.sma50)return'Bullish';if(x.price<=x.sma20&&x.sma20<=x.sma50)return'Bearish'}return'Mixed'}
 function passes(x){const q=String($('ts11Search').value||'').trim().toUpperCase();const name=String(x.companyName||x.name||'').toUpperCase();const searchType=$('ts11SearchType').value||'any';if(q&&searchType==='symbol'&&!x.symbol.includes(q))return false;if(q&&searchType==='company'&&!name.includes(q))return false;if(q&&searchType==='any'&&!x.symbol.includes(q)&&!name.includes(q))return false;const rmin=n($('ts11RsiMin').value),rmax=n($('ts11RsiMax').value),rv=n($('ts11RelVol').value),mc=n($('ts11MinCh').value),nh=n($('ts11NearHigh').value);if($('ts11OnlyHistory').checked&&(!x.historyPoints||x.historyPoints<20))return false;if(rmin!=null&&(x.rsi==null||x.rsi<rmin))return false;if(rmax!=null&&(x.rsi==null||x.rsi>rmax))return false;if(rv!=null&&(x.relativeVolume==null||x.relativeVolume<rv))return false;if(mc!=null&&(x.change==null||x.change<mc))return false;const tr=trend(x);if($('ts11Trend').value==='bull'&&tr!=='Bullish')return false;if($('ts11Trend').value==='bear'&&tr!=='Bearish')return false;const ma=$('ts11MA').value;if(ma==='above20'&&(x.price==null||x.ema20==null||x.price<x.ema20))return false;if(ma==='above50'&&(x.price==null||x.ema50==null||x.price<x.ema50))return false;if(ma==='golden'&&(x.sma20==null||x.sma50==null||x.sma20<x.sma50))return false;if(ma==='death'&&(x.sma20==null||x.sma50==null||x.sma20>x.sma50))return false;const md=$('ts11Macd').value;if(md==='bull'&&(x.macd==null||x.macdSignal==null||x.macd<x.macdSignal))return false;if(md==='bear'&&(x.macd==null||x.macdSignal==null||x.macd>x.macdSignal))return false;const ps=$('ts11PriceSma').value;if(ps==='yes'&&(x.price==null||x.sma20==null||x.price<x.sma20))return false;if(ps==='no'&&(x.price==null||x.sma20==null||x.price>=x.sma20))return false;if(nh!=null&&(x.high52==null||x.price==null||x.high52<=0||((x.high52-x.price)/x.high52*100)>nh))return false;if(preset==='momentum'&&(x.rsi==null||x.rsi<55||x.change==null||x.change<=0))return false;if(preset==='bullish'&&tr!=='Bullish')return false;if(preset==='breakout'&&(x.high52==null||x.price==null||x.price<x.high52*.97||x.relativeVolume==null||x.relativeVolume<1.2))return false;if(preset==='oversold'&&(x.rsi==null||x.rsi>=30))return false;if(preset==='volume'&&(x.relativeVolume==null||x.relativeVolume<1.5))return false;if(preset==='macd'&&(x.macd==null||x.macdSignal==null||x.macd<=x.macdSignal))return false;return true}
+// Normalize the API payload before rendering. These helpers are intentionally local to the Technical Screener.
+function extractRows(payload, depth=0){
+ if(depth>5||payload==null)return [];
+ if(Array.isArray(payload))return payload;
+ if(typeof payload!=='object')return [];
+ for(const key of ['data','results','rows','content','items','securities','live','stocks','records']){
+  const value=payload[key];
+  if(Array.isArray(value))return value;
+  if(value&&typeof value==='object'){const nested=extractRows(value,depth+1);if(nested.length)return nested;}
+ }
+ return [];
+}
+function mapRows(rawRows){
+ const read=(obj,keys)=>{for(const key of keys){const v=obj?.[key];if(v!==undefined&&v!==null&&v!=='' )return v;}return null;};
+ const numeric=(v)=>{if(v===undefined||v===null||v==='')return null;const n=Number(v);return Number.isFinite(n)?n:null;};
+ return (Array.isArray(rawRows)?rawRows:[]).map(row=>{
+  if(!row||typeof row!=='object')return null;
+  const tech=row.technicals&&typeof row.technicals==='object'?row.technicals:(row.technical&&typeof row.technical==='object'?row.technical:{});
+  const pick=(keys)=>{const v=read(row,keys);return v!==null?v:read(tech,keys);};
+  const symbol=String(pick(['symbol','ticker','securitySymbol','stockSymbol','code','security_code'])??'').trim().toUpperCase();
+  if(!symbol)return null;
+  return {...row,
+   symbol,
+   companyName:pick(['companyName','company_name','company','securityName','name'])||symbol,
+   price:numeric(pick(['price','ltp','lastPrice','lastTradedPrice','close','closePrice'])),
+   change:numeric(pick(['change','percentageChange','percentChange','percent_change','changePercent','perChange','pChange','changePercentage'])),
+   rsi:numeric(pick(['rsi','RSI'])),
+   sma20:numeric(pick(['sma20','sma_20','SMA20'])),
+   sma50:numeric(pick(['sma50','sma_50','SMA50'])),
+   ema20:numeric(pick(['ema20','ema_20','EMA20'])),
+   ema50:numeric(pick(['ema50','ema_50','EMA50'])),
+   macd:numeric(pick(['macd','MACD'])),
+   macdSignal:numeric(pick(['macdSignal','macd_signal','macd_signal_line','signal'])),
+   relativeVolume:numeric(pick(['relativeVolume','relative_volume','relVolume'])),
+   adx:numeric(pick(['adx','ADX'])),
+   high52:numeric(pick(['high52','high52Week','high52week','high_52_week'])),
+   historyPoints:numeric(pick(['historyPoints','history_points','historyCount']))
+  };
+ }).filter(Boolean);
+}
 function render(){const key=$('ts11Sort').value;const data=all.map(x=>({...x,_score:score(x)})).filter(passes);data.sort((a,b)=>((b[key]??-Infinity)-(a[key]??-Infinity)));const avg=data.length?data.reduce((s,x)=>s+(x.change||0),0)/data.length:0;const bull=data.filter(x=>trend(x)==='Bullish').length;const tech=data.filter(x=>(x.historyPoints||0)>=20).length;const shocks=data.filter(x=>(x.relativeVolume||0)>=1.5).length;$('ts11Summary').innerHTML=`<div class="ts11-stat"><b>${data.length}</b><span>Matches</span></div><div class="ts11-stat"><b>${fmt(avg,2)}%</b><span>Avg change</span></div><div class="ts11-stat"><b>${bull}</b><span>Bullish</span></div><div class="ts11-stat"><b>${shocks}</b><span>Vol shocks</span></div><div class="ts11-stat"><b>${tech}</b><span>With history</span></div>`;if(!data.length){$('ts11Results').innerHTML='<tr><td colspan="13"><div class="ts11-empty">No stocks match these conditions. Try unchecking “Require technical history” or clearing filters.</div></td></tr>';return}$('ts11Results').innerHTML=data.slice(0,500).map(x=>{const tr=trend(x),buy=x._score>=6;return`<tr data-symbol="${esc(x.symbol)}"><td><b>${esc(x.symbol)}</b><br><span style="font-size:9px;color:var(--muted)">${esc(x.companyName||x.name||'')}</span></td><td>${fmt(x.price)}</td><td class="${x.change>0?'ts11-up':x.change<0?'ts11-down':''}">${x.change==null?'—':(x.change>0?'+':'')+fmt(x.change)+'%'}</td><td>${fmt(x.rsi,1)}</td><td>${fmt(x.sma20)}</td><td>${fmt(x.sma50)}</td><td>${fmt(x.ema20)}</td><td>${fmt(x.ema50)}</td><td class="${x.macd!=null&&x.macdSignal!=null&&x.macd>x.macdSignal?'ts11-up':'ts11-down'}">${fmt(x.macd,3)}</td><td>${fmt(x.relativeVolume,2)}×</td><td>${fmt(x.adx,1)}</td><td>${fmt(x.high52)}</td><td><span class="ts11-chip ${buy?'buy':tr==='Bearish'?'sell':''}">${buy?'BUY SETUP':tr}</span><span class="ts11-chip">${x._score}</span></td></tr>`}).join('');document.querySelectorAll('#ts11Results tr[data-symbol]').forEach(row=>row.onclick=()=>{if(typeof window.openProfessionalChart==='function')window.openProfessionalChart(row.dataset.symbol);});}
 function setLoading(on,message='Loading live market rows and calculating indicators…'){const btn=$('ts11Run');if(btn){btn.disabled=on;btn.innerHTML=on?'<span class="ts11-spinner" aria-hidden="true"></span>Scanning…':'Run Scan'}if(on){$('ts11Results').innerHTML=`<tr><td colspan="13"><div class="ts11-loading" role="status" aria-live="polite"><span class="ts11-spinner" aria-hidden="true"></span><span>${esc(message)}</span></div></td></tr>`;$('ts11Summary').innerHTML='';}}
 async function load(){
@@ -4842,34 +4882,65 @@ async function load(){
  setLoading(true,'Connecting to NEPSE and loading the first batch…');
  try{
   const tf=encodeURIComponent($('ts11Tf').value||'D');
-  const batchSize=5;let offset=0;let universeCount=null;let latestPayload=null;let hadBatchError=false;
-  // Small requests prevent a single large historical-data request from hanging.
-  // Render after every batch so useful rows remain visible while later batches load.
+  const batchSize=10;let offset=0;let universeCount=null;let latestPayload=null;let hadBatchError=false;
+  // First load live market rows without historical calculations so the screen never stays blank
+  // while the slower historical-indicator endpoint is working.
+  try{
+   const liveController=new AbortController();const liveTimer=setTimeout(()=>liveController.abort(),15000);
+   let livePayload;
+   try{
+    const liveResponse=await fetch(base()+'/api/technical-screener?limit='+batchSize+'&offset=0&technical=false&timeframe='+tf,{cache:'no-store',headers:{Accept:'application/json'},signal:liveController.signal});
+    if(!liveResponse.ok)throw new Error('Live market API returned HTTP '+liveResponse.status);
+    livePayload=await liveResponse.json();
+   }finally{clearTimeout(liveTimer);}
+   if(thisRequest!==requestNo)return;
+   const liveRows=mapRows(Array.isArray(livePayload)?livePayload:(Array.isArray(livePayload?.data)?livePayload.data:(Array.isArray(livePayload?.results)?livePayload.results:(Array.isArray(livePayload?.rows)?livePayload.rows:extractRows(livePayload)))));
+   universeCount=Math.max(0,Number(livePayload.universeCount??livePayload.count??liveRows.length)||0);
+   if(liveRows.length){all=liveRows;loaded=true;render();$('ts11Universe').textContent='Universe: '+fmt(universeCount,0)+' · live rows '+fmt(all.length,0);$('ts11Updated').textContent='Updated: '+new Date(livePayload.updatedAt||Date.now()).toLocaleTimeString();status.textContent='LIVE DATA READY · LOADING INDICATORS';dot.style.background='#d29b19';}
+  }catch(liveError){console.warn('Technical screener live-row prefetch failed',liveError);}
+  // Now enrich the full universe with indicators. If historical calls time out, live rows stay visible.
   while(offset<500){
    if(thisRequest!==requestNo)return;
    setLoading(true,`Scanning stocks ${offset+1}${universeCount?'–'+Math.min(offset+batchSize,universeCount):'–'+(offset+batchSize)}${universeCount?' of '+universeCount:''}…`);
-   const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),45000);
-   let payload;
-   try{
-    const response=await fetch(base()+'/api/technical-screener?limit='+batchSize+'&offset='+offset+'&technical=true&timeframe='+tf,{cache:'no-store',headers:{Accept:'application/json'},signal:controller.signal});
-    if(!response.ok)throw new Error('Technical Screener API returned HTTP '+response.status);
-    payload=await response.json();
-   }finally{clearTimeout(timer);}
+   let payload=null,lastBatchError=null;
+   // Retry a transient timeout once. A failed batch must not discard already loaded rows.
+   for(let attempt=0;attempt<2&&!payload;attempt++){
+    const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),30000);
+    try{
+     const response=await fetch(base()+'/api/technical-screener?limit='+batchSize+'&offset='+offset+'&technical=true&timeframe='+tf,{cache:'no-store',headers:{Accept:'application/json'},signal:controller.signal});
+     if(!response.ok)throw new Error('Technical Screener API returned HTTP '+response.status);
+     payload=await response.json();
+    }catch(batchError){lastBatchError=batchError;}
+    finally{clearTimeout(timer);}
+   }
    if(thisRequest!==requestNo)return;
+   if(!payload){
+    hadBatchError=true;console.warn('Technical screener batch failed at offset '+offset,lastBatchError);
+    offset+=batchSize;
+    if(universeCount!=null&&offset>=universeCount)break;
+    continue;
+   }
    latestPayload=payload;
    const rawRows=Array.isArray(payload)?payload:(Array.isArray(payload?.data)?payload.data:(Array.isArray(payload?.results)?payload.results:(Array.isArray(payload?.rows)?payload.rows:extractRows(payload))));
    const mapped=mapRows(rawRows);
    if(universeCount==null)universeCount=Math.max(0,Number(payload.universeCount??payload.count??mapped.length)||0);
    if(mapped.length){
-    const seen=new Set(all.map(x=>String(x.symbol||'').toUpperCase()));
-    for(const row of mapped){const sym=String(row.symbol||'').toUpperCase();if(sym&&!seen.has(sym)){all.push(row);seen.add(sym);}}
+    const bySymbol=new Map(all.map((x,i)=>[String(x.symbol||'').toUpperCase(),i]));
+    for(const row of mapped){const sym=String(row.symbol||'').toUpperCase();if(!sym)continue;if(bySymbol.has(sym)){all[bySymbol.get(sym)]={...all[bySymbol.get(sym)],...row};}else{bySymbol.set(sym,all.length);all.push(row);}}
     loaded=true;render();
     $('ts11Universe').textContent='Universe: '+fmt(universeCount,0)+' · loaded '+fmt(all.length,0);
     $('ts11Updated').textContent='Updated: '+new Date(payload.updatedAt||Date.now()).toLocaleTimeString();
     const hasIndicators=all.some(x=>x.rsi!=null||x.sma20!=null||x.sma50!=null||x.ema20!=null||x.ema50!=null||x.macd!=null||x.relativeVolume!=null||x.adx!=null);
     dot.style.background=hasIndicators?'#20a464':'#d29b19';status.textContent=hasIndicators?'SCANNING · INDICATORS READY':'SCANNING · LOADING INDICATORS';
    }
-   if(!mapped.length||mapped.length<batchSize)break;
+   // Some live feeds return fewer recognizable rows than requested in a middle
+   // slice. Continue by offset until the reported universe is covered; only stop
+   // on an empty response when there is no known universe left to scan.
+   if(!mapped.length){
+    // An empty/temporarily malformed page must not terminate the scan early.
+    // Keep moving through the reported universe; only stop when its end is reached.
+    if(universeCount!=null && offset+batchSize>=universeCount)break;
+   }
    offset+=batchSize;
    if(universeCount!=null&&offset>=universeCount)break;
   }

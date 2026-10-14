@@ -84,6 +84,8 @@ CACHE_TTL = {
     "floorsheet": 35,
     "company": 300,
     "history": 600,
+    "technical-history": 600,
+    "technical-screener": 300,
     "sectors": 60,
     "sectorconstituents": 1800,
     "brokers": 45,
@@ -4005,7 +4007,11 @@ async def technical_screener(
             if technical:
                 async with sem:
                     try:
-                        h = await get_history(symbol)
+                        # Cache normalized OHLCV per symbol/timeframe so repeat scans
+                        # reuse recent history instead of calling upstream providers again.
+                        async def load_technical_history():
+                            return await get_history(symbol)
+                        h = await cached(f'technical-history:{tf}:{symbol}', load_technical_history)
                         rows = h.get('data', []) if isinstance(h, dict) else []
                         rows = _aggregate_technical_history(rows, tf)
                         base.update(_technical_snapshot(rows))
