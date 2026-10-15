@@ -1720,7 +1720,6 @@ body{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",san
     <div class="feature-list">
       <div class="feature-group">MARKET & RESEARCH</div>
       <button class="feature-item" onclick="openFeatureWorkspace('market-intelligence-v9','📊 Command Center')"><b>📊 Command Center</b><small>Market overview, breadth, movers, liquidity and feed health</small></button>
-      <button class="feature-item" onclick="openFeatureWorkspace('market-intelligence-v9','📡 Live Market')"><b>📡 Live Market</b><small>Live market snapshot, movers and trading activity</small></button>
       <button class="feature-item" onclick="openFeatureWorkspace('stock-xray-v7','🩻 Stock X-Ray')"><b>🩻 Stock X-Ray</b><small>Fundamentals, valuation, technicals and activity</small></button>
       <button class="feature-item" onclick="openFeatureWorkspace('professional-charting-v8','📈 Professional Charting')"><b>📈 Professional Charting</b><small>Candles, volume and technical indicators</small></button>
       <div class="feature-group">SCREENER & FLOW</div>
@@ -2613,14 +2612,20 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
   function sym(r){return String(r.symbol||r.ticker||r.stockSymbol||r.securityName||'').toUpperCase()}
   function pick(r, keys){for(const k of keys){const n=num(r[k]);if(n!==null)return n}return null}
   function normalize(rows){
-    return (Array.isArray(rows)?rows:[]).map(r=>({
-      raw:r, symbol:sym(r),
-      name:r.companyName||r.company||r.name||r.securityName||sym(r),
-      ltp:pick(r,['ltp','lastPrice','close','price','lastTradedPrice']),
-      change:pick(r,['percentageChange','percentChange','changePercent','changePercentage','pctChange']),
-      volume:pick(r,['volume','totalTradedQuantity','quantity']),
-      turnover:pick(r,['turnover','totalTradedValue','value']),
-    })).filter(r=>r.symbol)
+    return (Array.isArray(rows)?rows:[]).map(r=>{
+      const ltp=pick(r,['ltp','lastPrice','close','closePrice','price','lastTradedPrice']);
+      const prev=pick(r,['previousDayClosePrice','previous_day_close_price','previousClose','prevClose','previousClosePrice']);
+      let change=pick(r,['percentageChange','percentChange','changePercent','changePercentage','pctChange','perChange','pChange']);
+      if(change===null && ltp!==null && prev!==null && prev!==0) change=((ltp-prev)/prev)*100;
+      return {
+        raw:r, symbol:sym(r),
+        name:r.companyName||r.company||r.name||r.securityName||sym(r),
+        ltp,
+        change,
+        volume:pick(r,['volume','totalTradedQuantity','tradedShares','quantity']),
+        turnover:pick(r,['turnover','totalTradedValue','totalAmount','value']),
+      };
+    }).filter(r=>r.symbol)
   }
 
   function discoverRows(){
@@ -2694,11 +2699,58 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
 
   function refresh(){
     const rows=discoverRows();
+    // Prefer the shared live feed when it contains usable price rows. Otherwise keep
+    // the direct technical-screener snapshot loaded below instead of showing an empty list.
     if(rows.length){state.rows=rows;state.status='LIVE'}
+    else if(state.rows.length){state.status='LIVE'}
+    else if(quantFetchBusy){state.status='CONNECTING'}
     else if(window.PULSE_FEED?.status){state.status=String(window.PULSE_FEED.status).toUpperCase()}
     else state.status='CACHED';
     if($('qFeedState'))$('qFeedState').textContent='FEED: '+state.status;
     renderResults();renderSignals();renderWatch();renderAlerts();checkAlerts();
+  }
+
+  const API=(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
+  let quantFetchBusy=false, quantLastFetch=0;
+  async function fetchQuantRows(){
+    if(quantFetchBusy || Date.now()-quantLastFetch<15000)return;
+    quantFetchBusy=true; quantLastFetch=Date.now();
+    if(!$('qFeedState')){quantFetchBusy=false;return}
+    if(!state.rows.length){state.status='CONNECTING';$('qFeedState').textContent='FEED: CONNECTING';}
+    try{
+      const controller=new AbortController();
+      const timer=setTimeout(()=>controller.abort(),45000);
+      let response;
+      try{
+        response=await fetch(API+'/api/technical-screener?limit=10&offset=0&technical=true&timeframe=D&_quant_watchlist='+Date.now(),{
+          cache:'no-store',signal:controller.signal,headers:{Accept:'application/json'}
+        });
+      } finally { clearTimeout(timer); }
+      if(!response.ok)throw new Error('Technical screener HTTP '+response.status);
+      const payload=await response.json();
+      let raw=Array.isArray(payload?.data)?payload.data:
+        Array.isArray(payload?.rows)?payload.rows:
+        Array.isArray(payload?.results)?payload.results:
+        Array.isArray(payload?.securities)?payload.securities:[];
+      if(!raw.length && payload?.data && typeof payload.data==='object'){
+        raw=Array.isArray(payload.data.rows)?payload.data.rows:
+          Array.isArray(payload.data.results)?payload.data.results:
+          Array.isArray(payload.data.securities)?payload.data.securities:[];
+      }
+      const rows=normalize(raw);
+      if(!rows.length)throw new Error('Technical screener returned no usable rows');
+      state.rows=rows;
+      state.status='LIVE';
+      if($('qFeedState'))$('qFeedState').textContent='FEED: LIVE';
+    }catch(e){
+      if(!state.rows.length){
+        state.status='CACHED';
+        if($('qFeedState'))$('qFeedState').textContent='FEED: CACHED';
+      }
+    }finally{
+      quantFetchBusy=false;
+      refresh();
+    }
   }
 
   $('qAdd')?.addEventListener('click',()=>{
@@ -2719,7 +2771,10 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
 
   document.addEventListener('pulse-feed-update',refresh);
   setInterval(refresh,5000);
-  setTimeout(refresh,700);
+  // Fetch a real technical snapshot directly on section initialization; don't depend
+  // on another component having already populated window.PULSE_FEED.
+  setTimeout(()=>{refresh();fetchQuantRows()},150);
+  setInterval(fetchQuantRows,30000);
 })();
 </script>
 
@@ -4272,7 +4327,7 @@ document.addEventListener('DOMContentLoaded',()=>{
         <div><label>Label (optional)</label><input id="aw6Label" placeholder="My alert"></div>
       </div>
       <div class="aw6-actions">
-        <button id="aw6Create" class="aw6-btn">Create alert</button>
+        <button id="aw6Create" class="aw6-btn" type="button">Create alert</button>
         <label class="aw6-toggle"><input id="aw6Notify" type="checkbox"> Browser notification when supported</label>
       </div>
       <div class="aw6-hint">For breakout/breakdown alerts, the threshold is not required; the feed must provide usable history/high-low data.</div>
@@ -4419,9 +4474,11 @@ function addWatch(){
 }
 function createAlert(){
   const sym=String($('aw6AlertSymbol').value||'').trim().toUpperCase(), type=$('aw6AlertType').value;
-  if(!sym||!find(sym)){toast('Choose a symbol available in the current feed.');return}
+  // Save alerts even before the market feed has populated; evaluate when the symbol arrives.
+  if(!sym){toast('Enter a symbol, for example NABIL.');$('aw6AlertSymbol').focus();return}
+  if(!/^[A-Z0-9._-]{1,24}$/.test(sym)){toast('Enter a valid stock symbol.');$('aw6AlertSymbol').focus();return}
   const needsThreshold=!['breakout','breakdown'].includes(type), threshold=needsThreshold?num($('aw6Threshold').value):null;
-  if(needsThreshold&&threshold==null){toast('Enter an alert threshold.');return}
+  if(needsThreshold&&threshold==null){toast('Enter an alert threshold.');$('aw6Threshold').focus();return}
   const a={id:'a_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),symbol:sym,type,threshold,label:String($('aw6Label').value||'').trim(),enabled:true,createdAt:Date.now(),triggeredAt:null};
   alerts.push(a);save(KEY_A,alerts);renderAlerts();toast('Alert created for '+sym);$('aw6AlertSymbol').value='';$('aw6Threshold').value='';$('aw6Label').value='';
 }
@@ -4866,7 +4923,7 @@ document.addEventListener('DOMContentLoaded',()=>{
 const $=id=>document.getElementById(id);let feed={securities:[],liveMarket:[],gainers:[],losers:[],sectorIndices:[],floorsheet:[],status:'WAITING'};
 function num(v){const n=Number(v);return Number.isFinite(n)?n:null}function fmt(v,d=2){const n=num(v);return n==null?'—':n.toLocaleString(undefined,{maximumFractionDigits:d})}function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}function val(r,ks){for(const k of ks){const n=num(r?.[k]);if(n!=null)return n}return null}function txt(r,ks){for(const k of ks)if(r?.[k]!=null&&String(r[k]).trim()!=='')return r[k];return null}
 function rows(){const a=[...(feed.liveMarket||[]),...(feed.securities||[])],seen=new Set(),o=[];for(const r of a){const symbol=String(r.symbol||r.ticker||r.securitySymbol||r.code||'').trim().toUpperCase();if(!symbol||seen.has(symbol))continue;seen.add(symbol);o.push({...r,symbol})}return o}
-function metrics(r){return{p:val(r,['price','ltp','lastPrice','close']),ch:val(r,['changePercent','percentageChange','percentChange','changePct','change']),vol:val(r,['volume','totalTradedQuantity','quantity']),turn:val(r,['turnover','totalTurnover','value']),sector:txt(r,['sector','sectorName'])}}
+function metrics(r){let p=val(r,['price','ltp','lastPrice','closePrice','close','currentPrice']),prev=val(r,['previousDayClosePrice','previousClose','previousClosingPrice','prevClose','previousPrice']);let ch=val(r,['changePercent','percentageChange','percentChange','changePct','pChange','perChange']);if(ch==null){const raw=val(r,['change']);if(raw!=null&&prev!=null&&prev!==0)ch=raw/prev*100;else if(p!=null&&prev!=null&&prev!==0)ch=(p-prev)/prev*100;}return{p,ch,vol:val(r,['volume','totalTradedQuantity','quantity','tradedShares','totalTradeQuantity']),turn:val(r,['turnover','totalTurnover','value','totalTradedValue','totalTradeValue']),sector:txt(r,['sector','sectorName'])}}
 function table(list,mode){if(!list.length)return'<div class="mi9-empty">No usable data in the current feed.</div>';return`<div class="mi9-scroll"><table class="mi9-table"><thead><tr><th>Symbol</th><th>Price</th><th>Change</th><th>${mode==='vol'?'Volume':'Turnover'}</th></tr></thead><tbody>${list.slice(0,10).map(r=>{const d=metrics(r),v=mode==='vol'?d.vol:d.turn;return`<tr><td><b>${esc(r.symbol)}</b></td><td>${fmt(d.p)}</td><td class="${d.ch>0?'mi9-good':d.ch<0?'mi9-bad':''}">${d.ch==null?'—':(d.ch>0?'+':'')+fmt(d.ch)+'%'}</td><td>${fmt(v,mode==='vol'?0:2)}</td></tr>`}).join('')}</tbody></table></div>`}
 function render(){
 const a=rows(),ds=a.map(metrics),adv=ds.filter(x=>x.ch>0).length,dec=ds.filter(x=>x.ch<0).length,unch=ds.length-adv-dec,total=ds.length;
@@ -4885,7 +4942,10 @@ const cov=[['Securities',total],['Price',ds.filter(x=>x.p!=null).length],['Chang
 $('mi9Coverage').innerHTML=cov.map(x=>`<div style="margin:9px 0"><div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:4px"><b>${esc(x[0])}</b><span>${x[1]}/${total||0}</span></div><div class="mi9-bar"><i style="width:${total?Math.min(100,x[1]/total*100):0}%;background:#667085"></i></div></div>`).join('');
 }
 function sync(x){if(!x)return;feed={...feed,...x,securities:x.securities||feed.securities||[],liveMarket:x.liveMarket||feed.liveMarket||[]};const st=String(feed.status||'WAITING').toUpperCase();$('mi9Status').textContent=st;$('mi9Dot').style.background=st.includes('LIVE')?'#20a464':st.includes('CACHE')?'#d29b19':'#999';render()}
-document.addEventListener('DOMContentLoaded',()=>{document.querySelectorAll('.mi9-tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.mi9-tab').forEach(x=>x.classList.remove('active'));b.classList.add('active');['overview','movers','liquidity','sectors','health'].forEach(x=>{$('mi9'+x[0].toUpperCase()+x.slice(1)).hidden=x!==b.dataset.mi9})}));window.addEventListener('pulse-central-snapshot',e=>sync(e.detail));window.addEventListener('pulse-feed-update',()=>{const st=window.PULSE_FEED_ENGINE?.state?.();if(st)sync(st)});const st=window.PULSE_FEED_ENGINE?.state?.();if(st)sync(st);else render()});
+const API=(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
+function collectRows(payload){const out=[],seen=new Set();const walk=(v,depth=0)=>{if(!v||depth>5)return;if(Array.isArray(v)){for(const x of v)walk(x,depth+1);return;}if(typeof v!=='object')return;const sym=txt(v,['symbol','ticker','securitySymbol','symbolName','stockSymbol','security_code','code']);const price=val(v,['ltp','lastTradedPrice','lastPrice','price','closePrice','closingPrice','close','currentPrice']);if(sym&&price!=null){const key=String(sym).trim().toUpperCase();if(key&&!seen.has(key)){seen.add(key);out.push({...v,symbol:key,price:price});}return;}for(const k of ['data','live','liveMarket','companies','stocks','rows','results','result','items','records','content','market','payload'])if(v[k]!=null)walk(v[k],depth+1);};walk(payload);return out;}
+async function loadCommandMarket(){const status=$('mi9Status');if(status)status.textContent='CONNECTING';try{let rows=[];let marketPayload=null;try{const r=await fetch(API+'/api/market?_mi9='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});if(r.ok){marketPayload=await r.json();rows=collectRows(marketPayload);}}catch(e){}if(!rows.length){const r=await fetch(API+'/api/technical-screener?limit=60&offset=0&technical=false&timeframe=D&_mi9='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});if(!r.ok)throw Error('Market API HTTP '+r.status);const d=await r.json();rows=collectRows(d);marketPayload=marketPayload||d;}if(!rows.length)throw Error('Backend responded, but no usable security rows were found');const gainers=rows.filter(r=>metrics(r).ch!=null).slice().sort((a,b)=>metrics(b).ch-metrics(a).ch);const losers=rows.filter(r=>metrics(r).ch!=null).slice().sort((a,b)=>metrics(a).ch-metrics(b).ch);const sectors=rows.filter(r=>metrics(r).sector);feed={...feed,liveMarket:rows,securities:[],gainers:gainers.slice(0,10),losers:losers.slice(0,10),sectorIndices:sectors,status:'LIVE'};render();if(status)status.textContent='LIVE · '+rows.length+' rows';window.PULSE_COMMAND_CENTER_RECEIVER={status:'LIVE',rows:rows.length,updatedAt:marketPayload?.updatedAt||new Date().toISOString()};}catch(e){console.warn('Command Center market load failed',e);if(status)status.textContent='FEED UNAVAILABLE';if(!rows().length){feed={...feed,status:'OFFLINE'};render();}}}
+document.addEventListener('DOMContentLoaded',()=>{document.querySelectorAll('.mi9-tab').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.mi9-tab').forEach(x=>x.classList.remove('active'));b.classList.add('active');['overview','movers','liquidity','sectors','health'].forEach(x=>{$('mi9'+x[0].toUpperCase()+x.slice(1)).hidden=x!==b.dataset.mi9})}));window.addEventListener('pulse-central-snapshot',e=>{if((e.detail?.live||e.detail?.companies||[]).length)sync(e.detail)});window.addEventListener('pulse-feed-update',()=>{const st=window.PULSE_FEED_ENGINE?.state?.();if(st&&((st.liveMarket||st.securities||st.live||[]).length))sync(st)});const st=window.PULSE_FEED_ENGINE?.state?.();if(st&&((st.liveMarket||st.securities||st.live||[]).length))sync(st);else render();loadCommandMarket();setInterval(loadCommandMarket,60000)});
 })();
 </script>
 
