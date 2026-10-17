@@ -7189,14 +7189,66 @@ body.v22-profile-tab-active .bottom.mobile-exact-bottom{z-index:10000}
 (function(){
  const $=id=>document.getElementById(id);const gate=$('np-login-gate');if(!gate)return;
  let mode='login';
- function config(){return window.NEPSE_PULSE_AUTH||{supabaseUrl:'',supabaseAnonKey:''}}
+ function config(){
+   const cfg=window.NEPSE_PULSE_AUTH||window.AUTH_CFG||{};
+   return {
+     supabaseUrl: cfg.supabaseUrl||cfg.url||'',
+     supabaseAnonKey: cfg.supabaseAnonKey||cfg.anonKey||cfg.publishableKey||''
+   };
+ }
  function status(message,error=false){const el=$('np-login-status');if(el){el.textContent=message||'';el.style.color=error?'#ffb8b8':'#8de6bd'}}
  function setMode(next){mode=next;const signup=mode==='signup';$('np-login-heading').innerHTML=signup?'Create <span>Account</span>':'Welcome <span>Back</span>';$('np-login-subheading').innerHTML=signup?'Create your NEPSE Pulse account<br>to continue':'Sign in to your NEPSE Pulse account<br>to continue';$('np-login-submit').textContent=signup?'Create Account':'Login';$('np-login-switch-text').textContent=signup?'Already have an account?':'Don’t have an account?';$('np-login-switch').textContent=signup?'Login':'Sign Up';$('np-login-forgot').style.display=signup?'none':'inline';$('np-login-password').autocomplete=signup?'new-password':'current-password';status('')}
- async function client(){let c=window.__NP_LOGIN_SUPABASE;if(c)return c;const cfg=config();if(!cfg.supabaseUrl||!cfg.supabaseAnonKey){status('Sign-in is not configured yet. Add your Supabase URL and publishable key in auth-config.js, then enable Email and Google providers.',true);return null}try{if(!window.supabase){await new Promise((resolve,reject)=>{const sc=document.createElement('script');sc.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';sc.onload=resolve;sc.onerror=reject;document.head.appendChild(sc)})}c=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});window.__NP_LOGIN_SUPABASE=c;return c}catch(e){status('Could not load the sign-in service. Check your connection.',true);return null}}
+ async function client(){
+   let c=window.__NP_LOGIN_SUPABASE;
+   if(c)return c;
+   const cfg=config();
+   if(!cfg.supabaseUrl||!cfg.supabaseAnonKey){
+     status('Sign-in configuration is missing. Check that auth-config.js is in the repository root and contains your Supabase project URL and publishable key.',true);
+     return null;
+   }
+   try{
+     if(!window.supabase){
+       await new Promise((resolve,reject)=>{
+         const sc=document.createElement('script');
+         sc.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
+         sc.onload=resolve;
+         sc.onerror=()=>reject(new Error('Could not download the Supabase sign-in library. Check your internet connection or CDN access.'));
+         document.head.appendChild(sc);
+       });
+     }
+     c=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey,{
+       auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}
+     });
+     window.__NP_LOGIN_SUPABASE=c;
+     return c;
+   }catch(e){
+     status(e.message||'Could not load the sign-in service. Check your connection.',true);
+     return null;
+   }
+ }
  $('np-login-switch').addEventListener('click',()=>setMode(mode==='login'?'signup':'login'));
  $('np-login-toggle-password').addEventListener('click',()=>{const input=$('np-login-password');input.type=input.type==='password'?'text':'password';$('np-login-toggle-password').setAttribute('aria-label',input.type==='password'?'Show password':'Hide password')});
  $('np-login-form').addEventListener('submit',async e=>{e.preventDefault();const email=$('np-login-email').value.trim(),password=$('np-login-password').value;if(!email||!password){status('Enter your email and password.',true);return}const c=await client();if(!c)return;const btn=$('np-login-submit');btn.disabled=true;btn.textContent=mode==='signup'?'Creating account…':'Signing in…';try{let result;if(mode==='signup')result=await c.auth.signUp({email,password,options:{emailRedirectTo:window.location.origin+window.location.pathname}});else result=await c.auth.signInWithPassword({email,password});if(result.error)throw result.error;if(mode==='signup'&&!result.data.session){status('Account created. Check your email to confirm your address.');return}if(result.data.session){window.__NP_LOGIN_SESSION=result.data.session;window.npHideLoginGate?.();status('Signed in successfully.')}}catch(err){status(err.message||'Sign-in failed. Please try again.',true)}finally{btn.disabled=false;btn.textContent=mode==='signup'?'Create Account':'Login'}});
- $('np-login-google').addEventListener('click',async()=>{const c=await client();if(!c)return;status('Connecting to Google…');try{const {error}=await c.auth.signInWithOAuth({provider:'google',options:{redirectTo:window.location.origin+window.location.pathname}});if(error)throw error}catch(err){status(err.message||'Could not start Google sign-in.',true)}});
+ $('np-login-google').addEventListener('click',async()=>{
+   const btn=$('np-login-google');
+   if(btn.dataset.busy==='1')return;
+   btn.dataset.busy='1';
+   status('Preparing Google sign-in…');
+   try{
+     const c=await client();
+     if(!c)return;
+     status('Connecting to Google…');
+     const {error}=await c.auth.signInWithOAuth({
+       provider:'google',
+       options:{redirectTo:window.location.origin+window.location.pathname}
+     });
+     if(error)throw error;
+   }catch(err){
+     status(err.message||'Could not start Google sign-in.',true);
+   }finally{
+     btn.dataset.busy='0';
+   }
+ });
  $('np-login-forgot').addEventListener('click',async()=>{const email=$('np-login-email').value.trim();if(!email){status('Enter your email address first, then tap Forgot Password.',true);$('np-login-email').focus();return}const c=await client();if(!c)return;try{const {error}=await c.auth.resetPasswordForEmail(email,{redirectTo:window.location.origin+window.location.pathname});if(error)throw error;status('If this email is registered, a password reset link has been sent.')}catch(err){status(err.message||'Could not send the reset email.',true)}});
  $('np-login-guest').addEventListener('click',()=>{window.npHideLoginGate?.();status('Continuing as guest. Sign in later from Profile to sync your account.')});
  const cfg=config();if(!cfg.supabaseUrl||!cfg.supabaseAnonKey)$('np-login-config-note').textContent='Google and email login require Supabase Auth setup. Guest access remains available.';
