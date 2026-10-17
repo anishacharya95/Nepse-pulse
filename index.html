@@ -5894,7 +5894,17 @@ header.topbar .feature-btn{
       // exchanging the OAuth callback code and cause the login gate to reappear.
       let client=window.__NP_LOGIN_SUPABASE;
       if(!client){
-        client=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey);
+        client=window.supabase.createClient(
+  cfg.supabaseUrl,
+  cfg.supabaseAnonKey,
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true
+    }
+  }
+)
         window.__NP_LOGIN_SUPABASE=client;
       }
       const {data,error}=await client.auth.getSession();
@@ -7179,7 +7189,17 @@ body.v22-profile-tab-active .bottom.mobile-exact-bottom{z-index:10000}
 (function(){
  const $=id=>document.getElementById(id);const gate=$('np-login-gate');if(!gate)return;
  let mode='login';
- function config(){return window.NEPSE_PULSE_AUTH||{supabaseUrl:'',supabaseAnonKey:''}}
+ function config(){return window.supabase.createClient(
+  cfg.supabaseUrl,
+  cfg.supabaseAnonKey,
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true
+    }
+  }
+)
  function status(message,error=false){const el=$('np-login-status');if(el){el.textContent=message||'';el.style.color=error?'#ffb8b8':'#8de6bd'}}
  function setMode(next){mode=next;const signup=mode==='signup';$('np-login-heading').innerHTML=signup?'Create <span>Account</span>':'Welcome <span>Back</span>';$('np-login-subheading').innerHTML=signup?'Create your NEPSE Pulse account<br>to continue':'Sign in to your NEPSE Pulse account<br>to continue';$('np-login-submit').textContent=signup?'Create Account':'Login';$('np-login-switch-text').textContent=signup?'Already have an account?':'Don’t have an account?';$('np-login-switch').textContent=signup?'Login':'Sign Up';$('np-login-forgot').style.display=signup?'none':'inline';$('np-login-password').autocomplete=signup?'new-password':'current-password';status('')}
  async function client(){let c=window.__NP_LOGIN_SUPABASE;if(c)return c;const cfg=config();if(!cfg.supabaseUrl||!cfg.supabaseAnonKey){status('Sign-in is not configured yet. Add your Supabase URL and anon key in auth-config.js, then enable Email and Google providers.',true);return null}try{if(!window.supabase){await new Promise((resolve,reject)=>{const sc=document.createElement('script');sc.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';sc.onload=resolve;sc.onerror=reject;document.head.appendChild(sc)})}c=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey);window.__NP_LOGIN_SUPABASE=c;return c}catch(e){status('Could not load the sign-in service. Check your connection.',true);return null}}
