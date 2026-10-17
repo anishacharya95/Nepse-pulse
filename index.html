@@ -3221,12 +3221,16 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
   function num(v){const n=Number(v);return Number.isFinite(n)?n:null}
   function pick(o,keys){for(const k of keys){const n=num(o?.[k]);if(n!==null)return n}return null}
   function text(o,keys){for(const k of keys){if(o?.[k]!==undefined&&o?.[k]!==null&&String(o[k]).trim())return String(o[k])}return ''}
-  function sym(o){return text(o,['symbol','ticker','stockSymbol','securityName']).toUpperCase()}
-  function ltp(o){return pick(o,['ltp','lastPrice','close','price','lastTradedPrice'])}
+  function sym(o){return text(o,['symbol','sym','ticker','stockSymbol','securitySymbol','stockSymbolName','symbolName','scrip','securityName','companySymbol']).toUpperCase().trim()}
+  function ltp(o){return pick(o,['ltp','LTP','lastPrice','lastTradedPrice','currentPrice','marketPrice','closingPrice','close','price','last_trade_price'])}
   function money(n){return n===null||n===undefined?'—':n.toLocaleString(undefined,{maximumFractionDigits:2})}
   function discover(){
-    const c=[window.PULSE_FEED?.state?.securities,window.PULSE_FEED?.state?.liveMarket,window.PULSE_FEED?.securities,window.liveMarketData,window.marketData];
-    for(const x of c)if(Array.isArray(x)&&x.length)return x;
+    // The Central Feed Engine is the authoritative source; PULSE_FEED is an engine
+    // whose state is a function, not an object with a nested .state property.
+    const engine=window.PULSE_FEED_ENGINE||window.PULSE_FEED;
+    let st={}; try{st=typeof engine?.state==='function'?engine.state():(engine?.state||{});}catch(e){}
+    const candidates=[st.live,st.liveMarket,st.securities,st.companies,st.stocks,st.priceVolume,window.PULSE_FEED?.live,window.liveMarketData,window.marketData];
+    for(const x of candidates){if(Array.isArray(x)&&x.length)return x;}
     return [];
   }
 
@@ -3251,11 +3255,13 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
   }
 
   function render(){
-    const status=window.PULSE_FEED?.status||window.PULSE_FEED?.state?.status||'CACHED';
+    const engine=window.PULSE_FEED_ENGINE||window.PULSE_FEED;
+    let feedState={};try{feedState=typeof engine?.state==='function'?engine.state():(engine?.state||{});}catch(e){}
+    const status=feedState.status||window.PULSE_FEED_STATUS||window.PULSE_FEED?.status||'CONNECTING';
     if($('pFeedState'))$('pFeedState').textContent='FEED: '+String(status).toUpperCase();
 
     rows=discover();
-    const map={}; rows.forEach(r=>{const s=sym(r); if(s)map[s]=ltp(r)});
+    const map={}; rows.forEach(r=>{const s=sym(r),price=ltp(r); if(s&&price!==null&&price>=0)map[s]=price;});
     const hs=holdings();
     let value=0,cost=0;
     const hr=$('pHoldings');
@@ -3269,13 +3275,14 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
     });
     if(hr)hr.innerHTML=rendered.map(x=>`<div class="p-item"><span><b>${x.h.symbol}</b><small>${x.h.qty.toLocaleString()} shares • Avg ${money(x.avg)}</small></span><span>${money(x.mv)}<small>${x.pl===null?'P/L —':'P/L '+money(x.pl)}</small></span></div>`).join('')||'<div class="p-empty">No holdings yet.</div>';
 
-    const pl=value&&cost?value-cost:null;
+    const allPricesAvailable=rendered.length>0&&rendered.every(x=>x.mv!==null);
+    const pl=allPricesAvailable?value-cost:null;
     if($('pStats'))$('pStats').innerHTML=`<div class="p-stat"><strong>${hs.length}</strong><span>Positions</span></div><div class="p-stat"><strong>${money(value||null)}</strong><span>Value</span></div><div class="p-stat"><strong>${pl===null?'—':money(pl)}</strong><span>Unrealized P/L</span></div>`;
     const dash=$('profilePortfolioDash');
     if(dash){
       const fmt=n=>n===null||n===undefined?'—':Number(n).toLocaleString(undefined,{maximumFractionDigits:2});
       const set=(id,v)=>{const el=$(id);if(el)el.textContent=v};
-      set('ppdValue','NPR '+fmt(value||null));set('ppdPL',pl===null?'—':(pl>=0?'+NPR ':'−NPR ')+fmt(Math.abs(pl)));set('ppdPositions',hs.length+' holdings');set('ppdCount',hs.length+' holdings');set('ppdHoldingsCount',hs.length+' holdings');set('ppdDonutValue',value?fmt(value/1000)+'K':'—');
+      set('ppdValue','NPR '+fmt(rendered.some(x=>x.mv!==null)?value:null));set('ppdPL',pl===null?'—':(pl>=0?'+NPR ':'−NPR ')+fmt(Math.abs(pl)));set('ppdPositions',hs.length+' holdings');set('ppdCount',hs.length+' holdings');set('ppdHoldingsCount',hs.length+' holdings');set('ppdDonutValue',rendered.some(x=>x.mv!==null)?fmt(value/1000)+'K':'—');
       const colors=['#176b53','#e2aa3e','#2c7d9b','#8c6bb1','#d16b62','#7d9b55','#4774b8'];
       let cursor=0;const slices=rendered.filter(x=>x.mv!==null&&x.mv>0);const total=slices.reduce((a,x)=>a+x.mv,0);
       const stops=slices.map((x,i)=>{const start=cursor;cursor+=total?x.mv/total*100:0;return `${colors[i%colors.length]} ${start}% ${cursor}%`});
@@ -3283,7 +3290,7 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
       const legend=$('ppdLegend');if(legend)legend.innerHTML=slices.map((x,i)=>`<div class="ppd-legend-row"><i class="ppd-dot" style="background:${colors[i%colors.length]}"></i><b>${x.h.symbol}</b><span>${total?Math.round(x.mv/total*100):0}%</span></div>`).join('')||'<div class="ppd-empty">Add holdings to see allocation.</div>';
       const holdingHtml=rendered.map((x,i)=>`<div class="ppd-holding"><div><b>${x.h.symbol}</b><small>${x.h.qty.toLocaleString()} shares · Avg ${money(x.avg)} · LTP ${money(x.live)}</small></div><div style="text-align:right"><b>NPR ${money(x.mv)}</b><small style="color:${x.pl===null?'#77837c':x.pl>=0?'#167653':'#c34242'}">P/L ${money(x.pl)}</small></div></div>`).join('')||'<div class="ppd-empty">No holdings yet. Add a buy transaction below.</div>';
       const hl=$('ppdHoldingList');if(hl)hl.innerHTML=holdingHtml;
-      const perf=$('ppdPerformance');if(perf)perf.innerHTML=rendered.length?`<div class="ppd-holding"><span>Market value</span><b>NPR ${fmt(value||null)}</b></div><div class="ppd-holding"><span>Invested cost</span><b>NPR ${fmt(cost||null)}</b></div><div class="ppd-holding"><span>Unrealized P/L</span><b style="color:${pl===null?'#77837c':pl>=0?'#167653':'#c34242'}">${pl===null?'—':(pl>=0?'+':'−')+'NPR '+fmt(Math.abs(pl))}</b></div>`:'Performance will appear when holdings and live prices are available.';
+      const perf=$('ppdPerformance');if(perf)perf.innerHTML=rendered.length?`<div class="ppd-holding"><span>Market value</span><b>NPR ${fmt(rendered.some(x=>x.mv!==null)?value:null)}</b></div><div class="ppd-holding"><span>Invested cost</span><b>NPR ${fmt(cost||null)}</b></div><div class="ppd-holding"><span>Unrealized P/L</span><b style="color:${pl===null?'#77837c':pl>=0?'#167653':'#c34242'}">${pl===null?'—':(pl>=0?'+':'−')+'NPR '+fmt(Math.abs(pl))}</b></div>`:'Performance will appear when holdings and live prices are available.';
     }
 
     const dr=$('pDividends');
@@ -3308,6 +3315,8 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
   });
 
   document.addEventListener('pulse-feed-update',render);
+  document.addEventListener('pulse-central-snapshot',render);
+  window.addEventListener('pulse-central-snapshot',render);
   setInterval(render,5000);
   setTimeout(render,900);
 })();
