@@ -5821,12 +5821,19 @@ header.topbar .feature-btn{
     }).join('');
   }
   async function loadSb(){
-    if(sb)return sb;
+    // IMPORTANT: every part of NEPSE Pulse must share one Supabase client.
+    // Creating another client during the OAuth callback can race with PKCE code
+    // exchange and make the login gate appear again after successful Google login.
+    if(window.__NP_LOGIN_SUPABASE){sb=window.__NP_LOGIN_SUPABASE;return sb}
+    if(sb){window.__NP_LOGIN_SUPABASE=sb;return sb}
     if(!AUTH_CFG.supabaseUrl||!AUTH_CFG.supabaseAnonKey){const x=document.getElementById('v22-auth-status');if(x)x.textContent='Add your Supabase URL and anon key in auth-config.js to enable sign-in.';return null}
     if(!window.supabase){
       await new Promise((resolve,reject)=>{const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';s.onload=resolve;s.onerror=reject;document.head.appendChild(s)}).catch(()=>{const x=document.getElementById('v22-auth-status');if(x)x.textContent='Could not load authentication service.'});
     }
-    if(window.supabase)sb=window.supabase.createClient(AUTH_CFG.supabaseUrl,AUTH_CFG.supabaseAnonKey);
+    if(window.supabase){
+      sb=window.supabase.createClient(AUTH_CFG.supabaseUrl,AUTH_CFG.supabaseAnonKey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+      window.__NP_LOGIN_SUPABASE=sb;
+    }
     return sb;
   }
   async function pullCloud(){
