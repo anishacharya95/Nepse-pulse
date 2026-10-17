@@ -5821,20 +5821,9 @@ header.topbar .feature-btn{
     }).join('');
   }
   async function loadSb(){
-    // IMPORTANT: every part of NEPSE Pulse must share one Supabase client.
-    // Creating another client during the OAuth callback can race with PKCE code
-    // exchange and make the login gate appear again after successful Google login.
     if(window.__NP_LOGIN_SUPABASE){sb=window.__NP_LOGIN_SUPABASE;return sb}
-    if(sb){window.__NP_LOGIN_SUPABASE=sb;return sb}
-    if(!AUTH_CFG.supabaseUrl||!AUTH_CFG.supabaseAnonKey){const x=document.getElementById('v22-auth-status');if(x)x.textContent='Add your Supabase URL and anon key in auth-config.js to enable sign-in.';return null}
-    if(!window.supabase){
-      await new Promise((resolve,reject)=>{const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';s.onload=resolve;s.onerror=reject;document.head.appendChild(s)}).catch(()=>{const x=document.getElementById('v22-auth-status');if(x)x.textContent='Could not load authentication service.'});
-    }
-    if(window.supabase){
-      sb=window.supabase.createClient(AUTH_CFG.supabaseUrl,AUTH_CFG.supabaseAnonKey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
-      window.__NP_LOGIN_SUPABASE=sb;
-    }
-    return sb;
+    try{sb=await window.__NP_GET_LOGIN_CLIENT();return sb}
+    catch(e){const x=document.getElementById('v22-auth-status');if(x)x.textContent=e.message||'Could not load authentication service.';return null}
   }
   async function pullCloud(){
     if(!sb||!currentUser)return;
@@ -5883,6 +5872,37 @@ header.topbar .feature-btn{
 </script>
 
 
+<script id="np-single-supabase-client">
+/* One shared Supabase client: prevents OAuth callback/session restoration races. */
+(function(){
+  window.__NP_GET_LOGIN_CLIENT = window.__NP_GET_LOGIN_CLIENT || async function(){
+    if(window.__NP_LOGIN_SUPABASE) return window.__NP_LOGIN_SUPABASE;
+    if(window.__NP_LOGIN_CLIENT_PROMISE) return window.__NP_LOGIN_CLIENT_PROMISE;
+    window.__NP_LOGIN_CLIENT_PROMISE = (async function(){
+      const cfg=window.NEPSE_PULSE_AUTH||window.AUTH_CFG||{};
+      const url=cfg.supabaseUrl||cfg.url||'';
+      const key=cfg.supabaseAnonKey||cfg.anonKey||cfg.publishableKey||'';
+      if(!url||!key) throw new Error('Supabase URL or publishable key is missing in auth-config.js.');
+      if(!window.supabase || !window.supabase.createClient){
+        await new Promise((resolve,reject)=>{
+          const old=document.querySelector('script[data-np-supabase-sdk="1"]');
+          if(old){old.addEventListener('load',resolve,{once:true});old.addEventListener('error',reject,{once:true});return;}
+          const sc=document.createElement('script');sc.dataset.npSupabaseSdk='1';
+          sc.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';sc.onload=resolve;sc.onerror=()=>reject(new Error('Could not load Supabase Auth library.'));document.head.appendChild(sc);
+        });
+      }
+      if(!window.supabase || !window.supabase.createClient) throw new Error('Supabase Auth library did not load.');
+      const c=window.supabase.createClient(url,key,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+      window.__NP_LOGIN_SUPABASE=c;
+      // Wait for Supabase initialization and OAuth PKCE callback processing before any gate decision.
+      try{await c.auth.getSession();}catch(e){}
+      return c;
+    })();
+    try{return await window.__NP_LOGIN_CLIENT_PROMISE;}
+    catch(e){window.__NP_LOGIN_CLIENT_PROMISE=null;throw e;}
+  };
+})();
+</script>
 <script id="nepse-pulse-splash-controller">
 (function(){
   const splash=document.getElementById('nepse-pulse-splash');
@@ -5897,32 +5917,14 @@ header.topbar .feature-btn{
     try{
       if(!window.supabase){await new Promise((resolve,reject)=>{const sc=document.createElement('script');sc.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';sc.onload=resolve;sc.onerror=reject;document.head.appendChild(sc)});}
       if(!window.supabase)return false;
-      // Reuse the login controller's client. Separate clients can race while
-      // exchanging the OAuth callback code and cause the login gate to reappear.
-      let client=window.__NP_LOGIN_SUPABASE;
-      if(!client){
-        client=window.supabase.createClient(
-  cfg.supabaseUrl,
-  cfg.supabaseAnonKey,
-  {
-    auth: {
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl: true
-    }
-  }
-)
-        window.__NP_LOGIN_SUPABASE=client;
-      }
-      // OAuth can return to GitHub Pages before the PKCE exchange has finished.
-      // Re-check the same client briefly instead of immediately treating the user as signed out.
-      let data=null, error=null;
-      for(let attempt=0;attempt<10;attempt++){
-        const result=await client.auth.getSession();
-        data=result.data; error=result.error;
+      // The shared factory waits for Supabase initialization, including OAuth callback processing.
+      const client=await window.__NP_GET_LOGIN_CLIENT();
+      let data=null,error=null;
+      for(let attempt=0;attempt<12;attempt++){
+        const result=await client.auth.getSession();data=result.data;error=result.error;
         if(error) return false;
-        if(data && data.session) break;
-        await new Promise(resolve=>setTimeout(resolve,350));
+        if(data&&data.session) break;
+        await new Promise(resolve=>setTimeout(resolve,500));
       }
       window.__NP_LOGIN_SESSION=(data&&data.session)||null;
       if(!window.__NP_LOGIN_AUTH_LISTENER){
@@ -5932,7 +5934,7 @@ header.topbar .feature-btn{
           if(session){hideLoginGate();}else if(window.__NP_LOGIN_REQUIRED)showLoginGate();
         });
       }
-      return Boolean(data.session);
+      return Boolean(data&&data.session);
     }catch(e){return false}
   }
   function showLoginGate(){if(!gate)return;window.__NP_LOGIN_REQUIRED=true;gate.classList.add('np-login-visible');gate.setAttribute('aria-hidden','false');document.body.classList.add('np-login-active');}
@@ -7214,32 +7216,8 @@ body.v22-profile-tab-active .bottom.mobile-exact-bottom{z-index:10000}
  function status(message,error=false){const el=$('np-login-status');if(el){el.textContent=message||'';el.style.color=error?'#ffb8b8':'#8de6bd'}}
  function setMode(next){mode=next;const signup=mode==='signup';$('np-login-heading').innerHTML=signup?'Create <span>Account</span>':'Welcome <span>Back</span>';$('np-login-subheading').innerHTML=signup?'Create your NEPSE Pulse account<br>to continue':'Sign in to your NEPSE Pulse account<br>to continue';$('np-login-submit').textContent=signup?'Create Account':'Login';$('np-login-switch-text').textContent=signup?'Already have an account?':'Don’t have an account?';$('np-login-switch').textContent=signup?'Login':'Sign Up';$('np-login-forgot').style.display=signup?'none':'inline';$('np-login-password').autocomplete=signup?'new-password':'current-password';status('')}
  async function client(){
-   let c=window.__NP_LOGIN_SUPABASE;
-   if(c)return c;
-   const cfg=config();
-   if(!cfg.supabaseUrl||!cfg.supabaseAnonKey){
-     status('Sign-in configuration is missing. Check that auth-config.js is in the repository root and contains your Supabase project URL and publishable key.',true);
-     return null;
-   }
-   try{
-     if(!window.supabase){
-       await new Promise((resolve,reject)=>{
-         const sc=document.createElement('script');
-         sc.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
-         sc.onload=resolve;
-         sc.onerror=()=>reject(new Error('Could not download the Supabase sign-in library. Check your internet connection or CDN access.'));
-         document.head.appendChild(sc);
-       });
-     }
-     c=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey,{
-       auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}
-     });
-     window.__NP_LOGIN_SUPABASE=c;
-     return c;
-   }catch(e){
-     status(e.message||'Could not load the sign-in service. Check your connection.',true);
-     return null;
-   }
+   try{return await window.__NP_GET_LOGIN_CLIENT();}
+   catch(e){status(e.message||'Could not initialize the sign-in service.',true);return null;}
  }
  $('np-login-switch').addEventListener('click',()=>setMode(mode==='login'?'signup':'login'));
  $('np-login-toggle-password').addEventListener('click',()=>{const input=$('np-login-password');input.type=input.type==='password'?'text':'password';$('np-login-toggle-password').setAttribute('aria-label',input.type==='password'?'Show password':'Hide password')});
@@ -7277,12 +7255,12 @@ body.v22-profile-tab-active .bottom.mobile-exact-bottom{z-index:10000}
      // Wait for Supabase's OAuth callback/session restoration before deciding
      // that this is an unauthenticated visit. Reuse the one shared client.
      let data=null,error=null;
-     for(let attempt=0;attempt<10;attempt++){
+     for(let attempt=0;attempt<12;attempt++){
        const result=await c.auth.getSession();
        data=result.data;error=result.error;
        if(error)throw error;
        if(data&&data.session)break;
-       await new Promise(resolve=>setTimeout(resolve,350));
+       await new Promise(resolve=>setTimeout(resolve,500));
      }
      window.__NP_LOGIN_SESSION=(data&&data.session)||null;
      if(data&&data.session)window.npHideLoginGate?.();
