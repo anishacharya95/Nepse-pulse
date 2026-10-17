@@ -5890,15 +5890,23 @@ header.topbar .feature-btn{
     try{
       if(!window.supabase){await new Promise((resolve,reject)=>{const sc=document.createElement('script');sc.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';sc.onload=resolve;sc.onerror=reject;document.head.appendChild(sc)});}
       if(!window.supabase)return false;
-      const client=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey);
+      // Reuse the login controller's client. Separate clients can race while
+      // exchanging the OAuth callback code and cause the login gate to reappear.
+      let client=window.__NP_LOGIN_SUPABASE;
+      if(!client){
+        client=window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey);
+        window.__NP_LOGIN_SUPABASE=client;
+      }
       const {data,error}=await client.auth.getSession();
       if(error) return false;
-      window.__NP_LOGIN_SUPABASE=client;
       window.__NP_LOGIN_SESSION=data.session||null;
-      client.auth.onAuthStateChange((_event,session)=>{
-        window.__NP_LOGIN_SESSION=session||null;
-        if(session){hideLoginGate();}else if(window.__NP_LOGIN_REQUIRED)showLoginGate();
-      });
+      if(!window.__NP_LOGIN_AUTH_LISTENER){
+        window.__NP_LOGIN_AUTH_LISTENER=true;
+        client.auth.onAuthStateChange((_event,session)=>{
+          window.__NP_LOGIN_SESSION=session||null;
+          if(session){hideLoginGate();}else if(window.__NP_LOGIN_REQUIRED)showLoginGate();
+        });
+      }
       return Boolean(data.session);
     }catch(e){return false}
   }
@@ -7192,11 +7200,14 @@ body.v22-profile-tab-active .bottom.mobile-exact-bottom{z-index:10000}
      if(error)throw error;
      window.__NP_LOGIN_SESSION=data.session||null;
      if(data.session)window.npHideLoginGate?.();
-     c.auth.onAuthStateChange((event,session)=>{
-       window.__NP_LOGIN_SESSION=session||null;
-       if(session)window.npHideLoginGate?.();
-       else if(event==='SIGNED_OUT')window.npShowLoginGate?.();
-     });
+     if(!window.__NP_LOGIN_AUTH_LISTENER){
+       window.__NP_LOGIN_AUTH_LISTENER=true;
+       c.auth.onAuthStateChange((event,session)=>{
+         window.__NP_LOGIN_SESSION=session||null;
+         if(session)window.npHideLoginGate?.();
+         else if(event==='SIGNED_OUT')window.npShowLoginGate?.();
+       });
+     }
    }catch(err){
      status('Could not restore your sign-in session. Please try signing in again.',true);
    }
