@@ -5914,9 +5914,17 @@ header.topbar .feature-btn{
 )
         window.__NP_LOGIN_SUPABASE=client;
       }
-      const {data,error}=await client.auth.getSession();
-      if(error) return false;
-      window.__NP_LOGIN_SESSION=data.session||null;
+      // OAuth can return to GitHub Pages before the PKCE exchange has finished.
+      // Re-check the same client briefly instead of immediately treating the user as signed out.
+      let data=null, error=null;
+      for(let attempt=0;attempt<10;attempt++){
+        const result=await client.auth.getSession();
+        data=result.data; error=result.error;
+        if(error) return false;
+        if(data && data.session) break;
+        await new Promise(resolve=>setTimeout(resolve,350));
+      }
+      window.__NP_LOGIN_SESSION=(data&&data.session)||null;
       if(!window.__NP_LOGIN_AUTH_LISTENER){
         window.__NP_LOGIN_AUTH_LISTENER=true;
         client.auth.onAuthStateChange((_event,session)=>{
@@ -7245,11 +7253,12 @@ body.v22-profile-tab-active .bottom.mobile-exact-bottom{z-index:10000}
      const c=await client();
      if(!c)return;
      status('Connecting to Google…');
-     const {error}=await c.auth.signInWithOAuth({
+     const {data,error}=await c.auth.signInWithOAuth({
        provider:'google',
        options:{redirectTo:window.location.origin+window.location.pathname}
      });
      if(error)throw error;
+     if(data&&data.url)status('Opening Google sign-in…');
    }catch(err){
      status(err.message||'Could not start Google sign-in.',true);
    }finally{
@@ -7265,10 +7274,18 @@ body.v22-profile-tab-active .bottom.mobile-exact-bottom{z-index:10000}
    const c=await client();
    if(!c)return;
    try{
-     const {data,error}=await c.auth.getSession();
-     if(error)throw error;
-     window.__NP_LOGIN_SESSION=data.session||null;
-     if(data.session)window.npHideLoginGate?.();
+     // Wait for Supabase's OAuth callback/session restoration before deciding
+     // that this is an unauthenticated visit. Reuse the one shared client.
+     let data=null,error=null;
+     for(let attempt=0;attempt<10;attempt++){
+       const result=await c.auth.getSession();
+       data=result.data;error=result.error;
+       if(error)throw error;
+       if(data&&data.session)break;
+       await new Promise(resolve=>setTimeout(resolve,350));
+     }
+     window.__NP_LOGIN_SESSION=(data&&data.session)||null;
+     if(data&&data.session)window.npHideLoginGate?.();
      if(!window.__NP_LOGIN_AUTH_LISTENER){
        window.__NP_LOGIN_AUTH_LISTENER=true;
        c.auth.onAuthStateChange((event,session)=>{
