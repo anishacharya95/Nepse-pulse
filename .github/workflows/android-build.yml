@@ -124,6 +124,11 @@ jobs:
               }
           }
           EOF
+          
+      - name: Pin compatible AndroidX Browser
+        run: |
+          printf '\nconfigurations.configureEach { resolutionStrategy.force "androidx.browser:browser:1.8.0" }\n' >> android/app/build.gradle
+
 
       - name: Build debug APK
         run: |
