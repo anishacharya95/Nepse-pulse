@@ -8076,23 +8076,35 @@ input,select{background:#fff!important;color:var(--text)!important}
 </section>
 <script id="nepse-pulse-gocharting-chart">
 (function(){'use strict';
-const API=String(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');const $=id=>document.getElementById(id);let chart=null,loading=false,current='NABIL';
+const API=String(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\\/$/,'');
+const $=id=>document.getElementById(id);let chart=null,loading=false,current='NABIL',candleSeries=null,volumeSeries=null;
 function status(s,ok){if($('gcpStatus'))$('gcpStatus').textContent=s;if($('gcpDot'))$('gcpDot').style.background=ok?'#20a464':'#b78300'}
 function message(title,detail,link){const el=$('gcpMessage');if(!el)return;el.innerHTML='<b>'+title+'</b><span>'+detail+'</span>'+(link?'<a href="'+link+'" target="_blank" rel="noopener">Open GoCharting</a>':'')}
 function normalizeSymbol(s){return String(s||'NABIL').trim().toUpperCase().replace(/^NEPSE:/,'')||'NABIL'}
 async function populateSymbols(){try{const r=await fetch(API+'/api/tv/search?query=&limit=500',{cache:'no-store'});if(!r.ok)return;const d=await r.json();const rows=Array.isArray(d)?d:(d.result||d.data||[]);$('gcpSymbols').innerHTML=rows.map(x=>String(x.symbol||x.ticker||x.code||x.full_name||'')).filter(Boolean).slice(0,500).map(s=>'<option value="'+s.replace(/&/g,'&amp;').replace(/"/g,'&quot;')+'"></option>').join('')}catch(e){}}
-async function load(){if(loading)return;loading=true;current=normalizeSymbol($('gcpSymbol')?.value);$('gcpSymbol').value=current;status('CHECKING GOCHARTING SDK',false);message('Connecting to GoCharting…','Checking SDK configuration and NEPSE history.');try{
- // GoCharting provides a supported SDK, but production embeds need a valid SDK/license configuration and a compatible datafeed.
- const license=String(window.GOCHARTING_LICENSE_KEY||'').trim();
- if(!license){status('SDK KEY REQUIRED',false);message('GoCharting SDK setup needed','The GoCharting SDK requires its own configured SDK key and compatible datafeed. No API key was present in this HTML, so the app will not pretend the chart is live. You can still open GoCharting directly.','https://gocharting.com/developers');$('gcpInfo').textContent='Configure window.GOCHARTING_LICENSE_KEY and the GoCharting NEPSE datafeed to enable the embedded SDK.';return}
- const scriptUrl='https://gocharting.com/sdk/library/'+encodeURIComponent(license)+'/index.umd.js';
- if(!window.GoChartingSDK){await new Promise((resolve,reject)=>{let sc=document.querySelector('script[data-gcp-sdk="1"]');if(sc){sc.addEventListener('load',resolve,{once:true});sc.addEventListener('error',()=>reject(Error('SDK script failed to load')),{once:true});return}sc=document.createElement('script');sc.src=scriptUrl;sc.async=true;sc.dataset.gcpSdk='1';sc.onload=resolve;sc.onerror=()=>reject(Error('GoCharting SDK failed to load'));document.head.appendChild(sc)})}
- if(!window.GoChartingSDK?.createChart)throw Error('GoCharting SDK did not expose createChart');
- // A NEPSE-compatible datafeed must be configured by the SDK account/provider. Do not use GoCharting's crypto-only demo feed for NEPSE equities.
- if(typeof window.NEPSE_GOCHARTING_DATAFEED==='undefined')throw Error('NEPSE_GOCHARTING_DATAFEED is not configured. Connect the GoCharting custom datafeed to the NEPSE Pulse OHLCV API before enabling the chart.');
- chart?.destroy?.();$('gcpChartMount').innerHTML='';chart=window.GoChartingSDK.createChart('#gcpChartMount',{symbol:current,interval:'1D',datafeed:window.NEPSE_GOCHARTING_DATAFEED,licenseKey:license,theme:document.documentElement.dataset.theme==='dark'?'dark':'light',isNativeApp:false,onError:e=>{console.error('GoCharting chart error',e);status('CHART ERROR',false)}});status('GOCHARTING CONNECTED',true);$('gcpInfo').textContent='GoCharting SDK · '+current+' · NEPSE datafeed';
- }catch(e){console.error('GoCharting integration:',e);status('SETUP REQUIRED',false);message('GoCharting is not connected yet',String(e.message||e)+' — configure a GoCharting SDK key and NEPSE-compatible custom datafeed.','https://gocharting.com/sdk/docs');$('gcpInfo').textContent='No live chart is shown until the SDK and NEPSE datafeed are configured.'}finally{loading=false}}
-$('gcpLoad')?.addEventListener('click',load);$('gcpSymbol')?.addEventListener('keydown',e=>{if(e.key==='Enter')load()});$('gcpOpenSite')?.addEventListener('click',()=>window.open('https://gocharting.com/','_blank','noopener'));window.openProfessionalChart=function(symbol){if(symbol)$('gcpSymbol').value=normalizeSymbol(symbol);$('professional-charting-v8')?.scrollIntoView({behavior:'smooth',block:'start'});load()};window.PULSE_TA_TERMINAL={open:window.openProfessionalChart,close:()=>{},getWidget:()=>chart};populateSymbols();status('SDK CONFIGURATION NEEDED',false);message('GoCharting integration ready for configuration','Add your GoCharting SDK key and NEPSE datafeed configuration to activate the embedded chart.','https://gocharting.com/developers');
+function loadLibrary(){return new Promise((resolve,reject)=>{if(window.LightweightCharts)return resolve();let sc=document.querySelector('script[data-pulse-lightweight-charts]');if(sc){sc.addEventListener('load',resolve,{once:true});sc.addEventListener('error',()=>reject(Error('Chart library could not load')),{once:true});return}sc=document.createElement('script');sc.src='https://unpkg.com/lightweight-charts@4.2.2/dist/lightweight-charts.standalone.production.js';sc.async=true;sc.dataset.pulseLightweightCharts='1';sc.onload=resolve;sc.onerror=()=>reject(Error('Chart library could not load'));document.head.appendChild(sc)})}
+async function load(){if(loading)return;loading=true;current=normalizeSymbol($('gcpSymbol')?.value);$('gcpSymbol').value=current;status('LOADING CHART',false);message('Loading '+current+'…','Fetching historical OHLCV from NEPSE Pulse.');try{
+ await loadLibrary();
+ const to=Math.floor(Date.now()/1000),from=to-86400*365;
+ const url=API+'/api/tv/history?symbol='+encodeURIComponent(current)+'&resolution=D&from='+from+'&to='+to+'&countback=500';
+ const r=await fetch(url,{cache:'no-store'});if(!r.ok)throw Error('Market history request failed ('+r.status+')');
+ const d=await r.json();if(d.s!=='ok'||!Array.isArray(d.t)||!d.t.length)throw Error('No historical candles are available for '+current+'.');
+ const candles=d.t.map((t,i)=>({time:Number(t),open:Number(d.o[i]),high:Number(d.h[i]),low:Number(d.l[i]),close:Number(d.c[i])})).filter(x=>Number.isFinite(x.time)&&Number.isFinite(x.open)&&Number.isFinite(x.high)&&Number.isFinite(x.low)&&Number.isFinite(x.close)).sort((a,b)=>a.time-b.time);
+ if(!candles.length)throw Error('The history response did not contain valid OHLC candles.');
+ const volumes=d.t.map((t,i)=>({time:Number(t),value:Number(d.v?.[i]||0),color:Number(d.c[i])>=Number(d.o[i])?'rgba(22,163,74,.45)':'rgba(220,38,38,.45)'})).filter(x=>Number.isFinite(x.time)&&Number.isFinite(x.value)).sort((a,b)=>a.time-b.time);
+ const mount=$('gcpChartMount');mount.innerHTML='';chart?.remove?.();
+ chart=LightweightCharts.createChart(mount,{width:mount.clientWidth||600,height:window.innerWidth<=800?520:640,layout:{background:{color:'#ffffff'},textColor:'#344054'},grid:{vertLines:{color:'#eef2f6'},horzLines:{color:'#eef2f6'}},rightPriceScale:{borderColor:'#dfe5ec'},timeScale:{borderColor:'#dfe5ec',timeVisible:false},crosshair:{mode:LightweightCharts.CrosshairMode.Normal}});
+ candleSeries=chart.addCandlestickSeries({upColor:'#16a34a',downColor:'#dc2626',borderUpColor:'#16a34a',borderDownColor:'#dc2626',wickUpColor:'#16a34a',wickDownColor:'#dc2626'});
+ candleSeries.setData(candles);volumeSeries=chart.addHistogramSeries({priceFormat:{type:'volume'},priceScaleId:'volume',color:'#94a3b8',scaleMargins:{top:.82,bottom:0}});volumeSeries.setData(volumes);chart.timeScale().fitContent();
+ if($('gcpMessage'))$('gcpMessage').style.display='none';
+ const resize=()=>{if(chart&&mount.isConnected)chart.applyOptions({width:mount.clientWidth||600,height:window.innerWidth<=800?520:640})};
+ window.removeEventListener('resize',window.__pulseChartResize||(()=>{}));window.__pulseChartResize=resize;window.addEventListener('resize',resize);
+ status('CHART READY',true);$('gcpInfo').textContent='NEPSE Pulse historical OHLCV · '+current+' · '+candles.length+' daily candles';
+ }catch(e){console.error('Professional chart:',e);status('CHART UNAVAILABLE',false);message('Unable to load chart',String(e.message||e)+' Check the NEPSE Pulse history endpoint and try again.','https://gocharting.com/')}finally{loading=false}}
+$('gcpLoad')?.addEventListener('click',load);$('gcpSymbol')?.addEventListener('keydown',e=>{if(e.key==='Enter')load()});$('gcpOpenSite')?.addEventListener('click',()=>window.open('https://gocharting.com/','_blank','noopener'));
+window.openProfessionalChart=function(symbol){if(symbol)$('gcpSymbol').value=normalizeSymbol(symbol);$('professional-charting-v8')?.scrollIntoView({behavior:'smooth',block:'start'});load()};
+window.PULSE_TA_TERMINAL={open:window.openProfessionalChart,close:()=>{},getWidget:()=>chart};
+populateSymbols();load();
 })();
 </script>
 
