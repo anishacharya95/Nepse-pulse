@@ -47,9 +47,14 @@ jobs:
           npm install @capacitor/core @capacitor/android
           npm install --save-dev @capacitor/cli
 
-          npx cap init "NEPSE Pulse" "com.nepsepulse.app" --web-dir android-web
+                    npx cap init "NEPSE Pulse" "com.nepsepulse.app" --web-dir android-web
+          npm install @capacitor/app
           npx cap add android
           npx cap sync android
+
+          sed -i \
+            's#</application>#<activity android:name="com.getcapacitor.BridgeActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.VIEW" /><category android:name="android.intent.category.DEFAULT" /><category android:name="android.intent.category.BROWSABLE" /><data android:scheme="com.nepsepulse.app" android:host="login-callback" /></intent-filter></activity></application>#' \
+            android/app/src/main/AndroidManifest.xml
 
       - name: Fix Kotlin dependency versions
         run: |
