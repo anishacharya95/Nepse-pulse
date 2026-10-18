@@ -2447,6 +2447,36 @@ async function renderTraderScan(name){
       r.prevE20=closes.length>=21?ema(closes.slice(0,-1),20):null;
       r.prevRsi=closes.length>=16?rsi(closes.slice(0,-1),14):null;
     });
+    if(name==='Candlestick Patterns'){
+      const candlePattern = h => {
+        if(!Array.isArray(h)||h.length<1) return null;
+        const c=h[h.length-1], p=h.length>1?h[h.length-2]:null;
+        const vals=[c.open,c.high,c.low,c.close];
+        if(!vals.every(v=>Number.isFinite(v))||c.high<c.low) return null;
+        const body=Math.abs(c.close-c.open), range=c.high-c.low;
+        if(range<=0) return null;
+        const upper=c.high-Math.max(c.open,c.close), lower=Math.min(c.open,c.close)-c.low;
+        const bullish=c.close>c.open, bearish=c.close<c.open;
+        const patterns=[];
+        if(body/range<=0.10) patterns.push({name:'Doji',bias:'Neutral',kind:'scan-neutral'});
+        if(lower>=body*2 && upper<=Math.max(body*0.6,range*0.08) && body/range<=0.38)
+          patterns.push({name:bullish?'Hammer':'Hanging Man',bias:bullish?'Potential bullish reversal':'Potential bearish reversal',kind:bullish?'scan-positive':'scan-negative'});
+        if(upper>=body*2 && lower<=Math.max(body*0.6,range*0.08) && body/range<=0.38)
+          patterns.push({name:bullish?'Inverted Hammer':'Shooting Star',bias:bullish?'Potential bullish reversal':'Potential bearish reversal',kind:bullish?'scan-positive':'scan-negative'});
+        if(p && [p.open,p.close].every(v=>Number.isFinite(v))){
+          const prevBody=Math.abs(p.close-p.open);
+          if(p.close<p.open && bullish && c.open<=p.close && c.close>=p.open && body>=prevBody*0.8)
+            patterns.push({name:'Bullish Engulfing',bias:'Potential bullish reversal',kind:'scan-positive'});
+          if(p.close>p.open && bearish && c.open>=p.close && c.close<=p.open && body>=prevBody*0.8)
+            patterns.push({name:'Bearish Engulfing',bias:'Potential bearish reversal',kind:'scan-negative'});
+          if(prevBody>0 && body<=prevBody*0.35 && ((p.close<p.open&&bullish)||(p.close>p.open&&bearish)) && c.open>=Math.min(p.open,p.close) && c.open<=Math.max(p.open,p.close))
+            patterns.push({name:'Harami',bias:'Possible reversal / pause',kind:'scan-neutral'});
+        }
+        return patterns;
+      };
+      results=results.map(r=>({...r,patterns:candlePattern(r.h)})).filter(r=>r.patterns&&r.patterns.length);
+      results.sort((a,b)=>(b.patterns.length-a.patterns.length)||(b.volume||0)-(a.volume||0));
+    }
     if(name==='Breakout Stocks') results=results.filter(qualifiesBreakout).sort((a,b)=>(b.volume||0)-(a.volume||0));
     else if(name==='Breakdown Stocks') results=results.filter(qualifiesBreakdown).sort((a,b)=>(b.volume||0)-(a.volume||0));
     else if(name==='Consolidating Stocks') results=results.filter(r=>r.historyAvailable&&r.h.length>=20&&r.last>0&&((r.hi-r.lo)/r.last)<=0.04).sort((a,b)=>((a.hi-a.lo)/a.last)-((b.hi-b.lo)/b.last));
@@ -2462,8 +2492,15 @@ async function renderTraderScan(name){
     else if(name==='Breakout Stocks') out=top.map(r=>rowHTML(r,r.symbol,`${r.company} · 20-session resistance ${r.resistance20.toFixed(2)} · LTP ${r.last.toFixed(2)}`,'BREAKOUT','scan-positive')).join('');
     else if(name==='Breakdown Stocks') out=top.map(r=>rowHTML(r,r.symbol,`${r.company} · 20-session support ${r.support20.toFixed(2)} · LTP ${r.last.toFixed(2)}`,'BREAKDOWN','scan-negative')).join('');
     else if(name==='Consolidating Stocks') out=top.map(r=>rowHTML(r,r.symbol,`${r.company} · ${r.historyAvailable?'20D range':'intraday range; history unavailable'}`,r.historyAvailable?`${(((r.hi-r.lo)/r.last)*100).toFixed(2)}%`:'LIVE ONLY',r.historyAvailable&&((r.hi-r.lo)/r.last)<.04?'scan-positive':'scan-neutral')).join('');
+    else if(name==='Candlestick Patterns') out=top.map(r=>{
+      const names=r.patterns.map(p=>p.name).join(' · ');
+      const bias=r.patterns.map(p=>p.bias).join(' / ');
+      const kind=r.patterns.some(p=>p.kind==='scan-positive')?'scan-positive':r.patterns.some(p=>p.kind==='scan-negative')?'scan-negative':'scan-neutral';
+      return rowHTML(r,r.symbol,`${r.company} · ${bias} · latest candle`,names,kind);
+    }).join('');
     else out=top.map(r=>rowHTML(r,r.symbol,`${r.company} · ${r.historyAvailable?'OHLC history available':'live price; historical candles unavailable'}`,r.last!==null&&r.last!==undefined?r.last.toFixed(2):'—')).join('');
-    out += '<div class="scan-note">Historical indicators are calculated from the API’s PriceVolumeHistory endpoint. Results are analytical signals, not investment advice.</div>';
+    if(name==='Candlestick Patterns') out += '<div class="scan-note">Patterns are detected from the latest available daily OHLC candles. Only detected formations are listed; if none appear, the API may not be returning usable open/high/low/close history. Patterns are possible signals, not guarantees or investment advice.</div>';
+    else out += '<div class="scan-note">Historical indicators are calculated from the API’s PriceVolumeHistory endpoint. Results are analytical signals, not investment advice.</div>';
   } else if(name==='Bulk Transactions'||name==='Unusual Trades'){
     const fs=await getFloorsheet();
     const parsed=fs.map(o=>({symbol:String(feedPick(o,['symbol','stocksymbol','securitysymbol','ticker'])||'').toUpperCase(),qty:feedNumber(feedPick(o,['quantity','contractquantity','tradedquantity','volume','shares'])),rate:feedNumber(feedPick(o,['rate','price','contractprice','tradedprice'])),amount:feedNumber(feedPick(o,['amount','turnover','totalamount','contractamount'])),buyer:feedPick(o,['buyer','buyerbroker','buyerbrokername']),seller:feedPick(o,['seller','sellerbroker','sellerbrokername'])})).filter(x=>x.symbol);
