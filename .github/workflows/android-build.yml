@@ -26,35 +26,68 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Prepare Android project
+      - name: Prepare web assets
         run: |
           mkdir -p android-web
-          cp index.html android-web/
 
-          if [ -f config.js ]; then
-            cp config.js android-web/
-          fi
+          rsync -a ./ android-web/ \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='android/' \
+            --exclude='android-web/' \
+            --exclude='node_modules/' \
+            --exclude='venv/' \
+            --exclude='.venv/' \
+            --exclude='__pycache__/' \
+            --exclude='app.py' \
+            --exclude='requirements.txt'
 
-          if [ -f auth-config.js ]; then
-            cp auth-config.js android-web/
-          fi
+          test -f android-web/index.html
 
-          if [ -f style.css ]; then
-            cp style.css android-web/
-          fi
-
+      - name: Initialize Capacitor
+        run: |
           npm init -y
-          npm install @capacitor/core @capacitor/android
+          npm install @capacitor/core @capacitor/android @capacitor/app @capacitor/browser
           npm install --save-dev @capacitor/cli
 
-                    npx cap init "NEPSE Pulse" "com.nepsepulse.app" --web-dir android-web
-          npm install @capacitor/app
+          npx cap init "NEPSE Pulse" "com.nepsepulse.app" --web-dir android-web
           npx cap add android
           npx cap sync android
 
-          sed -i \
-            's#</application>#<activity android:name="com.getcapacitor.BridgeActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.VIEW" /><category android:name="android.intent.category.DEFAULT" /><category android:name="android.intent.category.BROWSABLE" /><data android:scheme="com.nepsepulse.app" android:host="login-callback" /></intent-filter></activity></application>#' \
-            android/app/src/main/AndroidManifest.xml
+      - name: Register Android login callback
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path("android/app/src/main/AndroidManifest.xml")
+          s = p.read_text()
+
+          callback = """
+              <intent-filter>
+                  <action android:name="android.intent.action.VIEW" />
+                  <category android:name="android.intent.category.DEFAULT" />
+                  <category android:name="android.intent.category.BROWSABLE" />
+                  <data android:scheme="com.nepsepulse.app"
+                        android:host="login-callback" />
+              </intent-filter>
+          """
+
+          if "android:host=\"login-callback\"" not in s:
+              pattern = re.compile(
+                  r'(<activity\b[^>]*>.*?'
+                  r'<action android:name="android.intent.action.MAIN"\s*/>.*?'
+                  r'<category android:name="android.intent.category.LAUNCHER"\s*/>.*?</activity>)',
+                  re.S
+              )
+              match = pattern.search(s)
+              if not match:
+                  raise SystemExit("Could not find launcher activity in AndroidManifest.xml")
+              activity = match.group(1)
+              activity = activity.replace("</activity>", callback + "\n    </activity>")
+              s = s[:match.start()] + activity + s[match.end():]
+              p.write_text(s)
+          PY
 
       - name: Fix Kotlin dependency versions
         run: |
