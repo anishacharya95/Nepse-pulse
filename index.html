@@ -8079,31 +8079,33 @@ input,select{background:#fff!important;color:var(--text)!important}
 const API=String(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
 const $=id=>document.getElementById(id);let chart=null,loading=false,current='NABIL',resizeHandler=null;
 function status(s,ok){if($('gcpStatus'))$('gcpStatus').textContent=s;if($('gcpDot'))$('gcpDot').style.background=ok?'#20a464':'#b78300'}
-function message(title,detail){const el=$('gcpMessage');if(!el)return;el.style.display='flex';el.innerHTML='<b>'+title+'</b><span>'+detail+'</span>'}
+function message(title,detail){const el=$('gcpMessage');if(!el)return;el.style.display='flex';el.replaceChildren();const b=document.createElement('b');b.textContent=title;const span=document.createElement('span');span.textContent=detail;el.append(b,span)}
 function normalizeSymbol(s){return String(s||'NABIL').trim().toUpperCase().replace(/^NEPSE:/,'')||'NABIL'}
-async function populateSymbols(){try{const r=await fetch(API+'/api/tv/search?query=&limit=500',{cache:'no-store'});if(!r.ok)return;const d=await r.json();const rows=Array.isArray(d)?d:(d.result||d.data||[]);$('gcpSymbols').innerHTML=rows.map(x=>String(x.symbol||x.ticker||x.code||x.full_name||'')).filter(Boolean).slice(0,500).map(s=>'<option value="'+s.replace(/&/g,'&amp;').replace(/"/g,'&quot;')+'"></option>').join('')}catch(e){console.warn('Symbol search unavailable',e)}}
-function loadLibrary(){return new Promise((resolve,reject)=>{if(window.klinecharts&&typeof window.klinecharts.init==='function')return resolve();let sc=document.querySelector('script[data-pulse-klinecharts]');if(sc){sc.addEventListener('load',resolve,{once:true});sc.addEventListener('error',()=>reject(Error('KLineChart library could not load')),{once:true});return}sc=document.createElement('script');sc.src='https://cdn.jsdelivr.net/npm/klinecharts@9.8.12/dist/umd/klinecharts.min.js';sc.async=true;sc.dataset.pulseKlinecharts='1';sc.onload=()=>window.klinecharts?resolve():reject(Error('KLineChart loaded but its API was not found'));sc.onerror=()=>reject(Error('KLineChart library could not load'));document.head.appendChild(sc)})}
-async function load(){if(loading)return;loading=true;current=normalizeSymbol($('gcpSymbol')?.value);if($('gcpSymbol'))$('gcpSymbol').value=current;status('LOADING CHART',false);message('Loading '+current+'…','Fetching historical OHLCV from NEPSE Pulse.');try{
+async function populateSymbols(){try{const r=await fetch(API+'/api/tv/search?query=&limit=500',{cache:'no-store',headers:{Accept:'application/json'}});if(!r.ok)return;let d=await r.json();if(d&&d.data&&!Array.isArray(d))d=d.data;const rows=Array.isArray(d)?d:(d.result||d.symbols||[]);$('gcpSymbols').innerHTML=rows.map(x=>String(x.symbol||x.ticker||x.code||x.full_name||'')).filter(Boolean).slice(0,500).map(s=>'<option value="'+s.replace(/&/g,'&amp;').replace(/"/g,'&quot;')+'"></option>').join('')}catch(e){console.warn('Symbol search unavailable',e)}}
+function loadLibrary(){return new Promise((resolve,reject)=>{if(window.klinecharts&&typeof window.klinecharts.init==='function')return resolve();let sc=document.querySelector('script[data-pulse-klinecharts]');if(sc){if(sc.dataset.loaded==='1'&&window.klinecharts)return resolve();if(sc.dataset.failed==='1')return reject(Error('KLineChart CDN failed to load. Check your internet connection.'));sc.addEventListener('load',()=>window.klinecharts?resolve():reject(Error('KLineChart library loaded but its API was not found')),{once:true});sc.addEventListener('error',()=>reject(Error('KLineChart library could not load from the CDN')),{once:true});return}sc=document.createElement('script');sc.src='https://cdn.jsdelivr.net/npm/klinecharts@9.8.12/dist/umd/klinecharts.min.js';sc.async=true;sc.dataset.pulseKlinecharts='1';sc.onload=()=>{sc.dataset.loaded='1';window.klinecharts&&typeof window.klinecharts.init==='function'?resolve():reject(Error('KLineChart library loaded but its API was not found'))};sc.onerror=()=>{sc.dataset.failed='1';reject(Error('KLineChart library could not load from the CDN.'))};document.head.appendChild(sc)})}
+async function load(){if(loading)return;loading=true;current=normalizeSymbol($('gcpSymbol')?.value);if($('gcpSymbol'))$('gcpSymbol').value=current;status('LOADING CHART',false);message('Loading '+current+'…','Loading the chart library and requesting historical candles.');try{
  await loadLibrary();
- const to=Math.floor(Date.now()/1000),from=to-86400*365*3;
- const url=API+'/api/tv/history?symbol='+encodeURIComponent(current)+'&resolution=D&from='+from+'&to='+to+'&countback=750';
- const r=await fetch(url,{cache:'no-store'});if(!r.ok)throw Error('Market history request failed ('+r.status+')');
- const d=await r.json();if(d.s!=='ok'||!Array.isArray(d.t)||!d.t.length)throw Error('No historical candles are available for '+current+'.');
- const candles=d.t.map((t,i)=>({timestamp:Number(t)*1000,open:Number(d.o?.[i]),high:Number(d.h?.[i]),low:Number(d.l?.[i]),close:Number(d.c?.[i]),volume:Number(d.v?.[i]||0)})).filter(x=>Number.isFinite(x.timestamp)&&Number.isFinite(x.open)&&Number.isFinite(x.high)&&Number.isFinite(x.low)&&Number.isFinite(x.close)&&x.high>=x.low).sort((a,b)=>a.timestamp-b.timestamp);
- if(!candles.length)throw Error('The history response did not contain valid OHLC candles.');
- const mount=$('gcpChartMount');if(!mount)throw Error('Chart container was not found.');
- if(chart){try{window.klinecharts.dispose('gcpChartMount')}catch(e){} chart=null}
+ // Use the same countback-style request already used elsewhere in NEPSE Pulse.
+ const url=API+'/api/tv/history?symbol='+encodeURIComponent(current)+'&resolution=D&countback=5000&_kline='+Date.now();
+ const r=await fetch(url,{cache:'no-store',headers:{Accept:'application/json'}});if(!r.ok)throw Error('Market history request failed (HTTP '+r.status+').');
+ let d=await r.json();if(d&&d.data&&typeof d.data==='object'&&!Array.isArray(d.data)&&!d.s)d=d.data;
+ if(d.s!=='ok'||!Array.isArray(d.t)||!d.t.length)throw Error('The history API returned no daily candles for '+current+' (status: '+String(d.s||'missing')+').');
+ const n=Math.min(d.t.length,d.o?.length||0,d.h?.length||0,d.l?.length||0,d.c?.length||0);
+ const candles=[];for(let i=0;i<n;i++){const timestamp=Number(d.t[i])*1000,open=Number(d.o[i]),high=Number(d.h[i]),low=Number(d.l[i]),close=Number(d.c[i]),volume=Number(d.v?.[i]||0);if(Number.isFinite(timestamp)&&timestamp>0&&[open,high,low,close].every(Number.isFinite)&&high>=low)candles.push({timestamp,open,high,low,close,volume:Number.isFinite(volume)?volume:0})}
+ candles.sort((a,b)=>a.timestamp-b.timestamp);if(!candles.length)throw Error('The history API responded, but contained no valid OHLC candle rows.');
+ const mount=$('gcpChartMount');if(!mount)throw Error('Professional Charting container was not found.');
+ if(chart){try{window.klinecharts.dispose('gcpChartMount')}catch(e){}chart=null}
  mount.innerHTML='';
- chart=window.klinecharts.init('gcpChartMount',{styles:{candle:{bar:{upColor:'#16a34a',downColor:'#dc2626',noChangeColor:'#94a3b8'},tooltip:{showRule:'always'}},indicator:{bars:[{upColor:'#16a34a',downColor:'#dc2626',noChangeColor:'#94a3b8'}]}}});
- if(!chart)throw Error('KLineChart could not initialize in the chart container.');
+ chart=window.klinecharts.init(mount,{timezone:'Asia/Kathmandu',styles:{candle:{bar:{upColor:'#16a34a',downColor:'#dc2626',noChangeColor:'#94a3b8'},tooltip:{showRule:'always'}}}});
+ if(!chart)throw Error('KLineChart could not initialize. Check that the chart container is visible.');
  chart.setSymbol({ticker:current});chart.setPeriod({span:1,type:'day'});chart.applyNewData(candles);
  try{chart.createIndicator('VOL',false,{height:90})}catch(e){console.warn('Volume indicator could not be added',e)}
  try{chart.createIndicator('MA',false,{id:'candle_pane'})}catch(e){console.warn('Moving-average indicator could not be added',e)}
  if($('gcpMessage'))$('gcpMessage').style.display='none';
  if(resizeHandler)window.removeEventListener('resize',resizeHandler);resizeHandler=()=>{try{chart?.resize()}catch(e){}};window.addEventListener('resize',resizeHandler);
  status('CHART READY',true);if($('gcpInfo'))$('gcpInfo').textContent='NEPSE Pulse historical OHLCV · '+current+' · '+candles.length+' daily candles';
- }catch(e){console.error('KLineChart integration:',e);status('CHART UNAVAILABLE',false);message('Unable to load chart',String(e.message||e)+' Check the NEPSE Pulse history endpoint and try again.');if($('gcpInfo'))$('gcpInfo').textContent='KLineChart · waiting for valid historical data'}finally{loading=false}}
-$('gcpLoad')?.addEventListener('click',load);$('gcpSymbol')?.addEventListener('keydown',e=>{if(e.key==='Enter')load()});$('gcpOpenSite')?.addEventListener('click',()=>{if(chart){try{chart.scrollToRealTime()}catch(e){}try{chart.fitContent()}catch(e){}}load()});
+ }catch(e){console.error('KLineChart integration:',e);status('CHART UNAVAILABLE',false);message('Unable to load chart',String(e.message||e));if($('gcpInfo'))$('gcpInfo').textContent='KLineChart · diagnostic details shown above'}finally{loading=false}}
+$('gcpLoad')?.addEventListener('click',load);$('gcpSymbol')?.addEventListener('keydown',e=>{if(e.key==='Enter')load()});$('gcpOpenSite')?.addEventListener('click',()=>load());
 window.openProfessionalChart=function(symbol){if(symbol&&$('gcpSymbol'))$('gcpSymbol').value=normalizeSymbol(symbol);$('professional-charting-v8')?.scrollIntoView({behavior:'smooth',block:'start'});load()};
 window.PULSE_TA_TERMINAL={open:window.openProfessionalChart,close:()=>{},getWidget:()=>chart};
 populateSymbols();load();
