@@ -1,4 +1,3 @@
-
 name: NEPSE Pulse Android Build
 
 on:
@@ -29,7 +28,6 @@ jobs:
       - name: Prepare web assets
         run: |
           mkdir -p android-web
-
           rsync -a ./ android-web/ \
             --exclude='.git/' \
             --exclude='.github/' \
@@ -41,15 +39,44 @@ jobs:
             --exclude='__pycache__/' \
             --exclude='app.py' \
             --exclude='requirements.txt'
-
           test -f android-web/index.html
 
-      - name: Initialize Capacitor
+      - name: Install Capacitor and browser plugins
         run: |
           npm init -y
           npm install @capacitor/core @capacitor/android @capacitor/app @capacitor/browser
-          npm install --save-dev @capacitor/cli
+          npm install --save-dev @capacitor/cli esbuild
 
+      - name: Bundle Capacitor native plugins for the plain HTML app
+        run: |
+          cat > capacitor-plugins-entry.js <<'EOF'
+          import { Capacitor } from '@capacitor/core';
+          import { App } from '@capacitor/app';
+          import { Browser } from '@capacitor/browser';
+          window.Capacitor = Capacitor;
+          window.NP_CAP_APP = App;
+          window.NP_CAP_BROWSER = Browser;
+          EOF
+
+          npx esbuild capacitor-plugins-entry.js \
+            --bundle --format=iife --platform=browser --target=es2020 \
+            --outfile=android-web/np-capacitor-plugins.bundle.js
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('android-web/index.html')
+          s = p.read_text()
+          tag = '<script src="./np-capacitor-plugins.bundle.js"></script>'
+          if tag not in s:
+              if '</head>' not in s.lower():
+                  raise SystemExit('Could not find </head> in android-web/index.html')
+              pos = s.lower().rfind('</head>')
+              s = s[:pos] + tag + '\n' + s[pos:]
+              p.write_text(s)
+          PY
+
+      - name: Initialize Capacitor Android project
+        run: |
           npx cap init "NEPSE Pulse" "com.nepsepulse.app" --web-dir android-web
           npx cap add android
           npx cap sync android
@@ -60,20 +87,17 @@ jobs:
           from pathlib import Path
           import re
 
-          p = Path("android/app/src/main/AndroidManifest.xml")
+          p = Path('android/app/src/main/AndroidManifest.xml')
           s = p.read_text()
-
-          callback = """
-              <intent-filter>
-                  <action android:name="android.intent.action.VIEW" />
-                  <category android:name="android.intent.category.DEFAULT" />
-                  <category android:name="android.intent.category.BROWSABLE" />
-                  <data android:scheme="com.nepsepulse.app"
-                        android:host="login-callback" />
-              </intent-filter>
-          """
-
-          if "android:host=\"login-callback\"" not in s:
+          callback = '''
+                  <intent-filter>
+                      <action android:name="android.intent.action.VIEW" />
+                      <category android:name="android.intent.category.DEFAULT" />
+                      <category android:name="android.intent.category.BROWSABLE" />
+                      <data android:scheme="com.nepsepulse.app" android:host="login-callback" />
+                  </intent-filter>
+          '''
+          if 'android:host="login-callback"' not in s:
               pattern = re.compile(
                   r'(<activity\b[^>]*>.*?'
                   r'<action android:name="android.intent.action.MAIN"\s*/>.*?'
@@ -82,9 +106,8 @@ jobs:
               )
               match = pattern.search(s)
               if not match:
-                  raise SystemExit("Could not find launcher activity in AndroidManifest.xml")
-              activity = match.group(1)
-              activity = activity.replace("</activity>", callback + "\n    </activity>")
+                  raise SystemExit('Could not find launcher activity in AndroidManifest.xml')
+              activity = match.group(1).replace('</activity>', callback + '\n    </activity>')
               s = s[:match.start()] + activity + s[match.end():]
               p.write_text(s)
           PY
