@@ -6001,10 +6001,26 @@ header.topbar .feature-btn{
       const parsed=new URL(url);
       const authError=parsed.searchParams.get('error_description')||parsed.searchParams.get('error');
       if(authError)throw new Error(authError);
+      // Supabase may return PKCE ?code=... or an implicit-flow token fragment.
+      // Handle both formats so Android doesn't reject a valid callback merely because it has no code.
       const code=parsed.searchParams.get('code');
-      if(!code)throw new Error('Google returned to the app without an authorization code. Please try again.');
+      const hashParams=new URLSearchParams((parsed.hash||'').replace(/^#/,''));
+      const hashError=hashParams.get('error_description')||hashParams.get('error');
+      if(hashError)throw new Error(hashError);
       const client=await window.__NP_GET_LOGIN_CLIENT();
-      const result=await client.auth.exchangeCodeForSession(code);
+      let result;
+      if(code){
+        result=await client.auth.exchangeCodeForSession(code);
+      }else{
+        const access_token=hashParams.get('access_token');
+        const refresh_token=hashParams.get('refresh_token');
+        if(!access_token||!refresh_token){
+          const callbackParams=[...parsed.searchParams.keys(),...hashParams.keys()];
+          const hasAuthError=parsed.searchParams.has('error')||parsed.searchParams.has('error_description');
+          throw new Error(hasAuthError?'Google sign-in was rejected. Please try again.':'Android received the login callback, but it contained neither an authorization code nor a session token. Check the Supabase OAuth redirect and APK callback settings.');
+        }
+        result=await client.auth.setSession({access_token,refresh_token});
+      }
       if(result.error)throw result.error;
       const session=result.data&&result.data.session;
       if(!session)throw new Error('Google sign-in returned, but no session was created. Please try again.');
