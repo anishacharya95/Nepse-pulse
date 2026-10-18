@@ -29,21 +29,31 @@ jobs:
       - name: Prepare Android project
         run: |
           mkdir -p android-web
-          cp index.html android-web/index.html
-          if [ -f config.js ]; then cp config.js android-web/; fi
-          if [ -f auth-config.js ]; then cp auth-config.js android-web/; fi
-          if [ -f style.css ]; then cp style.css android-web/; fi
+          cp index.html android-web/
+
+          if [ -f config.js ]; then
+            cp config.js android-web/
+          fi
+
+          if [ -f auth-config.js ]; then
+            cp auth-config.js android-web/
+          fi
+
+          if [ -f style.css ]; then
+            cp style.css android-web/
+          fi
+
           npm init -y
           npm install @capacitor/core @capacitor/android
           npm install --save-dev @capacitor/cli
+
           npx cap init "NEPSE Pulse" "com.nepsepulse.app" --web-dir android-web
           npx cap add android
           npx cap sync android
 
-                  - name: Fix Kotlin dependency versions
+      - name: Fix Kotlin dependency versions
         run: |
-          cd android
-          cat >> app/build.gradle <<'EOF'
+          cat >> android/app/build.gradle <<'EOF'
 
           configurations.all {
               resolutionStrategy {
@@ -59,16 +69,10 @@ jobs:
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug
-          
-          
-
-      
-    
-          
-    
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: nepse-pulse-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
