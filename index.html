@@ -1878,8 +1878,7 @@ main { padding-bottom: calc(190px + env(safe-area-inset-bottom)) !important; }
 <div class="drawer" id="tradersZoneModal" onclick="if(event.target===this)closeTradersZone()">
   <div class="sheet tz-sheet">
     <div class="grab"></div>
-    <div class="sheet-head"><h2>⚡ Traders Zone</h2><button class="close" onclick="closeTradersZone()">Close</button></div>
-    <div class="tz-status"><span>Market scan status</span><b id="tzFeedStatus">OFFLINE · awaiting verified feed</b></div>
+    <div class="sheet-head"><h2>⚡ Traders Zone</h2></div>
     <div class="tz-toolbar"><button class="tz-filter" onclick="toast('All trader scans selected.')">All</button><button class="tz-filter" onclick="toast('Momentum scans selected.')">Momentum</button><button class="tz-filter" onclick="toast('Volume scans selected.')">Volume</button><button class="tz-filter" onclick="toast('Technical scans selected.')">Technical</button></div>
     <div class="tz-module-grid">
       <button class="tz-module" onclick="openTraderModule('Candlestick Patterns')"><b>🕯️ Candlestick Patterns</b><small>Doji, hammer, engulfing, morning/evening star and other pattern families.</small></button>
@@ -7479,29 +7478,32 @@ body.v22-profile-tab-active .bottom.mobile-exact-bottom{z-index:10000}
 </style>
 
 
-<style id="tz-unusual-trades-grid-fix">
-/* Keep the final Traders Zone card aligned with the other two-column cards. */
-.traders-zone .tz-grid > .tz-card:last-child {
+
+
+
+<style id="tz-unusual-trades-grid-fix-v2">
+/* The final lone card in the Traders Zone drawer stays half-width and centered. */
+#tradersZoneModal .tz-module-grid > .tz-module:last-child {
   grid-column: 1 / -1 !important;
-  width: calc((100% - 10px) / 2) !important;
   justify-self: center !important;
-  box-sizing: border-box !important;
+  width: calc((100% - 9px) / 2) !important;
+  max-width: calc((100% - 9px) / 2) !important;
   min-width: 0 !important;
-  height: auto !important;
-  min-height: 142px !important;
+  box-sizing: border-box !important;
+  align-self: stretch !important;
   white-space: normal !important;
-  overflow: visible !important;
+  overflow-wrap: anywhere !important;
 }
-.traders-zone .tz-grid > .tz-card:last-child b,
-.traders-zone .tz-grid > .tz-card:last-child small {
+#tradersZoneModal .tz-module-grid > .tz-module:last-child b,
+#tradersZoneModal .tz-module-grid > .tz-module:last-child small {
+  display: block !important;
+  max-width: 100% !important;
+  white-space: normal !important;
   overflow-wrap: anywhere !important;
   word-break: normal !important;
 }
-@media (max-width: 420px) {
-  .traders-zone .tz-grid > .tz-card:last-child { min-height: 132px !important; }
-}
+#tradersZoneModal .tz-sheet > .sheet-head { margin-bottom: 12px; }
 </style>
-
 </body>
 </html><script>
 // NEPSE Pulse Professional Charting V1 extension
@@ -8675,6 +8677,30 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 }
 </style>
 
+
+<style id="tz-unusual-trades-grid-fix-v2">
+/* The final lone card in the Traders Zone drawer stays half-width and centered. */
+#tradersZoneModal .tz-module-grid > .tz-module:last-child {
+  grid-column: 1 / -1 !important;
+  justify-self: center !important;
+  width: calc((100% - 9px) / 2) !important;
+  max-width: calc((100% - 9px) / 2) !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+  align-self: stretch !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+}
+#tradersZoneModal .tz-module-grid > .tz-module:last-child b,
+#tradersZoneModal .tz-module-grid > .tz-module:last-child small {
+  display: block !important;
+  max-width: 100% !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+  word-break: normal !important;
+}
+#tradersZoneModal .tz-sheet > .sheet-head { margin-bottom: 12px; }
+</style>
 </body>
 </html>
 
