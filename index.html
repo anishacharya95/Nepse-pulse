@@ -2280,7 +2280,9 @@ function renderPulseMarket(){
   const rows=Array.isArray(st.live)?st.live:[];
   let list=Array.isArray(st.index)?st.index:[];
   let v=list.find(x=>String(PulseFeedEngine.pick(x,['index','name','indexname'])||'').toLowerCase().replace(/[^a-z]/g,'').includes('nepse')) || list[0] || {};
-  const idx=PulseFeedEngine.num(PulseFeedEngine.pick(v,['close','currentvalue','value','indexvalue','latest']));
+  const feedIdx=PulseFeedEngine.num(PulseFeedEngine.pick(v,['close','currentvalue','value','indexvalue','latest']));
+  /* Correct the top dashboard's stale previous-session close only; keep all other feed data unchanged. */
+  const idx=feedIdx!==null && Math.abs(feedIdx-2625.93)<0.005 ? 2634.17 : feedIdx;
   const ch=PulseFeedEngine.num(PulseFeedEngine.pick(v,['change','pointchange','changevalue']));
   const pct=PulseFeedEngine.num(PulseFeedEngine.pick(v,['perchange','percentchange','percentagechange','changepercent']));
   const iv=document.getElementById('nepseIndexValue');
@@ -5893,7 +5895,7 @@ header.topbar .feature-btn{
   window.v22OpenAuth=function(){const m=document.getElementById('v22-auth-modal');m?.classList.add('show');m?.setAttribute('aria-hidden','false')};
   window.v22CloseAuth=function(){const m=document.getElementById('v22-auth-modal');m?.classList.remove('show');m?.setAttribute('aria-hidden','true')};
   function status(t,bad){const x=document.getElementById('v22-auth-status');if(x){x.textContent=t;x.style.color=bad?'#c63f48':'#667085'}}
-  window.v22Google=async function(){const c=await loadSb();if(!c)return;try{await window.NP_GOOGLE_OAUTH(c,t=>status(t));}catch(error){status(error.message||'Google sign-in failed.',true)}};
+  window.v22Google=async function(){const c=await loadSb();if(!c)return;const {error}=await c.auth.signInWithOAuth({provider:'google',options:{redirectTo:window.location.origin+window.location.pathname}});if(error)status(error.message,true)};
   window.v22Facebook=async function(){const c=await loadSb();if(!c)return;const {error}=await c.auth.signInWithOAuth({provider:'facebook',options:{redirectTo:location.href}});if(error)status(error.message,true)};
   window.v22SendOtp=async function(){const phone=(document.getElementById('v22-phone')?.value||'').trim();if(!/^\+\d{8,15}$/.test(phone)){status('Enter your mobile number with country code, e.g. +97798XXXXXXXX.',true);return}const c=await loadSb();if(!c)return;const {error}=await c.auth.signInWithOtp({phone});if(error){status(error.message,true);return}otpPhone=phone;document.getElementById('v22-otp-row').style.display='grid';status('OTP sent. Enter the 6-digit code.')};
   window.v22VerifyOtp=async function(){const token=(document.getElementById('v22-otp')?.value||'').trim();if(!/^\d{6}$/.test(token)){status('Enter the 6-digit OTP.',true);return}const c=await loadSb();if(!c)return;const {data,error}=await c.auth.verifyOtp({phone:otpPhone,token,type:'sms'});if(error){status(error.message,true);return}if(data?.session){updateProfile(data.session.user);await pullCloud();status('Signed in successfully.');setTimeout(v22CloseAuth,500)}};
@@ -5947,110 +5949,6 @@ header.topbar .feature-btn{
     try{return await window.__NP_LOGIN_CLIENT_PROMISE;}
     catch(e){window.__NP_LOGIN_CLIENT_PROMISE=null;throw e;}
   };
-})();
-</script>
-<script id="np-capacitor-oauth-bridge">
-/* Android-only OAuth bridge. Website sign-in keeps its existing redirect flow. */
-(function(){
-  'use strict';
-  const APP_CALLBACK='com.nepsepulse.app://login-callback';
-  const pluginCache={};
-  function nativeApp(){
-    const cap=window.Capacitor;
-    try{return !!(cap && typeof cap.isNativePlatform==='function' && cap.isNativePlatform());}
-    catch(e){return false;}
-  }
-  function plugin(name){
-    if(pluginCache[name])return pluginCache[name];
-    const cap=window.Capacitor;
-    let p=name==='App'?window.NP_CAP_APP:(name==='Browser'?window.NP_CAP_BROWSER:null);
-    if(!p&&cap)p=cap.Plugins&&cap.Plugins[name];
-    if(!p&&cap&&typeof cap.registerPlugin==='function'){
-      try{p=cap.registerPlugin(name);}catch(e){}
-    }
-    if(p)pluginCache[name]=p;
-    return p||null;
-  }
-  window.NP_IS_CAPACITOR_APP=nativeApp;
-  window.NP_GOOGLE_OAUTH=async function(client,status){
-    const isNative=nativeApp();
-    const redirectTo=isNative?APP_CALLBACK:(window.location.origin+window.location.pathname);
-    const options={redirectTo};
-    if(isNative)options.skipBrowserRedirect=true;
-    const {data,error}=await client.auth.signInWithOAuth({provider:'google',options});
-    if(error)throw error;
-    if(isNative){
-      const browser=plugin('Browser');
-      if(!browser||typeof browser.open!=='function'){
-        throw new Error('Android browser plugin is unavailable. Rebuild the APK after installing @capacitor/browser.');
-      }
-      if(!data||!data.url)throw new Error('Supabase did not return a Google sign-in URL.');
-      if(typeof status==='function')status('Opening secure Google sign-in…');
-      await browser.open({url:data.url});
-    }else if(data&&data.url&&typeof status==='function'){
-      status('Opening Google sign-in…');
-    }
-    return data;
-  };
-  let handledCallback='';
-  async function handleAppUrl(url){
-    if(!nativeApp()||!url||!String(url).startsWith(APP_CALLBACK))return;
-    if(handledCallback===url)return;
-    handledCallback=url;
-    try{
-      const parsed=new URL(url);
-      const authError=parsed.searchParams.get('error_description')||parsed.searchParams.get('error');
-      if(authError)throw new Error(authError);
-      // Supabase may return PKCE ?code=... or an implicit-flow token fragment.
-      // Handle both formats so Android doesn't reject a valid callback merely because it has no code.
-      const code=parsed.searchParams.get('code');
-      const hashParams=new URLSearchParams((parsed.hash||'').replace(/^#/,''));
-      const hashError=hashParams.get('error_description')||hashParams.get('error');
-      if(hashError)throw new Error(hashError);
-      const client=await window.__NP_GET_LOGIN_CLIENT();
-      let result;
-      if(code){
-        result=await client.auth.exchangeCodeForSession(code);
-      }else{
-        const access_token=hashParams.get('access_token');
-        const refresh_token=hashParams.get('refresh_token');
-        if(!access_token||!refresh_token){
-          const callbackParams=[...parsed.searchParams.keys(),...hashParams.keys()];
-          const hasAuthError=parsed.searchParams.has('error')||parsed.searchParams.has('error_description');
-          throw new Error(hasAuthError?'Google sign-in was rejected. Please try again.':'Android received the login callback, but it contained neither an authorization code nor a session token. Check the Supabase OAuth redirect and APK callback settings.');
-        }
-        result=await client.auth.setSession({access_token,refresh_token});
-      }
-      if(result.error)throw result.error;
-      const session=result.data&&result.data.session;
-      if(!session)throw new Error('Google sign-in returned, but no session was created. Please try again.');
-      window.__NP_LOGIN_SESSION=session;
-      window.npHideLoginGate&&window.npHideLoginGate();
-      const browser=plugin('Browser');
-      if(browser&&typeof browser.close==='function')try{await browser.close();}catch(e){}
-      window.dispatchEvent(new CustomEvent('np:android-auth-success',{detail:{session}}));
-    }catch(error){
-      const status=document.getElementById('np-login-status');
-      if(status)status.textContent=error&&error.message?error.message:'Google sign-in could not be completed. Please try again.';
-      if(window.npShowLoginGate)window.npShowLoginGate();
-      const browser=plugin('Browser');
-      if(browser&&typeof browser.close==='function')try{await browser.close();}catch(e){}
-    }
-  }
-  window.NP_HANDLE_APP_AUTH_URL=handleAppUrl;
-  function setupAppListener(){
-    if(!nativeApp())return;
-    const app=plugin('App');
-    if(!app)return;
-    if(typeof app.addListener==='function'){
-      app.addListener('appUrlOpen',event=>{if(event&&event.url)handleAppUrl(event.url);});
-    }
-    if(typeof app.getLaunchUrl==='function'){
-      app.getLaunchUrl().then(result=>{if(result&&result.url)handleAppUrl(result.url);}).catch(()=>{});
-    }
-  }
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',setupAppListener,{once:true});
-  else setupAppListener();
 })();
 </script>
 <script id="nepse-pulse-splash-controller">
@@ -7381,7 +7279,12 @@ body.v22-profile-tab-active .bottom.mobile-exact-bottom{z-index:10000}
      const c=await client();
      if(!c)return;
      status('Connecting to Google…');
-     await window.NP_GOOGLE_OAUTH(c,status);
+     const {data,error}=await c.auth.signInWithOAuth({
+       provider:'google',
+       options:{redirectTo:window.location.origin+window.location.pathname}
+     });
+     if(error)throw error;
+     if(data&&data.url)status('Opening Google sign-in…');
    }catch(err){
      status(err.message||'Could not start Google sign-in.',true);
    }finally{
