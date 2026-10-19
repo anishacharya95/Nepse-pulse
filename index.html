@@ -1848,6 +1848,30 @@ main { padding-bottom: calc(190px + env(safe-area-inset-bottom)) !important; }
     <div class="profile-row"><div class="avatar" id="profileAvatar">P</div><div><b id="profileName">Not signed in</b><small id="profileEmail">Connect an account to sync your data.</small></div></div>
     <div class="auth-status" id="profileStatus">Authentication is configured as provider-ready. Real Google, Facebook and phone OTP require your Supabase project URL/key plus enabled providers.</div>
     <button class="auth-btn" onclick="signOutPulse()">↪ Sign out</button>
+    <button class="auth-btn" id="deleteAccountBtn" style="margin-top:10px;border:1px solid #d9534f;color:#ffb8b8" onclick="requestPulseAccountDeletion()">Delete Account</button>
+    <p style="font-size:12px;line-height:1.5;color:var(--muted,#9aaac4);margin:8px 0">Deleting your account is permanent and removes your Supabase login. Review the <button type="button" class="link-btn" onclick="openPrivacyPolicy()">Privacy Policy</button> first.</p>
+    <button class="auth-btn" type="button" onclick="openPrivacyPolicy()">Privacy Policy</button>
+  </div>
+</div>
+
+<div class="modal" id="privacyPolicyModal" onclick="if(event.target===this)closePrivacyPolicy()" role="dialog" aria-modal="true" aria-labelledby="privacyPolicyTitle">
+  <div class="sheet profile-sheet" style="max-height:85vh;overflow:auto">
+    <div class="grab"></div>
+    <div class="sheet-head"><h2 id="privacyPolicyTitle">NEPSE Pulse Privacy Policy</h2><button class="close" type="button" onclick="closePrivacyPolicy()">Close</button></div>
+    <p><strong>Last updated:</strong> 19 October 2026</p>
+    <p>NEPSE Pulse provides Nepal stock-market information and related app features. This policy explains how information may be handled when you use the app.</p>
+    <h3>Information we handle</h3>
+    <p>When you sign in, our authentication provider (Supabase, with providers such as Google where enabled) may process account identifiers such as your email address, phone number, and basic profile information. If you save a watchlist while signed in, the app may store the symbols associated with your account. Information you choose to submit to the app may also be processed to provide the requested feature.</p>
+    <h3>How information is used</h3>
+    <p>Information is used to sign you in, maintain your session, sync account-linked features such as watchlists, provide app functionality, maintain security, and troubleshoot problems.</p>
+    <h3>Service providers and advertising</h3>
+    <p>The app uses Supabase for authentication and related backend services. The app may display ads through Google AdMob. These providers may process information under their own privacy terms and settings. Please review the relevant providers’ privacy policies for details.</p>
+    <h3>Retention and deletion</h3>
+    <p>You can request account deletion using the Delete Account option in the account screen. Deletion is intended to remove your Supabase authentication account and account-linked data that is configured to be deleted with it. Some records may be retained where required by law, for security, or to resolve disputes. If in-app deletion does not work, contact <a href="mailto:anishacharya95@gmail.com">anishacharya95@gmail.com</a>.</p>
+    <h3>Children and security</h3>
+    <p>Do not submit information that is not needed to use the app. We use third-party services and reasonable safeguards, but no online service can guarantee absolute security.</p>
+    <h3>Changes and contact</h3>
+    <p>This policy may be updated as the app changes. For privacy questions or deletion help, contact <a href="mailto:anishacharya95@gmail.com">anishacharya95@gmail.com</a>.</p>
   </div>
 </div>
 
@@ -2675,6 +2699,52 @@ async function verifyPulseOtp(){
     closeLogin(); setAuthUser(data.user); toast('Welcome to NEPSE Pulse.');
   }catch(e){toast('OTP verification failed.')}
 }
+function openPrivacyPolicy(){
+  const modal=document.getElementById('privacyPolicyModal');
+  if(modal)modal.classList.add('open');
+}
+function closePrivacyPolicy(){
+  const modal=document.getElementById('privacyPolicyModal');
+  if(modal)modal.classList.remove('open');
+}
+
+async function requestPulseAccountDeletion(){
+  const confirmed=window.confirm('Permanently delete your NEPSE Pulse account? This action cannot be undone.');
+  if(!confirmed)return;
+  const btn=document.getElementById('deleteAccountBtn');
+  const status=document.getElementById('profileStatus');
+  if(btn){btn.disabled=true;btn.textContent='Deleting account…';}
+  try{
+    const client=window.__NP_LOGIN_SUPABASE||(typeof window.__NP_GET_LOGIN_CLIENT==='function'?await window.__NP_GET_LOGIN_CLIENT():null);
+    if(!client)throw new Error('Authentication is not configured.');
+    const {data,error}=await client.auth.getSession();
+    if(error)throw error;
+    const session=data?.session;
+    if(!session?.access_token)throw new Error('Please sign in again before deleting your account.');
+    const cfg=window.NEPSE_PULSE_AUTH||window.AUTH_CFG||PULSE_AUTH_CONFIG||{};
+    const projectUrl=cfg.supabaseUrl||cfg.url||'';
+    const publicKey=cfg.supabaseAnonKey||cfg.anonKey||cfg.publishableKey||'';
+    if(!projectUrl||!publicKey)throw new Error('Supabase URL or public key is not configured.');
+    const response=await fetch(projectUrl.replace(/\/$/, '')+'/functions/v1/bright-function',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+session.access_token,'apikey':publicKey},
+      body:JSON.stringify({action:'delete-account'})
+    });
+    const result=await response.json().catch(()=>({}));
+    if(!response.ok||result.success!==true)throw new Error(result.error||'Account deletion failed. Please try again or contact support.');
+    await client.auth.signOut();
+    setAuthUser(null);
+    closeProfile();
+    toast('Your account deletion request was completed.');
+  }catch(e){
+    console.error('Pulse account deletion failed',e);
+    if(status)status.textContent=e?.message||'Could not delete account. Please try again.';
+    toast(e?.message||'Could not delete account. Please try again.');
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent='Delete Account';}
+  }
+}
+
 async function signOutPulse(){
   try{
     const client=window.__NP_LOGIN_SUPABASE||(typeof window.__NP_GET_LOGIN_CLIENT==='function'?await window.__NP_GET_LOGIN_CLIENT():null);
