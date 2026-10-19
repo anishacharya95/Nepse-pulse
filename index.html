@@ -2528,11 +2528,16 @@ async function renderTraderScan(name){
 const PULSE_AUTH_CONFIG = window.NEPSE_PULSE_AUTH || {supabaseUrl:'',supabaseAnonKey:''};
 let pulseSession = null;
 
-function openProfile(){document.getElementById('profileModal').classList.add('open')}
+function openProfile(){
+  document.getElementById('profileModal').classList.add('open');
+  // Refresh the account sheet from the same Supabase client used by the main login flow.
+  initPulseAuth();
+}
 function closeProfile(){document.getElementById('profileModal').classList.remove('open')}
 
 function authReady(){
-  return Boolean(PULSE_AUTH_CONFIG.supabaseUrl && PULSE_AUTH_CONFIG.supabaseAnonKey && window.supabase);
+  const cfg=window.NEPSE_PULSE_AUTH||window.AUTH_CFG||PULSE_AUTH_CONFIG||{};
+  return Boolean((cfg.supabaseUrl||cfg.url) && (cfg.supabaseAnonKey||cfg.anonKey||cfg.publishableKey));
 }
 function setAuthUser(user){
   pulseSession = user || null;
@@ -2568,15 +2573,36 @@ function toggleTheme(){
 })();
 
 async function initPulseAuth(){
-  if(!authReady()){
-    document.getElementById('profileStatus').textContent='Authentication is not configured yet. Add your Supabase URL and anon key in PULSE_AUTH_CONFIG, then enable Google, Facebook and Phone providers in Supabase.';
-    return;
-  }
+  const status=document.getElementById('profileStatus');
   try{
-    const {data:{session}}=await window.supabase.auth.getSession();
-    setAuthUser(session?.user || null);
-    window.supabase.auth.onAuthStateChange((_event,session)=>setAuthUser(session?.user || null));
-  }catch(e){toast('Authentication connection failed. Check provider configuration.')}
+    let client=null;
+    if(typeof window.__NP_GET_LOGIN_CLIENT==='function') client=await window.__NP_GET_LOGIN_CLIENT();
+    else if(authReady() && window.supabase?.createClient){
+      const cfg=window.NEPSE_PULSE_AUTH||window.AUTH_CFG||PULSE_AUTH_CONFIG||{};
+      client=window.supabase.createClient(cfg.supabaseUrl||cfg.url,cfg.supabaseAnonKey||cfg.anonKey||cfg.publishableKey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+      window.__NP_LOGIN_SUPABASE=client;
+    }
+    if(!client){
+      if(status)status.textContent='Authentication is not configured. Check auth-config.js and your Supabase project URL/key.';
+      setAuthUser(null);return;
+    }
+    window.__NP_LOGIN_SUPABASE=client;
+    const {data,error}=await client.auth.getSession();
+    if(error)throw error;
+    setAuthUser(data?.session?.user||null);
+    if(status)status.textContent=data?.session?.user?'Your account is connected.':'No active session found. Sign in with the same account used for this site.';
+    if(!window.__PULSE_PROFILE_AUTH_LISTENER){
+      window.__PULSE_PROFILE_AUTH_LISTENER=true;
+      client.auth.onAuthStateChange((_event,session)=>{
+        setAuthUser(session?.user||null);
+        const st=document.getElementById('profileStatus');
+        if(st)st.textContent=session?.user?'Your account is connected.':'No active session found. Sign in with the same account used for this site.';
+      });
+    }
+  }catch(e){
+    if(status)status.textContent='Could not check your account session: '+(e?.message||'authentication error');
+    console.error('Pulse account session check failed',e);
+  }
 }
 async function pulseOAuth(provider){
   if(!authReady()){toast('Connect the authentication provider first. No sign-in was faked.');return}
@@ -2607,7 +2633,10 @@ async function verifyPulseOtp(){
   }catch(e){toast('OTP verification failed.')}
 }
 async function signOutPulse(){
-  if(authReady()){try{await window.supabase.auth.signOut()}catch(e){}}
+  try{
+    const client=window.__NP_LOGIN_SUPABASE||(typeof window.__NP_GET_LOGIN_CLIENT==='function'?await window.__NP_GET_LOGIN_CLIENT():null);
+    if(client)await client.auth.signOut();
+  }catch(e){console.error('Pulse sign out failed',e);}
   setAuthUser(null); closeProfile(); toast('Signed out.');
 }
 
