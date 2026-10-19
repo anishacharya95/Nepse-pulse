@@ -3393,113 +3393,60 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
 
 <script id="pulse-portfolio-v1-js">
 (function(){
-  const TX='nepsePulsePortfolioTxV1', DV='nepsePulseDividendsV1';
+  const BASE_TX='nepsePulsePortfolioTxV1', BASE_DV='nepsePulseDividendsV1';
   const $=id=>document.getElementById(id);
   const read=(k,d)=>{try{return JSON.parse(localStorage.getItem(k)||JSON.stringify(d))}catch(e){return d}};
   const write=(k,v)=>localStorage.setItem(k,JSON.stringify(v));
-  let tx=read(TX,[]), div=read(DV,[]), rows=[];
-
+  let tx=[], div=[], rows=[], currentUserId=null, client=null, cloudReady=false, syncTimer=null, syncing=false;
+  const localKey=(base)=>currentUserId?base+'_'+currentUserId:base+'_guest';
+  function assignIds(arr){return arr.map(x=>({...x,_record_id:x._record_id||((window.crypto&&crypto.randomUUID)?crypto.randomUUID():String(Date.now())+'_'+Math.random().toString(36).slice(2))}))}
+  function saveLocal(){try{write(localKey(BASE_TX),tx);write(localKey(BASE_DV),div)}catch(e){}}
+  function scheduleCloud(){saveLocal();if(!currentUserId||!cloudReady)return;clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud().catch(e=>console.warn('Portfolio cloud sync failed:',e)),500)}
+  async function getClient(){if(client)return client;if(window.__NP_GET_LOGIN_CLIENT)try{client=await window.__NP_GET_LOGIN_CLIENT();return client}catch(e){}return null}
+  async function loadCloud(userId){
+    const c=await getClient(); if(!c)throw new Error('Supabase client is unavailable');
+    const {data,error}=await c.from('user_portfolio_records').select('record_id,kind,record_data').eq('user_id',userId);
+    if(error)throw error;
+    tx=assignIds((data||[]).filter(r=>r.kind==='transaction').map(r=>({...r.record_data,_record_id:r.record_id})));
+    div=assignIds((data||[]).filter(r=>r.kind==='dividend').map(r=>({...r.record_data,_record_id:r.record_id})));
+    currentUserId=userId;cloudReady=true;saveLocal();render();
+  }
+  async function syncCloud(){
+    if(!currentUserId||!cloudReady||syncing)return; syncing=true;
+    try{
+      const c=await getClient();if(!c)return;
+      const desired=[...tx.map(x=>({record_id:String(x._record_id),user_id:currentUserId,kind:'transaction',record_data:Object.fromEntries(Object.entries(x).filter(([k])=>k!=='_record_id'))})),...div.map(x=>({record_id:String(x._record_id),user_id:currentUserId,kind:'dividend',record_data:Object.fromEntries(Object.entries(x).filter(([k])=>k!=='_record_id'))}))];
+      const {data:existing,error:readErr}=await c.from('user_portfolio_records').select('record_id').eq('user_id',currentUserId);if(readErr)throw readErr;
+      const wanted=new Set(desired.map(x=>x.record_id));const stale=(existing||[]).map(x=>x.record_id).filter(id=>!wanted.has(id));
+      if(stale.length){const {error}=await c.from('user_portfolio_records').delete().eq('user_id',currentUserId).in('record_id',stale);if(error)throw error;}
+      if(desired.length){const {error}=await c.from('user_portfolio_records').upsert(desired,{onConflict:'user_id,record_id'});if(error)throw error;}
+    } finally {syncing=false;}
+  }
+  async function authChanged(user){
+    const nextId=user?.id||null;if(nextId===currentUserId)return;
+    currentUserId=null;cloudReady=false;tx=[];div=[];
+    if(!nextId){tx=read(localKey(BASE_TX),[]);div=read(localKey(BASE_DV),[]);render();return;}
+    try{await loadCloud(nextId)}catch(e){console.error('Portfolio cloud load failed:',e);currentUserId=nextId;tx=read(localKey(BASE_TX),[]);div=read(localKey(BASE_DV),[]);cloudReady=false;render();const el=$('pFeedState');if(el)el.textContent='PORTFOLIO CLOUD SYNC ERROR — CHECK DATABASE SETUP';}
+  }
   function num(v){const n=Number(v);return Number.isFinite(n)?n:null}
   function pick(o,keys){for(const k of keys){const n=num(o?.[k]);if(n!==null)return n}return null}
   function text(o,keys){for(const k of keys){if(o?.[k]!==undefined&&o?.[k]!==null&&String(o[k]).trim())return String(o[k])}return ''}
   function sym(o){return text(o,['symbol','sym','ticker','stockSymbol','securitySymbol','stockSymbolName','symbolName','scrip','securityName','companySymbol']).toUpperCase().trim()}
   function ltp(o){return pick(o,['ltp','LTP','lastPrice','lastTradedPrice','currentPrice','marketPrice','closingPrice','close','price','last_trade_price'])}
   function money(n){return n===null||n===undefined?'—':n.toLocaleString(undefined,{maximumFractionDigits:2})}
-  function discover(){
-    // The Central Feed Engine is the authoritative source; PULSE_FEED is an engine
-    // whose state is a function, not an object with a nested .state property.
-    const engine=window.PULSE_FEED_ENGINE||window.PULSE_FEED;
-    let st={}; try{st=typeof engine?.state==='function'?engine.state():(engine?.state||{});}catch(e){}
-    const candidates=[st.live,st.liveMarket,st.securities,st.companies,st.stocks,st.priceVolume,window.PULSE_FEED?.live,window.liveMarketData,window.marketData];
-    for(const x of candidates){if(Array.isArray(x)&&x.length)return x;}
-    return [];
-  }
-
-  function holdings(){
-    const h={};
-    tx.slice().sort((a,b)=>String(a.date||'').localeCompare(String(b.date||'')) || (a.createdAt||0)-(b.createdAt||0)).forEach(t=>{
-      const s=String(t.symbol||'').toUpperCase(); if(!s)return;
-      if(!h[s])h[s]={symbol:s,qty:0,cost:0,realized:0};
-      const q=Number(t.qty)||0, p=Number(t.price)||0;
-      if(t.side==='BUY'){
-        h[s].qty+=q;
-        h[s].cost+=q*p;
-      } else if(q>0){
-        const sellQty=Math.min(q,h[s].qty);
-        const avg=h[s].qty>0?h[s].cost/h[s].qty:0;
-        h[s].realized += sellQty*(p-avg);
-        h[s].qty-=sellQty;
-        h[s].cost=Math.max(0,h[s].cost-sellQty*avg);
-      }
-    });
-    return Object.values(h).filter(x=>x.qty>0);
-  }
-
+  function discover(){const engine=window.PULSE_FEED_ENGINE||window.PULSE_FEED;let st={};try{st=typeof engine?.state==='function'?engine.state():(engine?.state||{});}catch(e){}const candidates=[st.live,st.liveMarket,st.securities,st.companies,st.stocks,st.priceVolume,window.PULSE_FEED?.live,window.liveMarketData,window.marketData];for(const x of candidates){if(Array.isArray(x)&&x.length)return x;}return [];}
+  function holdings(){const h={};tx.slice().sort((a,b)=>String(a.date||'').localeCompare(String(b.date||''))||(a.createdAt||0)-(b.createdAt||0)).forEach(t=>{const s=String(t.symbol||'').toUpperCase();if(!s)return;if(!h[s])h[s]={symbol:s,qty:0,cost:0,realized:0};const q=Number(t.qty)||0,p=Number(t.price)||0;if(t.side==='BUY'){h[s].qty+=q;h[s].cost+=q*p}else if(q>0){const sellQty=Math.min(q,h[s].qty),avg=h[s].qty>0?h[s].cost/h[s].qty:0;h[s].realized+=sellQty*(p-avg);h[s].qty-=sellQty;h[s].cost=Math.max(0,h[s].cost-sellQty*avg)}});return Object.values(h).filter(x=>x.qty>0)}
   function render(){
-    const engine=window.PULSE_FEED_ENGINE||window.PULSE_FEED;
-    let feedState={};try{feedState=typeof engine?.state==='function'?engine.state():(engine?.state||{});}catch(e){}
-    const status=feedState.status||window.PULSE_FEED_STATUS||window.PULSE_FEED?.status||'CONNECTING';
-    if($('pFeedState'))$('pFeedState').textContent='FEED: '+String(status).toUpperCase();
-
-    rows=discover();
-    const map={}; rows.forEach(r=>{const s=sym(r),price=ltp(r); if(s&&price!==null&&price>=0)map[s]=price;});
-    const hs=holdings();
-    let value=0,cost=0;
-    const hr=$('pHoldings');
-    const rendered=hs.map(h=>{
-      const live=map[h.symbol]??null;
-      const avg=h.cost/h.qty;
-      const mv=live===null?null:h.qty*live;
-      const pl=mv===null?null:mv-h.cost;
-      if(mv!==null)value+=mv; cost+=h.cost;
-      return {h,live,avg,mv,pl};
-    });
-    if(hr)hr.innerHTML=rendered.map(x=>`<div class="p-item"><span><b>${x.h.symbol}</b><small>${x.h.qty.toLocaleString()} shares • Avg ${money(x.avg)}</small></span><span>${money(x.mv)}<small>${x.pl===null?'P/L —':'P/L '+money(x.pl)}</small></span></div>`).join('')||'<div class="p-empty">No holdings yet.</div>';
-
-    const allPricesAvailable=rendered.length>0&&rendered.every(x=>x.mv!==null);
-    const pl=allPricesAvailable?value-cost:null;
-    if($('pStats'))$('pStats').innerHTML=`<div class="p-stat"><strong>${hs.length}</strong><span>Positions</span></div><div class="p-stat"><strong>${money(value||null)}</strong><span>Value</span></div><div class="p-stat"><strong>${pl===null?'—':money(pl)}</strong><span>Unrealized P/L</span></div>`;
-    const dash=$('profilePortfolioDash');
-    if(dash){
-      const fmt=n=>n===null||n===undefined?'—':Number(n).toLocaleString(undefined,{maximumFractionDigits:2});
-      const set=(id,v)=>{const el=$(id);if(el)el.textContent=v};
-      set('ppdValue','NPR '+fmt(rendered.some(x=>x.mv!==null)?value:null));set('ppdPL',pl===null?'—':(pl>=0?'+NPR ':'−NPR ')+fmt(Math.abs(pl)));set('ppdPositions',hs.length+' holdings');set('ppdCount',hs.length+' holdings');set('ppdHoldingsCount',hs.length+' holdings');set('ppdDonutValue',rendered.some(x=>x.mv!==null)?fmt(value/1000)+'K':'—');
-      const colors=['#176b53','#e2aa3e','#2c7d9b','#8c6bb1','#d16b62','#7d9b55','#4774b8'];
-      let cursor=0;const slices=rendered.filter(x=>x.mv!==null&&x.mv>0);const total=slices.reduce((a,x)=>a+x.mv,0);
-      const stops=slices.map((x,i)=>{const start=cursor;cursor+=total?x.mv/total*100:0;return `${colors[i%colors.length]} ${start}% ${cursor}%`});
-      const donut=$('ppdDonut');if(donut&&stops.length)donut.style.background='conic-gradient('+stops.join(',')+')';
-      const legend=$('ppdLegend');if(legend)legend.innerHTML=slices.map((x,i)=>`<div class="ppd-legend-row"><i class="ppd-dot" style="background:${colors[i%colors.length]}"></i><b>${x.h.symbol}</b><span>${total?Math.round(x.mv/total*100):0}%</span></div>`).join('')||'<div class="ppd-empty">Add holdings to see allocation.</div>';
-      const holdingHtml=rendered.map((x,i)=>`<div class="ppd-holding"><div><b>${x.h.symbol}</b><small>${x.h.qty.toLocaleString()} shares · Avg ${money(x.avg)} · LTP ${money(x.live)}</small></div><div style="text-align:right"><b>NPR ${money(x.mv)}</b><small style="color:${x.pl===null?'#77837c':x.pl>=0?'#167653':'#c34242'}">P/L ${money(x.pl)}</small></div></div>`).join('')||'<div class="ppd-empty">No holdings yet. Add a buy transaction below.</div>';
-      const hl=$('ppdHoldingList');if(hl)hl.innerHTML=holdingHtml;
-      const perf=$('ppdPerformance');if(perf)perf.innerHTML=rendered.length?`<div class="ppd-holding"><span>Market value</span><b>NPR ${fmt(rendered.some(x=>x.mv!==null)?value:null)}</b></div><div class="ppd-holding"><span>Invested cost</span><b>NPR ${fmt(cost||null)}</b></div><div class="ppd-holding"><span>Unrealized P/L</span><b style="color:${pl===null?'#77837c':pl>=0?'#167653':'#c34242'}">${pl===null?'—':(pl>=0?'+':'−')+'NPR '+fmt(Math.abs(pl))}</b></div>`:'Performance will appear when holdings and live prices are available.';
-    }
-
-    const dr=$('pDividends');
-    const total=div.reduce((a,d)=>a+(d.rate*d.shares),0);
-    if(dr)dr.innerHTML=(div.length?div.map((d,i)=>`<div class="p-item"><span><b>${d.symbol}</b><small>${d.shares.toLocaleString()} eligible shares • ${d.rate} / share</small></span><span>${money(d.rate*d.shares)}<button data-dv="${i}" style="margin-left:7px">Delete</button></span></div>`).join(''):'<div class="p-empty">No dividends recorded.</div>')+
-      (div.length?`<div class="p-item"><span><b>Total recorded dividends</b></span><span>${money(total)}</span></div>`:'');
-    dr?.querySelectorAll('[data-dv]').forEach(b=>b.onclick=()=>{div.splice(Number(b.dataset.dv),1);write(DV,div);render()});
+    const engine=window.PULSE_FEED_ENGINE||window.PULSE_FEED;let feedState={};try{feedState=typeof engine?.state==='function'?engine.state():(engine?.state||{});}catch(e){}const status=feedState.status||window.PULSE_FEED_STATUS||window.PULSE_FEED?.status||'CONNECTING';if($('pFeedState'))$('pFeedState').textContent=(currentUserId?'CLOUD PORTFOLIO • ':'LOCAL GUEST • ')+'FEED: '+String(status).toUpperCase();
+    rows=discover();const map={};rows.forEach(r=>{const s=sym(r),price=ltp(r);if(s&&price!==null&&price>=0)map[s]=price});const hs=holdings();let value=0,cost=0;const hr=$('pHoldings');const rendered=hs.map(h=>{const live=map[h.symbol]??null,avg=h.cost/h.qty,mv=live===null?null:h.qty*live,pl=mv===null?null:mv-h.cost;if(mv!==null)value+=mv;cost+=h.cost;return{h,live,avg,mv,pl}});if(hr)hr.innerHTML=rendered.map(x=>`<div class="p-item"><span><b>${x.h.symbol}</b><small>${x.h.qty.toLocaleString()} shares • Avg ${money(x.avg)}</small></span><span>${money(x.mv)}<small>${x.pl===null?'P/L —':'P/L '+money(x.pl)}</small></span></div>`).join('')||'<div class="p-empty">No holdings yet.</div>';
+    const allPricesAvailable=rendered.length>0&&rendered.every(x=>x.mv!==null),pl=allPricesAvailable?value-cost:null;if($('pStats'))$('pStats').innerHTML=`<div class="p-stat"><strong>${hs.length}</strong><span>Positions</span></div><div class="p-stat"><strong>${money(value||null)}</strong><span>Value</span></div><div class="p-stat"><strong>${pl===null?'—':money(pl)}</strong><span>Unrealized P/L</span></div>`;
+    const dash=$('profilePortfolioDash');if(dash){const fmt=n=>n===null||n===undefined?'—':Number(n).toLocaleString(undefined,{maximumFractionDigits:2});const set=(id,v)=>{const el=$(id);if(el)el.textContent=v};set('ppdValue','NPR '+fmt(rendered.some(x=>x.mv!==null)?value:null));set('ppdPL',pl===null?'—':(pl>=0?'+NPR ':'−NPR ')+fmt(Math.abs(pl)));set('ppdPositions',hs.length+' holdings');set('ppdCount',hs.length+' holdings');set('ppdHoldingsCount',hs.length+' holdings');set('ppdDonutValue',rendered.some(x=>x.mv!==null)?fmt(value/1000)+'K':'—');const colors=['#176b53','#e2aa3e','#2c7d9b','#8c6bb1','#d16b62','#7d9b55','#4774b8'];let cursor=0;const slices=rendered.filter(x=>x.mv!==null&&x.mv>0),total=slices.reduce((a,x)=>a+x.mv,0);const stops=slices.map((x,i)=>{const start=cursor;cursor+=total?x.mv/total*100:0;return `${colors[i%colors.length]} ${start}% ${cursor}%`});const donut=$('ppdDonut');if(donut&&stops.length)donut.style.background='conic-gradient('+stops.join(',')+')';const legend=$('ppdLegend');if(legend)legend.innerHTML=slices.map((x,i)=>`<div class="ppd-legend-row"><i class="ppd-dot" style="background:${colors[i%colors.length]}"></i><b>${x.h.symbol}</b><span>${total?Math.round(x.mv/total*100):0}%</span></div>`).join('')||'<div class="ppd-empty">Add holdings to see allocation.</div>';const holdingHtml=rendered.map(x=>`<div class="ppd-holding"><div><b>${x.h.symbol}</b><small>${x.h.qty.toLocaleString()} shares · Avg ${money(x.avg)} · LTP ${money(x.live)}</small></div><div style="text-align:right"><b>NPR ${money(x.mv)}</b><small style="color:${x.pl===null?'#77837c':x.pl>=0?'#167653':'#c34242'}">P/L ${money(x.pl)}</small></div></div>`).join('')||'<div class="ppd-empty">No holdings yet. Add a buy transaction below.</div>';const hl=$('ppdHoldingList');if(hl)hl.innerHTML=holdingHtml;const perf=$('ppdPerformance');if(perf)perf.innerHTML=rendered.length?`<div class="ppd-holding"><span>Market value</span><b>NPR ${fmt(rendered.some(x=>x.mv!==null)?value:null)}</b></div><div class="ppd-holding"><span>Invested cost</span><b>NPR ${fmt(cost||null)}</b></div><div class="ppd-holding"><span>Unrealized P/L</span><b style="color:${pl===null?'#77837c':pl>=0?'#167653':'#c34242'}">${pl===null?'—':(pl>=0?'+':'−')+'NPR '+fmt(Math.abs(pl))}</b></div>`:'Performance will appear when holdings and live prices are available.';}
+    const dr=$('pDividends'),total=div.reduce((a,d)=>a+(Number(d.rate)*Number(d.shares)),0);if(dr)dr.innerHTML=(div.length?div.map((d,i)=>`<div class="p-item"><span><b>${d.symbol}</b><small>${Number(d.shares).toLocaleString()} eligible shares • ${d.rate} / share</small></span><span>${money(d.rate*d.shares)}<button data-dv="${i}" style="margin-left:7px">Delete</button></span></div>`).join(''):'<div class="p-empty">No dividends recorded.</div>')+(div.length?`<div class="p-item"><span><b>Total recorded dividends</b></span><span>${money(total)}</span></div>`:'');dr?.querySelectorAll('[data-dv]').forEach(b=>b.onclick=()=>{div.splice(Number(b.dataset.dv),1);scheduleCloud();render()});
   }
-
-  $('pAddTx')?.addEventListener('click',()=>{
-    const s=($('pSymbol').value||'').trim().toUpperCase(), side=$('pSide').value, q=num($('pQty').value), p=num($('pPrice').value);
-    if(!s||q===null||q<=0||p===null||p<0)return;
-    tx.push({symbol:s,side,qty:q,price:p,date:$('pDate').value||new Date().toISOString().slice(0,10),createdAt:Date.now()});
-    write(TX,tx); $('pSymbol').value='';$('pQty').value='';$('pPrice').value='';render();
-  });
-
-  $('pAddDiv')?.addEventListener('click',()=>{
-    const s=($('pDivSymbol').value||'').trim().toUpperCase(), rate=num($('pDivRate').value), shares=num($('pDivShares').value);
-    if(!s||rate===null||shares===null||shares<0)return;
-    div.push({symbol:s,rate,shares,date:new Date().toISOString().slice(0,10)});
-    write(DV,div);$('pDivSymbol').value='';$('pDivRate').value='';$('pDivShares').value='';render();
-  });
-
-  document.addEventListener('pulse-feed-update',render);
-  document.addEventListener('pulse-central-snapshot',render);
-  window.addEventListener('pulse-central-snapshot',render);
-  setInterval(render,5000);
-  setTimeout(render,900);
+  $('pAddTx')?.addEventListener('click',()=>{const s=($('pSymbol').value||'').trim().toUpperCase(),side=$('pSide').value,q=num($('pQty').value),p=num($('pPrice').value);if(!s||q===null||q<=0||p===null||p<0)return;tx.push({_record_id:((window.crypto&&crypto.randomUUID)?crypto.randomUUID():String(Date.now())+'_'+Math.random().toString(36).slice(2)),symbol:s,side,qty:q,price:p,date:$('pDate').value||new Date().toISOString().slice(0,10),createdAt:Date.now()});scheduleCloud();$('pSymbol').value='';$('pQty').value='';$('pPrice').value='';render()});
+  $('pAddDiv')?.addEventListener('click',()=>{const s=($('pDivSymbol').value||'').trim().toUpperCase(),rate=num($('pDivRate').value),shares=num($('pDivShares').value);if(!s||rate===null||shares===null||shares<0)return;div.push({_record_id:((window.crypto&&crypto.randomUUID)?crypto.randomUUID():String(Date.now())+'_'+Math.random().toString(36).slice(2)),symbol:s,rate,shares,date:new Date().toISOString().slice(0,10)});scheduleCloud();$('pDivSymbol').value='';$('pDivRate').value='';$('pDivShares').value='';render()});
+  document.addEventListener('pulse-feed-update',render);document.addEventListener('pulse-central-snapshot',render);window.addEventListener('pulse-central-snapshot',render);setInterval(render,5000);setTimeout(render,900);
+  window.addEventListener('load',async()=>{const c=await getClient();if(!c){tx=read(localKey(BASE_TX),[]);div=read(localKey(BASE_DV),[]);render();return;}const {data}=await c.auth.getSession();await authChanged(data?.session?.user||null);c.auth.onAuthStateChange((_event,session)=>{authChanged(session?.user||null)});});
 })();
 </script>
 
