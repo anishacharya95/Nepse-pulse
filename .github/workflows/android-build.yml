@@ -44,35 +44,97 @@ jobs:
       - name: Install Capacitor and browser plugins
         run: |
           npm init -y
-          npm install @capacitor/core @capacitor/android @capacitor/app @capacitor/browser
-          npm install --save-dev @capacitor/cli esbuild
+          npm install @capacitor/core@7 @capacitor/android@7 @capacitor/app@7 @capacitor/browser@7 @capacitor-community/admob@7
+          npm install --save-dev @capacitor/cli@7 esbuild
 
-      - name: Bundle Capacitor native plugins for the plain HTML app
+      - name: Bundle Capacitor native plugins and configure banner
         run: |
           cat > capacitor-plugins-entry.js <<'EOF'
           import { Capacitor } from '@capacitor/core';
           import { App } from '@capacitor/app';
           import { Browser } from '@capacitor/browser';
+          import { AdMob } from '@capacitor-community/admob';
+
           window.Capacitor = Capacitor;
           window.NP_CAP_APP = App;
           window.NP_CAP_BROWSER = Browser;
+          window.NP_CAP_ADMOB = AdMob;
           EOF
 
           npx esbuild capacitor-plugins-entry.js \
             --bundle --format=iife --platform=browser --target=es2020 \
             --outfile=android-web/np-capacitor-plugins.bundle.js
 
+          cat > android-web/np-admob-banner.js <<'EOF'
+          (function () {
+            'use strict';
+
+            let started = false;
+
+            async function startAdMobBanner() {
+              if (started) return;
+              if (!window.Capacitor ||
+                  typeof window.Capacitor.isNativePlatform !== 'function' ||
+                  !window.Capacitor.isNativePlatform()) return;
+
+              const admob = window.NP_CAP_ADMOB;
+              if (!admob) {
+                console.warn('NEPSE Pulse: AdMob plugin is unavailable.');
+                return;
+              }
+
+              started = true;
+              try {
+                // Obtain consent information and show a consent form if required.
+                // Ads are requested only if the consent SDK says requests are allowed.
+                let consent = await admob.requestConsentInfo();
+                if (consent &&
+                    consent.isConsentFormAvailable &&
+                    String(consent.status).toLowerCase().includes('required')) {
+                  consent = await admob.showConsentForm();
+                }
+                if (consent && consent.canRequestAds === false) {
+                  console.info('NEPSE Pulse: ads not requested because consent is not ready.');
+                  return;
+                }
+
+                await admob.initialize();
+
+                await admob.showBanner({
+                  adId: 'ca-app-pub-1565800134063497/8028868444',
+                  adSize: 'ADAPTIVE_BANNER',
+                  position: 'BOTTOM_CENTER',
+                  margin: 0
+                });
+              } catch (error) {
+                console.error('NEPSE Pulse AdMob banner error:', error);
+                started = false;
+              }
+            }
+
+            if (document.readyState === 'loading') {
+              document.addEventListener('DOMContentLoaded', startAdMobBanner, { once: true });
+            } else {
+              startAdMobBanner();
+            }
+          })();
+          EOF
+
           python3 - <<'PY'
           from pathlib import Path
           p = Path('android-web/index.html')
           s = p.read_text()
-          tag = '<script src="./np-capacitor-plugins.bundle.js"></script>'
-          if tag not in s:
-              if '</head>' not in s.lower():
-                  raise SystemExit('Could not find </head> in android-web/index.html')
-              pos = s.lower().rfind('</head>')
-              s = s[:pos] + tag + '\n' + s[pos:]
-              p.write_text(s)
+          tags = [
+              '<script src="./np-capacitor-plugins.bundle.js"></script>',
+              '<script src="./np-admob-banner.js"></script>'
+          ]
+          for tag in tags:
+              if tag not in s:
+                  pos = s.lower().rfind('</head>')
+                  if pos < 0:
+                      raise SystemExit('Could not find </head> in android-web/index.html')
+                  s = s[:pos] + tag + '\n' + s[pos:]
+          p.write_text(s)
           PY
 
       - name: Initialize Capacitor Android project
@@ -80,6 +142,48 @@ jobs:
           npx cap init "NEPSE Pulse" "com.nepsepulse.app" --web-dir android-web
           npx cap add android
           npx cap sync android
+
+      - name: Configure AdMob App ID
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          manifest = Path('android/app/src/main/AndroidManifest.xml')
+          s = manifest.read_text()
+          app_id = 'ca-app-pub-1565800134063497~9972330494'
+          meta_name = 'com.google.android.gms.ads.APPLICATION_ID'
+
+          if meta_name not in s:
+              match = re.search(r'<application\b[^>]*>', s)
+              if not match:
+                  raise SystemExit('Could not find <application> in AndroidManifest.xml')
+              metadata = (
+                  '\n        <meta-data\n'
+                  '            android:name="' + meta_name + '"\n'
+                  '            android:value="' + app_id + '"/>\n'
+              )
+              s = s[:match.end()] + metadata + s[match.end():]
+              manifest.write_text(s)
+          else:
+              # Ensure an existing entry uses the correct App ID.
+              pattern = re.compile(
+                  r'(<meta-data\s+android:name="' + re.escape(meta_name) +
+                  r'"\s+android:value=")[^"]*("\s*/?>)'
+              )
+              s2, count = pattern.subn(r'\g<1>' + app_id + r'\g<2>', s, count=1)
+              if count:
+                  manifest.write_text(s2)
+
+          values = Path('android/app/src/main/res/values')
+          values.mkdir(parents=True, exist_ok=True)
+          strings = values / 'strings.xml'
+          content = strings.read_text() if strings.exists() else '<resources>\n</resources>\n'
+          line = '<string name="admob_app_id">' + app_id + '</string>'
+          if 'name="admob_app_id"' not in content:
+              content = content.replace('</resources>', '    ' + line + '\n</resources>')
+              strings.write_text(content)
+          PY
 
       - name: Register Android login callback
         run: |
