@@ -8574,6 +8574,59 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 #pulseFeatureWorkspace #pulseWorkspaceBody #portfolioZone.pulse-feature-mounted .p-card { display:block!important; }
 </style>
 
+
+
+<!-- Privacy policy navigation recovery: close the policy overlay before routing to Home/Menu tabs. -->
+<style id="pulse-privacy-navigation-recovery-css">
+#privacyPolicyModal { z-index: 2147483646 !important; }
+#privacyPolicyModal.open { pointer-events: auto; }
+#privacyPolicyModal .sheet-head { position: sticky; top: 0; z-index: 2; background: inherit; }
+#privacyPolicyModal .sheet-head .close { position: relative; z-index: 3; pointer-events: auto; }
+</style>
+<script id="pulse-privacy-navigation-recovery-js">
+(function () {
+  function closePolicy() {
+    var modal = document.getElementById('privacyPolicyModal');
+    if (modal) modal.classList.remove('open');
+    document.body.classList.remove('privacy-policy-open');
+  }
+  // Keep the regular navigation click handlers running after closing the overlay.
+  document.addEventListener('click', function (event) {
+    var el = event.target && event.target.closest ? event.target.closest(
+      '#v21-bottom-nav button, #v21-bottom-nav a, .bottom.mobile-exact-bottom button, .bottom.mobile-exact-bottom a, .nav button, .nav a, [role="tab"], [data-tab], [data-nav]'
+    ) : null;
+    if (!el) return;
+    var label = ((el.innerText || el.textContent || '') + ' ' +
+      (el.getAttribute('aria-label') || '') + ' ' +
+      (el.getAttribute('title') || '') + ' ' +
+      (el.getAttribute('data-tab') || '') + ' ' +
+      (el.getAttribute('data-nav') || '')).replace(/\s+/g, ' ').trim();
+    if (/home|menu|market|profile|watchlist|portfolio|more|screener/i.test(label)) closePolicy();
+  }, true);
+  // Escape and Android/browser Back should dismiss the policy rather than leave it stuck.
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape') closePolicy();
+  });
+  window.addEventListener('popstate', closePolicy);
+  // Keep the open/close functions consistent with the navigation recovery.
+  var oldOpen = window.openPrivacyPolicy;
+  window.openPrivacyPolicy = function () {
+    var modal = document.getElementById('privacyPolicyModal');
+    if (modal) modal.classList.add('open');
+    if (typeof oldOpen === 'function' && oldOpen !== window.openPrivacyPolicy) {
+      // Existing implementation only opens the same policy modal.
+    }
+  };
+  var oldClose = window.closePrivacyPolicy;
+  window.closePrivacyPolicy = function () {
+    closePolicy();
+    if (typeof oldClose === 'function' && oldClose !== window.closePrivacyPolicy) {
+      // Do not call the old function: closePolicy already performs its full action.
+    }
+  };
+})();
+</script>
+
 </body>
 </html>
 
