@@ -7504,6 +7504,45 @@ body.v22-profile-tab-active .bottom.mobile-exact-bottom{z-index:10000}
 }
 #tradersZoneModal .tz-sheet > .sheet-head { margin-bottom: 12px; }
 </style>
+
+<style id="tz-unusual-trades-left-fix">
+/* Keep Unusual Trades in the normal left-hand grid position; never center or span it. */
+#tradersZoneModal .tz-sheet {
+  max-height: 90dvh !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+  padding-bottom: max(18px, env(safe-area-inset-bottom)) !important;
+}
+#tradersZoneModal .tz-module-grid {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+  grid-auto-flow: row !important;
+  align-items: stretch !important;
+  overflow: visible !important;
+}
+#tradersZoneModal .tz-module-grid > .tz-module:last-child {
+  grid-column: auto !important;
+  justify-self: stretch !important;
+  align-self: stretch !important;
+  width: 100% !important;
+  max-width: none !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  box-sizing: border-box !important;
+  position: relative !important;
+  left: auto !important;
+  right: auto !important;
+  transform: none !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+#tradersZoneModal .tz-module-grid > .tz-module:last-child b,
+#tradersZoneModal .tz-module-grid > .tz-module:last-child small {
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+  word-break: normal !important;
+}
+</style>
 </body>
 </html><script>
 // NEPSE Pulse Professional Charting V1 extension
@@ -8700,6 +8739,45 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
   word-break: normal !important;
 }
 #tradersZoneModal .tz-sheet > .sheet-head { margin-bottom: 12px; }
+</style>
+
+<style id="tz-unusual-trades-left-fix">
+/* Keep Unusual Trades in the normal left-hand grid position; never center or span it. */
+#tradersZoneModal .tz-sheet {
+  max-height: 90dvh !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+  padding-bottom: max(18px, env(safe-area-inset-bottom)) !important;
+}
+#tradersZoneModal .tz-module-grid {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+  grid-auto-flow: row !important;
+  align-items: stretch !important;
+  overflow: visible !important;
+}
+#tradersZoneModal .tz-module-grid > .tz-module:last-child {
+  grid-column: auto !important;
+  justify-self: stretch !important;
+  align-self: stretch !important;
+  width: 100% !important;
+  max-width: none !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  box-sizing: border-box !important;
+  position: relative !important;
+  left: auto !important;
+  right: auto !important;
+  transform: none !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+#tradersZoneModal .tz-module-grid > .tz-module:last-child b,
+#tradersZoneModal .tz-module-grid > .tz-module:last-child small {
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+  word-break: normal !important;
+}
 </style>
 </body>
 </html>
