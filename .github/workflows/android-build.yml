@@ -71,51 +71,65 @@ jobs:
 
             let started = false;
 
-            async function startAdMobBanner() {
-              if (started) return;
+            function startAdMobDiagnostic() {
               if (!window.Capacitor ||
                   typeof window.Capacitor.isNativePlatform !== 'function' ||
                   !window.Capacitor.isNativePlatform()) return;
 
-              const admob = window.NP_CAP_ADMOB;
-              if (!admob) {
-                console.warn('NEPSE Pulse: AdMob plugin is unavailable.');
-                return;
+              const status = document.createElement('div');
+              status.id = 'np-admob-diagnostic';
+              status.style.cssText = 'position:fixed;top:6px;left:6px;right:6px;z-index:2147483647;background:#202124;color:#fff;padding:9px;font:12px sans-serif;border-radius:6px;overflow-wrap:anywhere;';
+              status.textContent = 'AdMob diagnostic: starting…';
+              document.body.appendChild(status);
+
+              function report(message) {
+                status.textContent = 'AdMob diagnostic: ' + message;
+                console.log('[NEPSE AdMob]', message);
               }
 
-              started = true;
-              try {
-                // Obtain consent information and show a consent form if required.
-                // Ads are requested only if the consent SDK says requests are allowed.
-                let consent = await admob.requestConsentInfo();
-                if (consent &&
-                    consent.isConsentFormAvailable &&
-                    String(consent.status).toLowerCase().includes('required')) {
-                  consent = await admob.showConsentForm();
-                }
-                if (consent && consent.canRequestAds === false) {
-                  console.info('NEPSE Pulse: ads not requested because consent is not ready.');
+              async function run() {
+                if (started) return;
+                started = true;
+                const admob = window.NP_CAP_ADMOB;
+                if (!admob) {
+                  report('FAILED — native AdMob plugin unavailable');
                   return;
                 }
 
-                await admob.initialize();
+                try {
+                  if (typeof admob.addListener === 'function') {
+                    await admob.addListener('bannerAdLoaded', function () {
+                      report('SUCCESS — Google test banner loaded');
+                    });
+                    await admob.addListener('bannerAdFailedToLoad', function (error) {
+                      report('AD LOAD FAILED — ' + JSON.stringify(error));
+                    });
+                  }
 
-                await admob.showBanner({
-                  adId: 'ca-app-pub-1565800134063497/8028868444',
-                  adSize: 'ADAPTIVE_BANNER',
-                  position: 'BOTTOM_CENTER',
-                  margin: 0
-                });
-              } catch (error) {
-                console.error('NEPSE Pulse AdMob banner error:', error);
-                started = false;
+                  report('plugin found; initializing…');
+                  await admob.initialize();
+                  report('initialized; requesting Google test banner…');
+                  await admob.showBanner({
+                    adId: 'ca-app-pub-3940256099942544/6300978111',
+                    adSize: 'ADAPTIVE_BANNER',
+                    position: 'BOTTOM_CENTER',
+                    margin: 0,
+                    isTesting: true
+                  });
+                  report('banner request submitted; waiting for result…');
+                } catch (error) {
+                  report('ERROR — ' + (error && error.message ? error.message : JSON.stringify(error)));
+                  started = false;
+                }
               }
+
+              run();
             }
 
             if (document.readyState === 'loading') {
-              document.addEventListener('DOMContentLoaded', startAdMobBanner, { once: true });
+              document.addEventListener('DOMContentLoaded', startAdMobDiagnostic, { once: true });
             } else {
-              startAdMobBanner();
+              startAdMobDiagnostic();
             }
           })();
           EOF
