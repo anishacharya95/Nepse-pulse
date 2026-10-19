@@ -6,6 +6,11 @@
 <script src="auth-config.js?v=1"></script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<link rel="preconnect" href="https://nepse-pulse-1.onrender.com" crossorigin>
+<link rel="dns-prefetch" href="//nepse-pulse-1.onrender.com">
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="preconnect" href="https://unpkg.com" crossorigin>
+<link rel="preconnect" href="https://charting-library.tradingview-widget.com" crossorigin>
 <meta name="theme-color" content="#ffffff">
 <meta name="nepse-pulse-chart-revision" content="red-green-market-direction-v2">
 <meta name="description" content="NEPSE Pulse — premium Nepal market intelligence terminal • Central Feed + Portfolio + Dividends + Screener + Floorsheet + Sector V5">
@@ -1466,7 +1471,7 @@ body{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",san
 #pulseWorkspaceBody > .pulse-feature-mounted { scroll-margin-top: 16px !important; }
 </style>
 <style id="npco-company-logo-style">.npco-company-logo{width:42px;height:42px;flex:0 0 42px;object-fit:contain;border-radius:50%;background:#fff;border:1px solid #dce5e9;padding:4px}.npco-company-logo-fallback{width:42px;height:42px;flex:0 0 42px;align-items:center;justify-content:center;border-radius:50%;background:#e8f3f6;color:#176b78;font-weight:800}#npCompanyPage .npco-header{gap:10px}</style><!-- TradingView Advanced Charts: official hosted runtime (latest) -->
-<script id="pulse-tradingview-hosted-runtime" type="text/javascript" src="https://charting-library.tradingview-widget.com/charting_library/charting_library.standalone.js"></script>
+<script id="pulse-tradingview-hosted-runtime" async type="text/javascript" src="https://charting-library.tradingview-widget.com/charting_library/charting_library.standalone.js"></script>
 <style id="npco-stock-info-final-fix">#npcoContent{display:block!important;visibility:visible!important}#npcoContent .npco-live-chart-card,#npcoContent .npco-fund-card,#npcoContent .npco-card{display:block!important;visibility:visible!important}#npcoContent .npco-fund-grid{display:grid!important}#npcoContent .npco-metric b,#npcoContent .npco-fund-item b{display:block!important;visibility:visible!important}.npco-company-chart{display:block!important;width:100%!important;height:220px!important}</style><style id="npco-premium-data-style">#npcoContent{display:block!important}.npco-section-title{font-size:15px;font-weight:850;margin-bottom:10px}.npco-live-chart-card{order:-1!important}.npco-source-note{margin-bottom:18px}.npco-metric{background:#f7fafc;border-radius:11px;padding:11px}.npco-metric b{display:block;margin-top:4px}</style>
 <style id="npco-loading-animation-fix">
 .npco-loading-state{display:flex;align-items:center;gap:12px;min-height:58px;padding:16px 18px;border-radius:16px;background:#fff;border:1px solid #dce5ec;color:#536473}
@@ -1515,6 +1520,14 @@ main { padding-bottom: calc(190px + env(safe-area-inset-bottom)) !important; }
 @media(max-height:700px){#np-login-gate .np-login-art{height:30vh;min-height:170px;max-height:300px}#np-login-gate .np-login-welcome{margin-bottom:15px}#np-login-gate .np-login-field{height:54px;margin-bottom:10px}#np-login-gate .np-login-primary{min-height:54px}#np-login-gate .np-login-divider{margin:14px 0}#np-login-gate .np-login-google{min-height:53px}}
 </style>
 
+
+<style id="np-startup-render-optimization">
+/* Keep closed feature workspaces from participating in layout/paint during initial startup. */
+#pulseFeatureWorkspace:not(.open) { content-visibility:hidden; }
+/* Preserve stable sizing while browser skips rendering closed/offscreen workspaces. */
+#pulseFeatureWorkspace:not(.open) { contain-intrinsic-size: 1px 600px; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior:auto !important; animation-duration:0.001ms !important; animation-iteration-count:1 !important; } }
+</style>
 </head>
 <body>
 
@@ -1996,7 +2009,7 @@ window.PULSE_FEED_STATUS='CONNECTING'; window.PULSE_FEED_TIMESTAMP='—';
 
 
 /* =========================
-   NEPSE PULSE V24.1 — STABLE FAST CENTRAL FEED
+   NEPSE PULSE V24.2 — FAST CENTRAL FEED WITH REQUEST DEDUPLICATION
    Primary: unofficial NEPSE REST API service.
    Browser path: /api/nepse (Netlify server-side proxy).
    Standalone path: direct hosted API with CORS.
@@ -2053,7 +2066,7 @@ const PulseFeedEngine = (()=>{
     if(!r.ok)throw new Error('Feed proxy HTTP '+r.status+' '+path);
     const d=await r.json(); if(d&&d.ok===false)throw new Error(d.error||'Feed proxy error'); return d.data!==undefined?d.data:d;
   },path);
-  const fetchRoute=async(path,query='')=>{
+  const fetchRouteUncached=async(path,query='')=>{
     // Central backend is the single source for hosted builds. This prevents
     // different panels from silently reading different feeds.
     const backend=String(window.NEPSE_PULSE_BACKEND_URL||'').replace(/\/$/,'');
@@ -2074,6 +2087,25 @@ const PulseFeedEngine = (()=>{
     if(!r.ok)throw new Error('NEPSE Pulse backend HTTP '+r.status+' '+path);
     return await r.json();
   },path);
+  // Fast in-memory GET cache: several panels request the same central routes on startup.
+  // Reuse a fresh response and coalesce simultaneous requests instead of hitting the backend repeatedly.
+  const routeCache=new Map(), routeInflight=new Map();
+  const fetchRoute=async(path,query='')=>{
+    const key=path+'?'+query;
+    const cacheable=!/[&_](?:_pulse|_fs|_sectorHeatmap|_xray|_tradex|_ta)=/.test(query);
+    const ttl=path==='/health'?10000:20000;
+    if(cacheable){
+      const hit=routeCache.get(key);
+      if(hit&&Date.now()-hit.time<ttl)return hit.value;
+      if(routeInflight.has(key))return routeInflight.get(key);
+    }
+    const task=fetchRouteUncached(path,query).then(value=>{
+      if(cacheable){routeCache.set(key,{time:Date.now(),value});if(routeCache.size>80)routeCache.delete(routeCache.keys().next().value);}
+      return value;
+    }).finally(()=>{if(cacheable)routeInflight.delete(key)});
+    if(cacheable)routeInflight.set(key,task);
+    return task;
+  };
   const fetchJSON=async(path='/market')=>{
     /* Central backend route. /market is exposed as /api/market by the backend. */
     if(path==='/market' && window.NEPSE_PULSE_BACKEND_URL){
@@ -2544,13 +2576,24 @@ function setAuthUser(user){
   const userBox=document.getElementById('authUser'), login=document.getElementById('loginBtn');
   const nameEl=document.getElementById('userLabel'), avatar=document.getElementById('avatar');
   const pName=document.getElementById('profileName'), pEmail=document.getElementById('profileEmail'), pAvatar=document.getElementById('profileAvatar');
+  // Some layouts omit the desktop header controls; never let an absent optional node
+  // break session restoration or prevent the account sheet from updating.
   if(user){
     const label=(user.user_metadata?.full_name || user.user_metadata?.name || user.phone || user.email || 'Account');
     const letter=label.trim().charAt(0).toUpperCase() || 'P';
-    userBox.style.display='flex'; login.style.display='none'; nameEl.textContent=label.split(' ')[0]; avatar.textContent=letter;
-    pName.textContent=label; pEmail.textContent=user.email || user.phone || 'Authenticated account'; pAvatar.textContent=letter;
+    if(userBox)userBox.style.display='flex';
+    if(login)login.style.display='none';
+    if(nameEl)nameEl.textContent=label.split(' ')[0];
+    if(avatar)avatar.textContent=letter;
+    if(pName)pName.textContent=label;
+    if(pEmail)pEmail.textContent=user.email || user.phone || 'Authenticated account';
+    if(pAvatar)pAvatar.textContent=letter;
   }else{
-    userBox.style.display='none'; login.style.display='block'; pName.textContent='Not signed in'; pEmail.textContent='Connect an account'; pAvatar.textContent='P';
+    if(userBox)userBox.style.display='none';
+    if(login)login.style.display='block';
+    if(pName)pName.textContent='Not signed in';
+    if(pEmail)pEmail.textContent='Connect an account';
+    if(pAvatar)pAvatar.textContent='P';
   }
 }
 
