@@ -7327,6 +7327,15 @@ body.v22-profile-tab-active .bottom.mobile-exact-bottom{z-index:10000}
 })();
 </script>
 
+
+<style id="pulse-portfolio-menu-tab-fix">
+/* The same portfolio ledger must render both in Profile and in the More > Portfolio workspace. */
+#pulseFeatureWorkspace #pulseWorkspaceBody > #portfolioZone.pulse-feature-mounted,
+#pulseFeatureWorkspace.open #pulseWorkspaceBody #portfolioZone.pulse-feature-mounted { display:block!important; visibility:visible!important; opacity:1!important; }
+#pulseFeatureWorkspace #pulseWorkspaceBody #portfolioZone.pulse-feature-mounted .p-grid { display:grid!important; }
+#pulseFeatureWorkspace #pulseWorkspaceBody #portfolioZone.pulse-feature-mounted .p-card { display:block!important; }
+</style>
+
 </body>
 </html><script>
 // NEPSE Pulse Professional Charting V1 extension
@@ -8413,6 +8422,15 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',mounted,{once:true});else mounted();if(window.MutationObserver)new MutationObserver(mounted).observe(document.documentElement,{childList:true,subtree:true});window.addEventListener('pageshow',mounted);
 })();
 </script>
+
+
+<style id="pulse-portfolio-menu-tab-fix">
+/* The same portfolio ledger must render both in Profile and in the More > Portfolio workspace. */
+#pulseFeatureWorkspace #pulseWorkspaceBody > #portfolioZone.pulse-feature-mounted,
+#pulseFeatureWorkspace.open #pulseWorkspaceBody #portfolioZone.pulse-feature-mounted { display:block!important; visibility:visible!important; opacity:1!important; }
+#pulseFeatureWorkspace #pulseWorkspaceBody #portfolioZone.pulse-feature-mounted .p-grid { display:grid!important; }
+#pulseFeatureWorkspace #pulseWorkspaceBody #portfolioZone.pulse-feature-mounted .p-card { display:block!important; }
+</style>
 
 </body>
 </html>
