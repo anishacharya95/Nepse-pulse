@@ -7478,6 +7478,30 @@ body.v22-profile-tab-active .bottom.mobile-exact-bottom{z-index:10000}
 #pulseFeatureWorkspace #pulseWorkspaceBody #portfolioZone.pulse-feature-mounted .p-card { display:block!important; }
 </style>
 
+
+<style id="tz-unusual-trades-grid-fix">
+/* Keep the final Traders Zone card aligned with the other two-column cards. */
+.traders-zone .tz-grid > .tz-card:last-child {
+  grid-column: 1 / -1 !important;
+  width: calc((100% - 10px) / 2) !important;
+  justify-self: center !important;
+  box-sizing: border-box !important;
+  min-width: 0 !important;
+  height: auto !important;
+  min-height: 142px !important;
+  white-space: normal !important;
+  overflow: visible !important;
+}
+.traders-zone .tz-grid > .tz-card:last-child b,
+.traders-zone .tz-grid > .tz-card:last-child small {
+  overflow-wrap: anywhere !important;
+  word-break: normal !important;
+}
+@media (max-width: 420px) {
+  .traders-zone .tz-grid > .tz-card:last-child { min-height: 132px !important; }
+}
+</style>
+
 </body>
 </html><script>
 // NEPSE Pulse Professional Charting V1 extension
@@ -8627,6 +8651,30 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 })();
 </script>
 
+
+<style id="tz-unusual-trades-grid-fix">
+/* Keep the final Traders Zone card aligned with the other two-column cards. */
+.traders-zone .tz-grid > .tz-card:last-child {
+  grid-column: 1 / -1 !important;
+  width: calc((100% - 10px) / 2) !important;
+  justify-self: center !important;
+  box-sizing: border-box !important;
+  min-width: 0 !important;
+  height: auto !important;
+  min-height: 142px !important;
+  white-space: normal !important;
+  overflow: visible !important;
+}
+.traders-zone .tz-grid > .tz-card:last-child b,
+.traders-zone .tz-grid > .tz-card:last-child small {
+  overflow-wrap: anywhere !important;
+  word-break: normal !important;
+}
+@media (max-width: 420px) {
+  .traders-zone .tz-grid > .tz-card:last-child { min-height: 132px !important; }
+}
+</style>
+
 </body>
 </html>
 
@@ -8944,25 +8992,3 @@ body.v22-profile-tab-active #v22-profile-tab-view { pointer-events:auto; }
   window.openTechnicalScreener=function(){leaveProfile();if(typeof priorOpenScreener==='function')return priorOpenScreener.apply(this,arguments);};
 })();
 </script>
-
-<style id="np-account-traders-visibility-fix-v1">
-/* Make the account deletion label clearly dark red in light and dark account sheets. */
-#deleteAccountBtn, #deleteAccountBtn:visited {
-  color:#7f1d1d !important;
-  -webkit-text-fill-color:#7f1d1d !important;
-  border-color:#b91c1c !important;
-  background:#fff1f2 !important;
-  font-weight:800 !important;
-}
-/* Ensure the final Traders Zone tile can scroll fully above fixed bottom navigation. */
-.traders-zone { padding-bottom: calc(110px + env(safe-area-inset-bottom)) !important; }
-.tz-grid { padding-bottom: 8px !important; align-items:stretch !important; }
-.tz-card { min-width:0 !important; min-height:142px !important; height:auto !important; overflow:visible !important; white-space:normal !important; }
-.tz-card b, .tz-card small { overflow-wrap:anywhere; }
-@media(max-width:420px) {
-  .traders-zone { padding-bottom: calc(125px + env(safe-area-inset-bottom)) !important; }
-  .tz-card { min-height:142px !important; padding:14px 10px !important; }
-}
-/* If Traders Zone is shown inside its full-screen workspace, retain bottom breathing room. */
-#traders-zone-v5, #tradersZoneModal, .pulse-feature-workspace { padding-bottom: env(safe-area-inset-bottom); }
-</style>
