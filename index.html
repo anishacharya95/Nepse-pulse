@@ -3434,7 +3434,21 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
   function sym(o){return text(o,['symbol','sym','ticker','stockSymbol','securitySymbol','stockSymbolName','symbolName','scrip','securityName','companySymbol']).toUpperCase().trim()}
   function ltp(o){return pick(o,['ltp','LTP','lastPrice','lastTradedPrice','currentPrice','marketPrice','closingPrice','close','price','last_trade_price'])}
   function money(n){return n===null||n===undefined?'—':n.toLocaleString(undefined,{maximumFractionDigits:2})}
-  function discover(){const engine=window.PULSE_FEED_ENGINE||window.PULSE_FEED;let st={};try{st=typeof engine?.state==='function'?engine.state():(engine?.state||{});}catch(e){}const candidates=[st.live,st.liveMarket,st.securities,st.companies,st.stocks,st.priceVolume,window.PULSE_FEED?.live,window.liveMarketData,window.marketData];for(const x of candidates){if(Array.isArray(x)&&x.length)return x;}return [];}
+  function discover(){
+    const engine=window.PULSE_FEED_ENGINE||window.PULSE_FEED;
+    let st={};try{st=typeof engine?.state==='function'?engine.state():(engine?.state||{});}catch(e){}
+    const candidates=[st.live,st.liveMarket,st.securities,st.companies,st.stocks,st.priceVolume,
+      st.data?.live,st.data?.companies,window.PULSE_FEED?.live,window.liveMarketData,window.marketData];
+    for(const x of candidates){
+      if(!Array.isArray(x)||!x.length)continue;
+      try{
+        const normalized=typeof engine?.normalizeLive==='function'?engine.normalizeLive(x):x;
+        if(Array.isArray(normalized)&&normalized.length)return normalized;
+      }catch(e){}
+      return x;
+    }
+    return [];
+  }
   function holdings(){const h={};tx.slice().sort((a,b)=>String(a.date||'').localeCompare(String(b.date||''))||(a.createdAt||0)-(b.createdAt||0)).forEach(t=>{const s=String(t.symbol||'').toUpperCase();if(!s)return;if(!h[s])h[s]={symbol:s,qty:0,cost:0,realized:0};const q=Number(t.qty)||0,p=Number(t.price)||0;if(t.side==='BUY'){h[s].qty+=q;h[s].cost+=q*p}else if(q>0){const sellQty=Math.min(q,h[s].qty),avg=h[s].qty>0?h[s].cost/h[s].qty:0;h[s].realized+=sellQty*(p-avg);h[s].qty-=sellQty;h[s].cost=Math.max(0,h[s].cost-sellQty*avg)}});return Object.values(h).filter(x=>x.qty>0)}
   function render(){
     const engine=window.PULSE_FEED_ENGINE||window.PULSE_FEED;let feedState={};try{feedState=typeof engine?.state==='function'?engine.state():(engine?.state||{});}catch(e){}const status=feedState.status||window.PULSE_FEED_STATUS||window.PULSE_FEED?.status||'CONNECTING';if($('pFeedState'))$('pFeedState').textContent=(currentUserId?'CLOUD PORTFOLIO • ':'LOCAL GUEST • ')+'FEED: '+String(status).toUpperCase();
