@@ -1848,7 +1848,7 @@ main { padding-bottom: calc(190px + env(safe-area-inset-bottom)) !important; }
     <div class="profile-row"><div class="avatar" id="profileAvatar">P</div><div><b id="profileName">Not signed in</b><small id="profileEmail">Connect an account to sync your data.</small></div></div>
     <div class="auth-status" id="profileStatus">Authentication is configured as provider-ready. Real Google, Facebook and phone OTP require your Supabase project URL/key plus enabled providers.</div>
     <button class="auth-btn" onclick="signOutPulse()">↪ Sign out</button>
-    <button class="auth-btn" id="deleteAccountBtn" style="margin-top:10px;border:1px solid #d9534f;color:#ffb8b8" onclick="requestPulseAccountDeletion()">Delete Account</button>
+    <button class="auth-btn" id="deleteAccountBtn" style="margin-top:10px;border:1px solid #8b0000;color:#8b0000;background:#ffe8e8" onclick="requestPulseAccountDeletion()">Delete Account</button>
     <p style="font-size:12px;line-height:1.5;color:var(--muted,#9aaac4);margin:8px 0">Deleting your account is permanent and removes your Supabase login. Review the <button type="button" class="link-btn" onclick="openPrivacyPolicy()">Privacy Policy</button> first.</p>
     <button class="auth-btn" type="button" onclick="openPrivacyPolicy()">Privacy Policy</button>
   </div>
@@ -2734,6 +2734,7 @@ async function requestPulseAccountDeletion(){
     await client.auth.signOut();
     setAuthUser(null);
     closeProfile();
+    openLogin();
     toast('Your account deletion request was completed.');
   }catch(e){
     console.error('Pulse account deletion failed',e);
@@ -2749,7 +2750,7 @@ async function signOutPulse(){
     const client=window.__NP_LOGIN_SUPABASE||(typeof window.__NP_GET_LOGIN_CLIENT==='function'?await window.__NP_GET_LOGIN_CLIENT():null);
     if(client)await client.auth.signOut();
   }catch(e){console.error('Pulse sign out failed',e);}
-  setAuthUser(null); closeProfile(); toast('Signed out.');
+  setAuthUser(null); closeProfile(); openLogin(); toast('Signed out.');
 }
 
 // Override the original auth UI actions with real-provider-aware versions.
@@ -8779,6 +8780,65 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
   word-break: normal !important;
 }
 </style>
+
+<style id="np-final-traders-auth-fix">
+/* Let every Traders Zone card scroll fully above the fixed bottom navigation. */
+#tradersZoneModal { z-index: 2000 !important; }
+#tradersZoneModal .tz-sheet {
+  box-sizing: border-box !important;
+  width: 100% !important;
+  max-height: calc(100vh - 12px) !important;
+  max-height: calc(100dvh - 12px) !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  padding-bottom: calc(120px + env(safe-area-inset-bottom, 0px)) !important;
+  overscroll-behavior: contain;
+}
+#tradersZoneModal .tz-grid {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  align-items: stretch !important;
+  gap: 10px !important;
+}
+#tradersZoneModal .tz-grid > .tz-card {
+  grid-column: auto !important;
+  justify-self: stretch !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+  white-space: normal !important;
+  overflow-wrap: anywhere !important;
+}
+#tradersZoneModal .tz-grid > .tz-card:last-child {
+  grid-column: auto !important;
+  justify-self: start !important;
+}
+#deleteAccountBtn { color: #8b0000 !important; background: #ffe8e8 !important; border-color: #8b0000 !important; }
+@media (max-width: 420px) {
+  #tradersZoneModal .tz-sheet { padding-left: 12px !important; padding-right: 12px !important; }
+  #tradersZoneModal .tz-card { min-height: 132px !important; }
+}
+</style>
+<script id="np-final-signout-login-fix">
+/* Ensure a successful sign-out returns to the sign-in modal. */
+window.signOutPulse = async function () {
+  try {
+    const client = window.__NP_LOGIN_SUPABASE || (typeof window.__NP_GET_LOGIN_CLIENT === 'function' ? await window.__NP_GET_LOGIN_CLIENT() : null);
+    if (client) {
+      const { error } = await client.auth.signOut();
+      if (error) throw error;
+    }
+    if (typeof setAuthUser === 'function') setAuthUser(null);
+    if (typeof closeProfile === 'function') closeProfile();
+    if (typeof openLogin === 'function') openLogin();
+    if (typeof toast === 'function') toast('Signed out.');
+  } catch (e) {
+    console.error('Pulse sign out failed', e);
+    if (typeof toast === 'function') toast(e?.message || 'Could not sign out. Please try again.');
+  }
+};
+</script>
+
 </body>
 </html>
 
