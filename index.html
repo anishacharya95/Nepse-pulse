@@ -7557,6 +7557,7 @@ window.runAiTrendlines=async function(){const symbol=(document.getElementById('n
   <div class="np-ad-card" id="npAiDetectiveSummary"><p class="np-ad-muted">Enter a stock symbol and select Analyze to load evidence from the existing backend.</p></div>
   <div class="np-ad-card"><h3 style="margin:0 0 7px">Evidence ledger</h3><p class="np-ad-muted" style="margin:0 0 8px">Each item shows the measured value and why it may support or contradict the signal.</p><div id="npAiDetectiveEvidence"><p class="np-ad-muted">No analysis yet.</p></div></div>
   <div class="np-ad-card"><h3 style="margin:0 0 7px">What could invalidate this read?</h3><div id="npAiDetectiveRisks" class="np-ad-muted">Risk checks appear after valid history is loaded.</div></div>
+  <div class="np-ad-card" id="npSignalTrackerCard"><div class="np-ad-signal"><div><h3 style="margin:0 0 5px">📊 Signal Quality Tracker</h3><p class="np-ad-muted" style="margin:0">Historical walk-forward test: signals use only candles available at the time; returns are measured over future sessions.</p></div><button class="np-ad-action" type="button" onclick="runNpSignalTracker()">Test history</button></div><div id="npSignalTrackerResults" style="margin-top:12px"><p class="np-ad-muted">Enter a symbol above, then run the historical tracker.</p></div></div>
   <div class="np-ad-caveat">Educational technical analysis only, not personalized financial advice. Price history may be delayed or incomplete. A bullish/bearish bias is not a buy/sell instruction; consider fundamentals, liquidity, fees and your own risk limits.</div>
  </div>
 </section>
@@ -7598,6 +7599,35 @@ window.runAiTrendlines=async function(){const symbol=(document.getElementById('n
    ledger.innerHTML=factors.map(f=>'<div class="np-ad-factor"><span class="np-ad-dot '+(f.dir>0?'up':f.dir<0?'down':'')+'">'+(f.dir>0?'↑':f.dir<0?'↓':'·')+'</span><div><strong>'+esc(f.title)+'</strong><p>'+esc(f.detail)+'</p></div></div>').join('');
    const warnings=[];if(rows.length<50)warnings.push('Fewer than 50 candles are available, so the 50-session trend check is omitted.');if(volRatio===null)warnings.push('Volume baseline unavailable; volume cannot confirm the move.');else if(volRatio>=1.5)warnings.push('Volume is elevated; confirm that the move holds on subsequent closes.');if(r!==null&& (r>=70||r<=30))warnings.push('RSI is at an extreme; reversals or volatility can occur.');if(Math.abs(ch1)>5)warnings.push('The latest daily move is unusually large; verify the source candle and check for corporate-action effects.');warnings.push('This analysis uses daily price/volume history only. It does not include fundamentals, broker flows, news, corporate actions or your portfolio risk.');risks.innerHTML=warnings.map(x=>'• '+esc(x)).join('<br>');
   }catch(e){summary.innerHTML='<p style="font-weight:800;margin:0 0 6px">Analysis unavailable</p><p class="np-ad-muted">'+esc(e.message)+'</p><p class="np-ad-muted">No signal was generated because the required historical evidence could not be verified. Check the existing backend and try again.</p>';ledger.innerHTML='<p class="np-ad-muted">Evidence ledger withheld until valid historical data is available.</p>';risks.textContent='Cannot assess invalidation risks without valid history.'}
+ };
+})();
+</script>
+
+
+<script id="np-signal-quality-tracker-logic">
+(function(){
+ 'use strict';
+ const $=id=>document.getElementById(id);
+ const api=()=>String(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
+ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+ const fmt=(n,d=2)=>Number.isFinite(n)?n.toFixed(d):'—';
+ function mean(a){return a.length?a.reduce((x,y)=>x+y,0)/a.length:null}
+ function sma(a,end,period){if(end+1<period)return null;let sum=0;for(let i=end-period+1;i<=end;i++)sum+=a[i];return sum/period}
+ window.runNpSignalTracker=async function(){
+  const out=$('npSignalTrackerResults'),symbol=String($('npAiDetectiveSymbol')?.value||'').trim().toUpperCase();
+  if(!/^[A-Z0-9._-]{1,24}$/.test(symbol)){out.innerHTML='<p class="np-ad-muted">Enter a valid symbol above first.</p>';return}
+  out.innerHTML='<p class="np-ad-muted">Loading historical candles and testing past signals…</p>';
+  try{
+   const r=await fetch(api()+'/api/tv/history?symbol='+encodeURIComponent(symbol)+'&resolution=D&countback=500&_signaltracker='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});
+   if(!r.ok)throw Error('History endpoint returned HTTP '+r.status);const d=await r.json();if(d.s!=='ok'||!Array.isArray(d.t)||!Array.isArray(d.c))throw Error('No valid OHLCV history returned');
+   const rows=[];for(let i=0;i<d.t.length;i++){const c=Number(d.c[i]),v=Number(d.v?.[i]);if(Number.isFinite(Number(d.t[i]))&&Number.isFinite(c)&&c>0)rows.push({t:Number(d.t[i]),c,v:Number.isFinite(v)&&v>=0?v:null})}
+   if(rows.length<40)throw Error('Only '+rows.length+' valid closes available; at least 40 are needed for a useful test.');
+   const closes=rows.map(x=>x.c),horizons=[1,5,20],results={};
+   for(const h of horizons){const samples=[];for(let i=20;i<rows.length-h;i++){const avg=sma(closes,i,20),prior=i>=5?closes[i-5]:null;if(avg===null||prior===null)continue;const momentum=(closes[i]/prior-1)*100;let dir=0;if(closes[i]>avg&&momentum>0)dir=1;else if(closes[i]<avg&&momentum<0)dir=-1;if(!dir)continue;const ret=(closes[i+h]/closes[i]-1)*100;samples.push({dir,ret,aligned:dir*ret>0,adverse:dir===1?Math.min(0,...closes.slice(i+1,i+h+1).map(c=>(c/closes[i]-1)*100)):Math.min(0,...closes.slice(i+1,i+h+1).map(c=>(closes[i]-c)/closes[i]*100))})}results[h]=samples}
+   const cards=horizons.map(h=>{const a=results[h],avg=mean(a.map(x=>x.ret)),hit=a.length?100*a.filter(x=>x.aligned).length/a.length:null,avgDir=mean(a.map(x=>x.ret*x.dir)),mae=a.length?Math.min(...a.map(x=>x.adverse)):null;return '<div class="np-ad-metric"><small>'+h+'-session horizon</small><b>'+a.length+' signals</b><small>Positive-direction hit rate: '+fmt(hit,1)+'%</small><small>Mean underlying return: '+(avg===null?'—':fmt(avg)+'%')+'</small><small>Mean signal-aligned return: '+(avgDir===null?'—':fmt(avgDir)+'%')+'</small><small>Worst observed adverse move: '+(mae===null?'—':fmt(mae)+'%')+'</small></div>'}).join('');
+   const total=horizons.reduce((n,h)=>n+results[h].length,0);out.innerHTML='<div class="np-ad-grid">'+cards+'</div><p class="np-ad-muted" style="margin-top:10px">Tested '+esc(symbol)+' using '+rows.length+' returned closes, through '+esc(new Date(rows[rows.length-1].t*1000).toLocaleDateString())+'. Rule: at each historical close, take a bullish direction when close is above its 20-session SMA and 5-session momentum is positive; bearish when both are negative. Outcomes begin after the signal candle. This is a simple historical diagnostic, not a live recommendation.</p><div class="np-ad-caveat" style="margin-top:8px">Limitations: no transaction costs, slippage, liquidity constraints, corporate-action adjustment or overlapping-position simulation. Small samples can be misleading; hit rate is not probability of future profit. A signal with zero return is not counted as a hit.</div>';
+   if(!total)out.innerHTML='<p class="np-ad-muted">No eligible historical signals were found under this rule. No performance score is shown.</p>';
+  }catch(e){out.innerHTML='<p class="np-ad-muted">Tracker unavailable: '+esc(e.message)+'. No performance figures were generated.</p>'}
  };
 })();
 </script>
