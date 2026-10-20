@@ -1762,8 +1762,12 @@ main { padding-bottom: calc(190px + env(safe-area-inset-bottom)) !important; }
 
 <div class="v22-modal-backdrop" id="v22-auth-modal" aria-hidden="true" onclick="if(event.target===this)v22CloseAuth()">
   <div class="v22-modal" role="dialog" aria-modal="true" aria-labelledby="v22-auth-title">
-    <div class="v22-head"><div><h2 id="v22-auth-title">Sign in to NEPSE Pulse</h2><p>Sign in with your Google account.</p></div><button class="v22-close" style="width:auto;padding:9px 12px;margin:0" type="button" onclick="v22CloseAuth()">Close</button></div>
+    <div class="v22-head"><div><h2 id="v22-auth-title">Sign in to NEPSE Pulse</h2><p>Use Google, Facebook, or your Nepal mobile number.</p></div><button class="v22-close" style="width:auto;padding:9px 12px;margin:0" type="button" onclick="v22CloseAuth()">Close</button></div>
     <button class="v22-provider google" type="button" onclick="v22Google()">Continue with Google</button>
+    <button class="v22-provider facebook" type="button" onclick="v22Facebook()">Continue with Facebook</button>
+    <div style="margin:14px 0 6px;color:#98a2b3;font-size:12px;text-align:center">OR MOBILE OTP</div>
+    <div class="v22-phone-row"><input id="v22-phone" class="v22-input" inputmode="tel" autocomplete="tel" placeholder="+97798XXXXXXXX" aria-label="Mobile number"><button class="v22-auth-btn" type="button" onclick="v22SendOtp()">Send OTP</button></div>
+    <div id="v22-otp-row" class="v22-phone-row" style="display:none"><input id="v22-otp" class="v22-input" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6-digit OTP" aria-label="OTP"><button class="v22-auth-btn" type="button" onclick="v22VerifyOtp()">Verify</button></div>
     <div id="v22-auth-status" class="v22-status" aria-live="polite">Authentication is ready for Supabase configuration.</div>
     <button class="v22-close" type="button" onclick="v22CloseAuth()">Cancel</button>
   </div>
@@ -1801,6 +1805,7 @@ main { padding-bottom: calc(190px + env(safe-area-inset-bottom)) !important; }
       <button class="feature-item" onclick="openFeatureWorkspace('market-intelligence-v9','📊 Command Center')"><b>📊 Command Center</b><small>Market overview, breadth, movers, liquidity and feed health</small></button>
       <button class="feature-item" onclick="openFeatureWorkspace('stock-xray-v7','🩻 Stock X-Ray')"><b>🩻 Stock X-Ray</b><small>Fundamentals, valuation, technicals and activity</small></button>
       <button class="feature-item" onclick="openFeatureWorkspace('professional-charting-v8','📈 Professional Charting')"><b>📈 Professional Charting</b><small>Candles, volume and technical indicators</small></button>
+      <button class="feature-item" onclick="openPriceVolumeActions()"><b>📊 Price Volume Actions</b><small>Market sentiment, unusual volume, bullish/bearish signals and active symbols</small></button>
       <div class="feature-group">SCREENER & FLOW</div>
       <button class="feature-item" onclick="openTechnicalScreener()"><b>🔎 Advanced Screener</b><small>Multi-factor filters, technical and liquidity scans</small></button>
       <button class="feature-item" onclick="openFeatureWorkspace('floorsheet-broker-v4','🏦 Floorsheet & Brokers')"><b>🏦 Floorsheet & Brokers</b><small>Transactions, broker flow, bulk and unusual activity</small></button>
@@ -1826,8 +1831,14 @@ main { padding-bottom: calc(190px + env(safe-area-inset-bottom)) !important; }
   <div class="sheet login-sheet">
     <div class="grab"></div>
     <div class="auth-title">Welcome to NEPSE Pulse</div>
-    <div class="auth-sub">Sign in with Google to sync your watchlist, portfolio, alerts and preferences across devices.</div>
+    <div class="auth-sub">Sign in to sync your watchlist, portfolio, alerts and preferences across devices.</div>
     <button class="auth-btn" onclick="authNotice('Google sign-in')"><span>G</span> Continue with Google</button>
+    <button class="auth-btn" onclick="authNotice('Facebook sign-in')"><span>f</span> Continue with Facebook</button>
+    <div class="divider">OR MOBILE NUMBER</div>
+    <div class="phone"><input class="cc" value="+977" aria-label="Country code"><input id="phone" class="num" inputmode="numeric" placeholder="98XXXXXXXX" maxlength="10"></div>
+    <button class="primary" style="width:100%;margin-top:9px" onclick="sendOtp()">Send OTP</button>
+    <div class="otp" id="otpBox"><input id="otp" inputmode="numeric" maxlength="6" placeholder="Enter 6-digit OTP"><button class="primary" style="width:100%;margin-top:9px" onclick="verifyOtp()">Verify OTP</button></div>
+    <div class="note">Production auth is provider-ready. Configure Supabase Auth with Google, Facebook and Phone/SMS providers, then add the project URL and anon key in <b>PULSE_AUTH_CONFIG</b>. Never place a service-role key in this HTML.</div>
   </div>
 </div>
 
@@ -1838,7 +1849,7 @@ main { padding-bottom: calc(190px + env(safe-area-inset-bottom)) !important; }
     <div class="profile-row"><div class="avatar" id="profileAvatar">P</div><div><b id="profileName">Not signed in</b><small id="profileEmail">Connect an account to sync your data.</small></div></div>
     <div class="auth-status" id="profileStatus">Authentication is configured as provider-ready. Real Google, Facebook and phone OTP require your Supabase project URL/key plus enabled providers.</div>
     <button class="auth-btn" onclick="signOutPulse()">↪ Sign out</button>
-    <button class="auth-btn" id="deleteAccountBtn" style="margin-top:10px;border:1px solid #8b0000;color:#8b0000;background:#ffe8e8" onclick="requestPulseAccountDeletion()">Delete Account</button>
+    <button class="auth-btn" id="deleteAccountBtn" style="margin-top:10px;border:1px solid #d9534f;color:#ffb8b8" onclick="requestPulseAccountDeletion()">Delete Account</button>
     <p style="font-size:12px;line-height:1.5;color:var(--muted,#9aaac4);margin:8px 0">Deleting your account is permanent and removes your Supabase login. Review the <button type="button" class="link-btn" onclick="openPrivacyPolicy()">Privacy Policy</button> first.</p>
     <button class="auth-btn" type="button" onclick="openPrivacyPolicy()">Privacy Policy</button>
   </div>
@@ -1868,7 +1879,8 @@ main { padding-bottom: calc(190px + env(safe-area-inset-bottom)) !important; }
 <div class="drawer" id="tradersZoneModal" onclick="if(event.target===this)closeTradersZone()">
   <div class="sheet tz-sheet">
     <div class="grab"></div>
-    <div class="sheet-head"><h2>⚡ Traders Zone</h2></div>
+    <div class="sheet-head"><h2>⚡ Traders Zone</h2><button class="close" onclick="closeTradersZone()">Close</button></div>
+    <div class="tz-status"><span>Market scan status</span><b id="tzFeedStatus">OFFLINE · awaiting verified feed</b></div>
     <div class="tz-toolbar"><button class="tz-filter" onclick="toast('All trader scans selected.')">All</button><button class="tz-filter" onclick="toast('Momentum scans selected.')">Momentum</button><button class="tz-filter" onclick="toast('Volume scans selected.')">Volume</button><button class="tz-filter" onclick="toast('Technical scans selected.')">Technical</button></div>
     <div class="tz-module-grid">
       <button class="tz-module" onclick="openTraderModule('Candlestick Patterns')"><b>🕯️ Candlestick Patterns</b><small>Doji, hammer, engulfing, morning/evening star and other pattern families.</small></button>
@@ -2724,7 +2736,6 @@ async function requestPulseAccountDeletion(){
     await client.auth.signOut();
     setAuthUser(null);
     closeProfile();
-    openLogin();
     toast('Your account deletion request was completed.');
   }catch(e){
     console.error('Pulse account deletion failed',e);
@@ -2740,7 +2751,7 @@ async function signOutPulse(){
     const client=window.__NP_LOGIN_SUPABASE||(typeof window.__NP_GET_LOGIN_CLIENT==='function'?await window.__NP_GET_LOGIN_CLIENT():null);
     if(client)await client.auth.signOut();
   }catch(e){console.error('Pulse sign out failed',e);}
-  setAuthUser(null); closeProfile(); openLogin(); toast('Signed out.');
+  setAuthUser(null); closeProfile(); toast('Signed out.');
 }
 
 // Override the original auth UI actions with real-provider-aware versions.
@@ -3383,99 +3394,113 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
 
 <script id="pulse-portfolio-v1-js">
 (function(){
-  const BASE_TX='nepsePulsePortfolioTxV1', BASE_DV='nepsePulseDividendsV1';
+  const TX='nepsePulsePortfolioTxV1', DV='nepsePulseDividendsV1';
   const $=id=>document.getElementById(id);
   const read=(k,d)=>{try{return JSON.parse(localStorage.getItem(k)||JSON.stringify(d))}catch(e){return d}};
   const write=(k,v)=>localStorage.setItem(k,JSON.stringify(v));
-  let tx=[], div=[], rows=[], currentUserId=null, client=null, cloudReady=false, syncTimer=null, syncing=false;
-  const localKey=(base)=>currentUserId?base+'_'+currentUserId:base+'_guest';
-  function assignIds(arr){return arr.map(x=>({...x,_record_id:x._record_id||((window.crypto&&crypto.randomUUID)?crypto.randomUUID():String(Date.now())+'_'+Math.random().toString(36).slice(2))}))}
-  function saveLocal(){try{write(localKey(BASE_TX),tx);write(localKey(BASE_DV),div)}catch(e){}}
-  function scheduleCloud(){saveLocal();if(!currentUserId||!cloudReady)return;clearTimeout(syncTimer);syncTimer=setTimeout(()=>syncCloud().catch(e=>console.warn('Portfolio cloud sync failed:',e)),500)}
-  async function getClient(){if(client)return client;if(window.__NP_GET_LOGIN_CLIENT)try{client=await window.__NP_GET_LOGIN_CLIENT();return client}catch(e){}return null}
-  async function loadCloud(userId){
-    const c=await getClient(); if(!c)throw new Error('Supabase client is unavailable');
-    const {data,error}=await c.from('user_portfolio_records').select('record_id,kind,record_data').eq('user_id',userId);
-    if(error)throw error;
-    tx=assignIds((data||[]).filter(r=>r.kind==='transaction').map(r=>({...r.record_data,_record_id:r.record_id})));
-    div=assignIds((data||[]).filter(r=>r.kind==='dividend').map(r=>({...r.record_data,_record_id:r.record_id})));
-    currentUserId=userId;cloudReady=true;saveLocal();render();
-  }
-  async function syncCloud(){
-    if(!currentUserId||!cloudReady||syncing)return; syncing=true;
-    try{
-      const c=await getClient();if(!c)return;
-      const desired=[...tx.map(x=>({record_id:String(x._record_id),user_id:currentUserId,kind:'transaction',record_data:Object.fromEntries(Object.entries(x).filter(([k])=>k!=='_record_id'))})),...div.map(x=>({record_id:String(x._record_id),user_id:currentUserId,kind:'dividend',record_data:Object.fromEntries(Object.entries(x).filter(([k])=>k!=='_record_id'))}))];
-      const {data:existing,error:readErr}=await c.from('user_portfolio_records').select('record_id').eq('user_id',currentUserId);if(readErr)throw readErr;
-      const wanted=new Set(desired.map(x=>x.record_id));const stale=(existing||[]).map(x=>x.record_id).filter(id=>!wanted.has(id));
-      if(stale.length){const {error}=await c.from('user_portfolio_records').delete().eq('user_id',currentUserId).in('record_id',stale);if(error)throw error;}
-      if(desired.length){const {error}=await c.from('user_portfolio_records').upsert(desired,{onConflict:'user_id,record_id'});if(error)throw error;}
-    } finally {syncing=false;}
-  }
-  async function authChanged(user){
-    const nextId=user?.id||null;if(nextId===currentUserId)return;
-    currentUserId=null;cloudReady=false;tx=[];div=[];
-    if(!nextId){tx=read(localKey(BASE_TX),[]);div=read(localKey(BASE_DV),[]);render();return;}
-    try{await loadCloud(nextId)}catch(e){console.error('Portfolio cloud load failed:',e);currentUserId=nextId;tx=read(localKey(BASE_TX),[]);div=read(localKey(BASE_DV),[]);cloudReady=false;render();const el=$('pFeedState');if(el)el.textContent='PORTFOLIO CLOUD SYNC ERROR — CHECK DATABASE SETUP';}
-  }
+  let tx=read(TX,[]), div=read(DV,[]), rows=[];
+
   function num(v){const n=Number(v);return Number.isFinite(n)?n:null}
   function pick(o,keys){for(const k of keys){const n=num(o?.[k]);if(n!==null)return n}return null}
   function text(o,keys){for(const k of keys){if(o?.[k]!==undefined&&o?.[k]!==null&&String(o[k]).trim())return String(o[k])}return ''}
-  function sym(o){return text(o,['symbol','sym','ticker','stockSymbol','securitySymbol','stockSymbolName','symbolName','scrip','securityName','companySymbol','code','stock_code','security_code']).toUpperCase().trim()}
-  function ltp(o){return pick(o,['ltp','LTP','lastPrice','lastTradedPrice','lastTradedPriceValue','currentPrice','marketPrice','closingPrice','closePrice','close','price','last_trade_price','lastTradedRate'])}
+  function sym(o){return text(o,['symbol','sym','ticker','stockSymbol','securitySymbol','stockSymbolName','symbolName','scrip','securityName','companySymbol']).toUpperCase().trim()}
+  function ltp(o){return pick(o,['ltp','LTP','lastPrice','lastTradedPrice','currentPrice','marketPrice','closingPrice','close','price','last_trade_price'])}
   function money(n){return n===null||n===undefined?'—':n.toLocaleString(undefined,{maximumFractionDigits:2})}
   function discover(){
+    // The Central Feed Engine is the authoritative source; PULSE_FEED is an engine
+    // whose state is a function, not an object with a nested .state property.
     const engine=window.PULSE_FEED_ENGINE||window.PULSE_FEED;
-    let st={};try{st=typeof engine?.state==='function'?engine.state():(engine?.state||{});}catch(e){}
-    const candidates=[st.live,st.liveMarket,st.securities,st.companies,st.stocks,st.priceVolume,
-      st.data?.live,st.data?.companies,window.PULSE_FEED?.live,window.liveMarketData,window.marketData];
-    for(const x of candidates){
-      if(!Array.isArray(x)||!x.length)continue;
-      try{
-        const normalized=typeof engine?.normalizeLive==='function'?engine.normalizeLive(x):x;
-        if(Array.isArray(normalized)&&normalized.length)return normalized;
-      }catch(e){}
-      return x;
-    }
+    let st={}; try{st=typeof engine?.state==='function'?engine.state():(engine?.state||{});}catch(e){}
+    const candidates=[st.live,st.liveMarket,st.securities,st.companies,st.stocks,st.priceVolume,window.PULSE_FEED?.live,window.liveMarketData,window.marketData];
+    for(const x of candidates){if(Array.isArray(x)&&x.length)return x;}
     return [];
   }
-  function holdings(){const h={};tx.slice().sort((a,b)=>String(a.date||'').localeCompare(String(b.date||''))||(a.createdAt||0)-(b.createdAt||0)).forEach(t=>{const s=String(t.symbol||'').toUpperCase();if(!s)return;if(!h[s])h[s]={symbol:s,qty:0,cost:0,realized:0};const q=Number(t.qty)||0,p=Number(t.price)||0;if(t.side==='BUY'){h[s].qty+=q;h[s].cost+=q*p}else if(q>0){const sellQty=Math.min(q,h[s].qty),avg=h[s].qty>0?h[s].cost/h[s].qty:0;h[s].realized+=sellQty*(p-avg);h[s].qty-=sellQty;h[s].cost=Math.max(0,h[s].cost-sellQty*avg)}});return Object.values(h).filter(x=>x.qty>0)}
-  function render(){
-    const engine=window.PULSE_FEED_ENGINE||window.PULSE_FEED;let feedState={};try{feedState=typeof engine?.state==='function'?engine.state():(engine?.state||{});}catch(e){}const status=feedState.status||window.PULSE_FEED_STATUS||window.PULSE_FEED?.status||'CONNECTING';if($('pFeedState'))$('pFeedState').textContent=(currentUserId?'CLOUD PORTFOLIO • ':'LOCAL GUEST • ')+'FEED: '+String(status).toUpperCase();
-    rows=discover();const map={};rows.forEach(r=>{const s=sym(r),price=ltp(r);if(s&&price!==null&&price>=0)map[s]=price});const hs=holdings();let value=0,cost=0;const hr=$('pHoldings');const rendered=hs.map(h=>{const live=map[h.symbol]??null,avg=h.cost/h.qty,mv=live===null?null:h.qty*live,pl=mv===null?null:mv-h.cost;if(mv!==null)value+=mv;cost+=h.cost;return{h,live,avg,mv,pl}});if(hr)hr.innerHTML=rendered.map(x=>`<div class="p-item"><span><b>${x.h.symbol}</b><small>${x.h.qty.toLocaleString()} shares • Avg ${money(x.avg)}</small></span><span>${money(x.mv)}<small>${x.pl===null?'P/L —':'P/L '+money(x.pl)}</small></span></div>`).join('')||'<div class="p-empty">No holdings yet.</div>';
-    const allPricesAvailable=rendered.length>0&&rendered.every(x=>x.mv!==null),pl=allPricesAvailable?value-cost:null;if($('pStats'))$('pStats').innerHTML=`<div class="p-stat"><strong>${hs.length}</strong><span>Positions</span></div><div class="p-stat"><strong>${money(value||null)}</strong><span>Value</span></div><div class="p-stat"><strong>${pl===null?'Waiting for live prices':money(pl)}</strong><span>Unrealized P/L</span></div>`;
-    const dash=$('profilePortfolioDash');if(dash){const fmt=n=>n===null||n===undefined?'—':Number(n).toLocaleString(undefined,{maximumFractionDigits:2});const set=(id,v)=>{const el=$(id);if(el)el.textContent=v};set('ppdValue','NPR '+fmt(rendered.some(x=>x.mv!==null)?value:null));set('ppdPL',pl===null?'Waiting for live prices':(pl>=0?'+NPR ':'−NPR ')+fmt(Math.abs(pl)));set('ppdPositions',hs.length+' holdings');set('ppdCount',hs.length+' holdings');set('ppdHoldingsCount',hs.length+' holdings');set('ppdDonutValue',rendered.some(x=>x.mv!==null)?fmt(value/1000)+'K':'—');const colors=['#176b53','#e2aa3e','#2c7d9b','#8c6bb1','#d16b62','#7d9b55','#4774b8'];let cursor=0;const slices=rendered.filter(x=>x.mv!==null&&x.mv>0),total=slices.reduce((a,x)=>a+x.mv,0);const stops=slices.map((x,i)=>{const start=cursor;cursor+=total?x.mv/total*100:0;return `${colors[i%colors.length]} ${start}% ${cursor}%`});const donut=$('ppdDonut');if(donut&&stops.length)donut.style.background='conic-gradient('+stops.join(',')+')';const legend=$('ppdLegend');if(legend)legend.innerHTML=slices.map((x,i)=>`<div class="ppd-legend-row"><i class="ppd-dot" style="background:${colors[i%colors.length]}"></i><b>${x.h.symbol}</b><span>${total?Math.round(x.mv/total*100):0}%</span></div>`).join('')||'<div class="ppd-empty">Add holdings to see allocation.</div>';const holdingHtml=rendered.map(x=>`<div class="ppd-holding"><div style="min-width:0;flex:1"><b>${x.h.symbol}</b><small>${x.h.qty.toLocaleString()} shares · Avg ${money(x.avg)} · LTP ${money(x.live)}</small></div><div style="text-align:right"><b>NPR ${money(x.mv)}</b><small style="color:${x.pl===null?'#77837c':x.pl>=0?'#167653':'#c34242'}">P/L ${x.pl===null?'Unavailable':(x.pl>=0?'+':'−')+'NPR '+money(Math.abs(x.pl))}</small><button type="button" data-remove-holding="${x.h.symbol}" style="display:block;margin:8px 0 0 auto;border:1px solid #e6b9b9;background:#fff5f5;color:#b42323;border-radius:9px;padding:7px 10px;font-weight:700">Remove</button></div></div>`).join('')||'<div class="ppd-empty">No holdings yet. Add a buy transaction below.</div>';const hl=$('ppdHoldingList');if(hl)hl.innerHTML=holdingHtml;const perf=$('ppdPerformance');if(perf)perf.innerHTML=rendered.length?`<div class="ppd-holding"><span>Market value</span><b>NPR ${fmt(rendered.some(x=>x.mv!==null)?value:null)}</b></div><div class="ppd-holding"><span>Invested cost</span><b>NPR ${fmt(cost||null)}</b></div><div class="ppd-holding"><span>Unrealized P/L</span><b style="color:${pl===null?'#77837c':pl>=0?'#167653':'#c34242'}">${pl===null?'—':(pl>=0?'+':'−')+'NPR '+fmt(Math.abs(pl))}</b></div>`:'Performance will appear when holdings and live prices are available.';}
-    const dr=$('pDividends'),total=div.reduce((a,d)=>a+(Number(d.rate)*Number(d.shares)),0);if(dr)dr.innerHTML=(div.length?div.map((d,i)=>`<div class="p-item"><span><b>${d.symbol}</b><small>${Number(d.shares).toLocaleString()} eligible shares • ${d.rate} / share</small></span><span>${money(d.rate*d.shares)}<button data-dv="${i}" style="margin-left:7px">Delete</button></span></div>`).join(''):'<div class="p-empty">No dividends recorded.</div>')+(div.length?`<div class="p-item"><span><b>Total recorded dividends</b></span><span>${money(total)}</span></div>`:'');dr?.querySelectorAll('[data-dv]').forEach(b=>b.onclick=()=>{div.splice(Number(b.dataset.dv),1);scheduleCloud();render()});
-  }
-  // Delegate Remove clicks from the document because the holdings list is rebuilt on every render.
-  document.addEventListener('click',async e=>{
-    const button=e.target?.closest?.('[data-remove-holding]');
-    if(!button)return;
-    e.preventDefault();e.stopPropagation();
-    if(button.dataset.removing==='1')return;
-    const symbol=String(button.getAttribute('data-remove-holding')||'').trim().toUpperCase();
-    if(!symbol)return;
-    if(!window.confirm('Remove '+symbol+' from your holdings? This deletes all recorded buy/sell transactions for '+symbol+' from this account portfolio.'))return;
-    button.dataset.removing='1';button.disabled=true;button.textContent='Removing…';
-    try{
-      tx=tx.filter(t=>String(t.symbol||'').trim().toUpperCase()!==symbol);
-      saveLocal();render();
-      if(currentUserId&&cloudReady){
-        await syncCloud();
-      }
-    }catch(err){
-      console.error('Unable to remove holding:',err);
-      window.alert('Could not sync the removal to your account. Please check your connection and try again.');
-    }finally{
-      const remaining=document.querySelector('[data-remove-holding="'+symbol.replace(/"/g,'\\"')+'"]');
-      if(remaining){remaining.dataset.removing='0';remaining.disabled=false;remaining.textContent='Remove';}
-    }
-  },true);
 
-  $('pAddTx')?.addEventListener('click',()=>{const s=($('pSymbol').value||'').trim().toUpperCase(),side=$('pSide').value,q=num($('pQty').value),p=num($('pPrice').value);if(!s||q===null||q<=0||p===null||p<0)return;tx.push({_record_id:((window.crypto&&crypto.randomUUID)?crypto.randomUUID():String(Date.now())+'_'+Math.random().toString(36).slice(2)),symbol:s,side,qty:q,price:p,date:$('pDate').value||new Date().toISOString().slice(0,10),createdAt:Date.now()});scheduleCloud();$('pSymbol').value='';$('pQty').value='';$('pPrice').value='';render()});
-  $('pAddDiv')?.addEventListener('click',()=>{const s=($('pDivSymbol').value||'').trim().toUpperCase(),rate=num($('pDivRate').value),shares=num($('pDivShares').value);if(!s||rate===null||shares===null||shares<0)return;div.push({_record_id:((window.crypto&&crypto.randomUUID)?crypto.randomUUID():String(Date.now())+'_'+Math.random().toString(36).slice(2)),symbol:s,rate,shares,date:new Date().toISOString().slice(0,10)});scheduleCloud();$('pDivSymbol').value='';$('pDivRate').value='';$('pDivShares').value='';render()});
-  document.addEventListener('pulse-feed-update',render);document.addEventListener('pulse-central-snapshot',render);window.addEventListener('pulse-central-snapshot',render);setInterval(render,5000);setTimeout(render,900);
-  window.addEventListener('load',async()=>{const c=await getClient();if(!c){tx=read(localKey(BASE_TX),[]);div=read(localKey(BASE_DV),[]);render();return;}const {data}=await c.auth.getSession();await authChanged(data?.session?.user||null);c.auth.onAuthStateChange((_event,session)=>{authChanged(session?.user||null)});});
+  function holdings(){
+    const h={};
+    tx.slice().sort((a,b)=>String(a.date||'').localeCompare(String(b.date||'')) || (a.createdAt||0)-(b.createdAt||0)).forEach(t=>{
+      const s=String(t.symbol||'').toUpperCase(); if(!s)return;
+      if(!h[s])h[s]={symbol:s,qty:0,cost:0,realized:0};
+      const q=Number(t.qty)||0, p=Number(t.price)||0;
+      if(t.side==='BUY'){
+        h[s].qty+=q;
+        h[s].cost+=q*p;
+      } else if(q>0){
+        const sellQty=Math.min(q,h[s].qty);
+        const avg=h[s].qty>0?h[s].cost/h[s].qty:0;
+        h[s].realized += sellQty*(p-avg);
+        h[s].qty-=sellQty;
+        h[s].cost=Math.max(0,h[s].cost-sellQty*avg);
+      }
+    });
+    return Object.values(h).filter(x=>x.qty>0);
+  }
+
+  function render(){
+    const engine=window.PULSE_FEED_ENGINE||window.PULSE_FEED;
+    let feedState={};try{feedState=typeof engine?.state==='function'?engine.state():(engine?.state||{});}catch(e){}
+    const status=feedState.status||window.PULSE_FEED_STATUS||window.PULSE_FEED?.status||'CONNECTING';
+    if($('pFeedState'))$('pFeedState').textContent='FEED: '+String(status).toUpperCase();
+
+    rows=discover();
+    const map={}; rows.forEach(r=>{const s=sym(r),price=ltp(r); if(s&&price!==null&&price>=0)map[s]=price;});
+    const hs=holdings();
+    let value=0,cost=0;
+    const hr=$('pHoldings');
+    const rendered=hs.map(h=>{
+      const live=map[h.symbol]??null;
+      const avg=h.cost/h.qty;
+      const mv=live===null?null:h.qty*live;
+      const pl=mv===null?null:mv-h.cost;
+      if(mv!==null)value+=mv; cost+=h.cost;
+      return {h,live,avg,mv,pl};
+    });
+    if(hr)hr.innerHTML=rendered.map(x=>`<div class="p-item"><span><b>${x.h.symbol}</b><small>${x.h.qty.toLocaleString()} shares • Avg ${money(x.avg)}</small></span><span>${money(x.mv)}<small>${x.pl===null?'P/L —':'P/L '+money(x.pl)}</small></span></div>`).join('')||'<div class="p-empty">No holdings yet.</div>';
+
+    const allPricesAvailable=rendered.length>0&&rendered.every(x=>x.mv!==null);
+    const pl=allPricesAvailable?value-cost:null;
+    if($('pStats'))$('pStats').innerHTML=`<div class="p-stat"><strong>${hs.length}</strong><span>Positions</span></div><div class="p-stat"><strong>${money(value||null)}</strong><span>Value</span></div><div class="p-stat"><strong>${pl===null?'—':money(pl)}</strong><span>Unrealized P/L</span></div>`;
+    const dash=$('profilePortfolioDash');
+    if(dash){
+      const fmt=n=>n===null||n===undefined?'—':Number(n).toLocaleString(undefined,{maximumFractionDigits:2});
+      const set=(id,v)=>{const el=$(id);if(el)el.textContent=v};
+      set('ppdValue','NPR '+fmt(rendered.some(x=>x.mv!==null)?value:null));set('ppdPL',pl===null?'—':(pl>=0?'+NPR ':'−NPR ')+fmt(Math.abs(pl)));set('ppdPositions',hs.length+' holdings');set('ppdCount',hs.length+' holdings');set('ppdHoldingsCount',hs.length+' holdings');set('ppdDonutValue',rendered.some(x=>x.mv!==null)?fmt(value/1000)+'K':'—');
+      const colors=['#176b53','#e2aa3e','#2c7d9b','#8c6bb1','#d16b62','#7d9b55','#4774b8'];
+      let cursor=0;const slices=rendered.filter(x=>x.mv!==null&&x.mv>0);const total=slices.reduce((a,x)=>a+x.mv,0);
+      const stops=slices.map((x,i)=>{const start=cursor;cursor+=total?x.mv/total*100:0;return `${colors[i%colors.length]} ${start}% ${cursor}%`});
+      const donut=$('ppdDonut');if(donut&&stops.length)donut.style.background='conic-gradient('+stops.join(',')+')';
+      const legend=$('ppdLegend');if(legend)legend.innerHTML=slices.map((x,i)=>`<div class="ppd-legend-row"><i class="ppd-dot" style="background:${colors[i%colors.length]}"></i><b>${x.h.symbol}</b><span>${total?Math.round(x.mv/total*100):0}%</span></div>`).join('')||'<div class="ppd-empty">Add holdings to see allocation.</div>';
+      const holdingHtml=rendered.map((x,i)=>`<div class="ppd-holding"><div><b>${x.h.symbol}</b><small>${x.h.qty.toLocaleString()} shares · Avg ${money(x.avg)} · LTP ${money(x.live)}</small></div><div style="text-align:right"><b>NPR ${money(x.mv)}</b><small style="color:${x.pl===null?'#77837c':x.pl>=0?'#167653':'#c34242'}">P/L ${money(x.pl)}</small></div></div>`).join('')||'<div class="ppd-empty">No holdings yet. Add a buy transaction below.</div>';
+      const hl=$('ppdHoldingList');if(hl)hl.innerHTML=holdingHtml;
+      const perf=$('ppdPerformance');if(perf)perf.innerHTML=rendered.length?`<div class="ppd-holding"><span>Market value</span><b>NPR ${fmt(rendered.some(x=>x.mv!==null)?value:null)}</b></div><div class="ppd-holding"><span>Invested cost</span><b>NPR ${fmt(cost||null)}</b></div><div class="ppd-holding"><span>Unrealized P/L</span><b style="color:${pl===null?'#77837c':pl>=0?'#167653':'#c34242'}">${pl===null?'—':(pl>=0?'+':'−')+'NPR '+fmt(Math.abs(pl))}</b></div>`:'Performance will appear when holdings and live prices are available.';
+    }
+
+    const dr=$('pDividends');
+    const total=div.reduce((a,d)=>a+(d.rate*d.shares),0);
+    if(dr)dr.innerHTML=(div.length?div.map((d,i)=>`<div class="p-item"><span><b>${d.symbol}</b><small>${d.shares.toLocaleString()} eligible shares • ${d.rate} / share</small></span><span>${money(d.rate*d.shares)}<button data-dv="${i}" style="margin-left:7px">Delete</button></span></div>`).join(''):'<div class="p-empty">No dividends recorded.</div>')+
+      (div.length?`<div class="p-item"><span><b>Total recorded dividends</b></span><span>${money(total)}</span></div>`:'');
+    dr?.querySelectorAll('[data-dv]').forEach(b=>b.onclick=()=>{div.splice(Number(b.dataset.dv),1);write(DV,div);render()});
+  }
+
+  $('pAddTx')?.addEventListener('click',()=>{
+    const s=($('pSymbol').value||'').trim().toUpperCase(), side=$('pSide').value, q=num($('pQty').value), p=num($('pPrice').value);
+    if(!s||q===null||q<=0||p===null||p<0)return;
+    tx.push({symbol:s,side,qty:q,price:p,date:$('pDate').value||new Date().toISOString().slice(0,10),createdAt:Date.now()});
+    write(TX,tx); $('pSymbol').value='';$('pQty').value='';$('pPrice').value='';render();
+  });
+
+  $('pAddDiv')?.addEventListener('click',()=>{
+    const s=($('pDivSymbol').value||'').trim().toUpperCase(), rate=num($('pDivRate').value), shares=num($('pDivShares').value);
+    if(!s||rate===null||shares===null||shares<0)return;
+    div.push({symbol:s,rate,shares,date:new Date().toISOString().slice(0,10)});
+    write(DV,div);$('pDivSymbol').value='';$('pDivRate').value='';$('pDivShares').value='';render();
+  });
+
+  document.addEventListener('pulse-feed-update',render);
+  document.addEventListener('pulse-central-snapshot',render);
+  window.addEventListener('pulse-central-snapshot',render);
+  setInterval(render,5000);
+  setTimeout(render,900);
 })();
 </script>
 
@@ -7455,71 +7480,35 @@ body.v22-profile-tab-active .bottom.mobile-exact-bottom{z-index:10000}
 </style>
 
 
-
-
-
-<style id="tz-unusual-trades-grid-fix-v2">
-/* The final lone card in the Traders Zone drawer stays half-width and centered. */
-#tradersZoneModal .tz-module-grid > .tz-module:last-child {
-  grid-column: 1 / -1 !important;
-  justify-self: center !important;
-  width: calc((100% - 9px) / 2) !important;
-  max-width: calc((100% - 9px) / 2) !important;
-  min-width: 0 !important;
-  box-sizing: border-box !important;
-  align-self: stretch !important;
-  white-space: normal !important;
-  overflow-wrap: anywhere !important;
-}
-#tradersZoneModal .tz-module-grid > .tz-module:last-child b,
-#tradersZoneModal .tz-module-grid > .tz-module:last-child small {
-  display: block !important;
-  max-width: 100% !important;
-  white-space: normal !important;
-  overflow-wrap: anywhere !important;
-  word-break: normal !important;
-}
-#tradersZoneModal .tz-sheet > .sheet-head { margin-bottom: 12px; }
+<style id="np-pva-ai-style">
+#npPvaPage{position:fixed;inset:0;z-index:100100;background:#f1f3f5;color:#101828;display:none;flex-direction:column;font-family:inherit}#npPvaPage.open{display:flex}.np-pva-head{background:#073536;color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px}.np-pva-head button{background:transparent;color:#fff;border:0;font-size:25px}.np-pva-title{font-size:20px;font-weight:800;flex:1}.np-pva-sub{font-size:12px;opacity:.8;font-weight:500}.np-pva-filters{padding:10px;display:flex;gap:8px;overflow:auto;background:#073536}.np-pva-filters input,.np-pva-filters select{min-width:115px;padding:10px;border-radius:9px;border:1px solid #527071;background:#104748;color:white}.np-pva-body{overflow:auto;padding:14px;flex:1}.np-pva-card{background:#fff;border-radius:16px;padding:16px;margin-bottom:12px;box-shadow:0 1px 3px #1018280a}.np-pva-card h3{margin:0 0 12px;font-size:17px}.np-pva-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.np-pva-metric{background:#f7f8fa;border-radius:12px;padding:12px}.np-pva-metric b{display:block;font-size:23px}.np-pva-muted{color:#667085;font-size:12px}.np-pva-bar{height:8px;background:#e8eaed;border-radius:9px;overflow:hidden;margin-top:8px}.np-pva-bar span{display:block;height:100%;float:left}.np-pva-row{display:flex;gap:10px;align-items:center;padding:12px 0;border-bottom:1px solid #eef0f3}.np-pva-row:last-child{border:0}.np-pva-symbol{font-weight:800;min-width:54px}.np-pva-grow{flex:1;min-width:0}.np-pva-pill{display:inline-block;border-radius:999px;padding:4px 8px;font-size:11px;font-weight:800;background:#eef2f6}.np-pva-up{color:#16864a}.np-pva-down{color:#d92d36}.np-pva-warn{color:#b54708}.np-ai-line{padding:11px;border-radius:12px;background:#f7f9fc;margin:8px 0;border:1px solid #e6eaf0}.np-ai-line strong{display:block;margin-bottom:4px}.np-ai-actions{display:flex;gap:8px;flex-wrap:wrap}.np-ai-actions button{border:0;background:#073536;color:#fff;border-radius:9px;padding:10px 12px}.np-ai-note{font-size:12px;color:#667085;line-height:1.5;margin-top:10px}@media(min-width:760px){.np-pva-body{max-width:1050px;width:100%;margin:0 auto}.np-pva-metrics{grid-template-columns:repeat(4,minmax(0,1fr))}}
 </style>
+<div id="npPvaPage" aria-label="Price Volume Actions">
+ <div class="np-pva-head"><button onclick="closePriceVolumeActions()" aria-label="Back">‹</button><div class="np-pva-title">Price Volume Actions<div class="np-pva-sub" id="npPvaSubtitle">NEPSE Pulse · Market activity</div></div><button onclick="loadPriceVolumeActions()" aria-label="Refresh">↻</button></div>
+ <div class="np-pva-filters"><input id="npPvaSearch" placeholder="Search symbol" oninput="renderPvaRows()"><select id="npPvaCategory" onchange="renderPvaRows()"><option value="all">All signals</option><option value="bullish">Bullish</option><option value="bearish">Bearish</option><option value="warning">Warning</option></select><select id="npPvaSort" onchange="renderPvaRows()"><option value="activity">Most active</option><option value="change">Price change</option><option value="volume">Volume</option></select></div>
+ <div class="np-pva-body"><div class="np-pva-card"><h3>◉ Market Sentiment</h3><div class="np-pva-metrics"><div class="np-pva-metric"><span class="np-pva-muted">Bullish signals</span><b id="npPvaBull" class="np-pva-up">—</b></div><div class="np-pva-metric"><span class="np-pva-muted">Bearish signals</span><b id="npPvaBear" class="np-pva-down">—</b></div><div class="np-pva-metric"><span class="np-pva-muted">Warnings</span><b id="npPvaWarn" class="np-pva-warn">—</b></div><div class="np-pva-metric"><span class="np-pva-muted">Symbols scanned</span><b id="npPvaCount">—</b></div></div><div class="np-pva-bar"><span id="npPvaBullBar" style="width:0;background:#4caf50"></span><span id="npPvaBearBar" style="width:0;background:#f04438"></span></div><p class="np-pva-muted" id="npPvaStatus">Loading live market snapshot…</p></div>
+ <div class="np-pva-card"><h3>Most Active Signals</h3><div id="npPvaRows"><p class="np-pva-muted">Fetching data from the existing NEPSE Pulse backend…</p></div></div>
+ <div class="np-pva-card"><h3>✦ AI Trendline Detection</h3><p class="np-pva-muted">Analyze real OHLC candles for the currently selected chart symbol.</p><div class="np-ai-actions"><button onclick="runAiTrendlines()">Analyze current chart</button><button onclick="openProfessionalChart()">Open chart</button></div><div id="npAiTrendResults" style="margin-top:10px"><p class="np-pva-muted">Select a stock in Professional Charting, then run analysis.</p></div><p class="np-ai-note">Trendlines and signals are algorithmic technical-analysis estimates, not guarantees or personalized investment advice.</p></div>
+ </div>
+</div>
+<script id="np-pva-ai-logic">
+(function(){
+'use strict';
+const $=id=>document.getElementById(id);let pvaRows=[];const backend=()=>String(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
+window.openPriceVolumeActions=function(){ $('npPvaPage').classList.add('open');try{closeFeatures()}catch(e){}loadPriceVolumeActions()};
+window.closePriceVolumeActions=function(){ $('npPvaPage').classList.remove('open')};
+function arrFromMarket(d){let x=d?.data??d?.stocks??d?.result??d?.marketData??d;if(Array.isArray(x))return x;for(const k of ['stocks','companies','securities','data','market','rows','items'])if(Array.isArray(x?.[k]))return x[k];return []}
+function num(...v){for(const x of v){const n=Number(x);if(x!==null&&x!==''&&Number.isFinite(n))return n}return 0}
+window.loadPriceVolumeActions=async function(){ $('npPvaStatus').textContent='Refreshing market snapshot…';try{const r=await fetch(backend()+'/api/market?_pva='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});if(!r.ok)throw Error('Market API HTTP '+r.status);const d=await r.json();const rows=arrFromMarket(d);pvaRows=rows.map(x=>({symbol:String(x.symbol||x.ticker||x.code||x.securitySymbol||'').trim().toUpperCase(),name:String(x.name||x.companyName||x.securityName||''),ltp:num(x.ltp,x.lastTradedPrice,x.close,x.price),change:num(x.change,x.pointChange),pct:num(x.changePercent,x.percentageChange,x.change_pct),volume:num(x.volume,x.totalTradeQuantity,x.quantity),turnover:num(x.turnover,x.totalTradeValue),transactions:num(x.transactions,x.totalTransactions)})).filter(x=>x.symbol);pvaRows=pvaRows.map(x=>({...x,signal:x.pct>0?'bullish':x.pct<0?'bearish':'warning',activity:x.volume+Math.sqrt(Math.max(0,x.turnover))}));const bull=pvaRows.filter(x=>x.signal==='bullish').length,bear=pvaRows.filter(x=>x.signal==='bearish').length,warn=pvaRows.length-bull-bear,total=Math.max(1,pvaRows.length);$('npPvaBull').textContent=bull.toLocaleString();$('npPvaBear').textContent=bear.toLocaleString();$('npPvaWarn').textContent=warn.toLocaleString();$('npPvaCount').textContent=pvaRows.length.toLocaleString();$('npPvaBullBar').style.width=(bull/total*100)+'%';$('npPvaBearBar').style.width=(bear/total*100)+'%';$('npPvaStatus').textContent='Direction inferred from reported price change; unusual-volume rules require a historical baseline. '+new Date().toLocaleTimeString();renderPvaRows()}catch(e){$('npPvaStatus').textContent='Could not load market snapshot: '+e.message+'. Check backend availability; no synthetic market values are shown.';$('npPvaRows').innerHTML='<p class="np-pva-muted">Market data is unavailable. Try Refresh when the existing backend is online.</p>';}}
+window.renderPvaRows=function(){const q=($('npPvaSearch')?.value||'').trim().toUpperCase(),cat=$('npPvaCategory')?.value||'all',sort=$('npPvaSort')?.value||'activity';let rows=pvaRows.filter(x=>(!q||x.symbol.includes(q)||x.name.toUpperCase().includes(q))&&(cat==='all'||x.signal===cat));rows.sort((a,b)=>sort==='change'?Math.abs(b.pct)-Math.abs(a.pct):sort==='volume'?b.volume-a.volume:b.activity-a.activity);const host=$('npPvaRows');if(!rows.length){host.innerHTML='<p class="np-pva-muted">No matching symbols in the current market response.</p>';return}host.innerHTML=rows.slice(0,100).map(x=>'<div class="np-pva-row"><div class="np-pva-symbol">'+esc(x.symbol)+'</div><div class="np-pva-grow"><div>'+esc(x.name||x.symbol)+'</div><div class="np-pva-muted">LTP '+(x.ltp?x.ltp.toLocaleString(undefined,{maximumFractionDigits:2}):'—')+' · Vol '+x.volume.toLocaleString()+'</div></div><div style="text-align:right"><b class="'+(x.pct>0?'np-pva-up':x.pct<0?'np-pva-down':'np-pva-warn')+'">'+(x.pct>0?'+':'')+x.pct.toFixed(2)+'%</b><div><span class="np-pva-pill">'+x.signal+'</span></div></div></div>').join('')};
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function pivots(rows,kind,span=3){const out=[];for(let i=span;i<rows.length-span;i++){const v=rows[i][kind==='high'?2:3];if(!Number.isFinite(v))continue;let ok=true;for(let j=i-span;j<=i+span;j++){if(j===i)continue;const other=rows[j][kind==='high'?2:3];if(!Number.isFinite(other)||(kind==='high'?other>v:other<v)){ok=false;break}}if(ok)out.push({i,v,t:rows[i][0]})}return out}
+function fmtDate(t){return new Date(t).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'})}
+function lineFor(points){if(points.length<2)return null;let best=null;for(let a=0;a<points.length-1;a++)for(let b=a+1;b<points.length;b++){const p=points[a],q=points[b],slope=(q.v-p.v)/(q.i-p.i);let hits=0,violations=0;for(const r of points){const projected=p.v+slope*(r.i-p.i);if(Math.abs(projected-r.v)<=Math.max(0.01,p.v*0.012))hits++;if((slope>=0&&r.v<projected-p.v*.025)||(slope<0&&r.v>projected+p.v*.025))violations++}const score=hits*3-violations;if(!best||score>best.score)best={p,q,slope,score,hits}}return best}
+window.runAiTrendlines=async function(){const symbol=(document.getElementById('txpSymbol')?.value||'NABIL').trim().toUpperCase();const resolution=window.npTrendResolution||'D';const host=$('npAiTrendResults');host.innerHTML='<p class="np-pva-muted">Loading candles for '+esc(symbol)+'…</p>';try{const url=backend()+'/api/tv/history?symbol='+encodeURIComponent(symbol)+'&resolution='+encodeURIComponent(resolution)+'&countback=500&_ai='+Date.now();const r=await fetch(url,{cache:'no-store',headers:{Accept:'application/json'}});if(!r.ok)throw Error('History HTTP '+r.status);const d=await r.json();if(d.s!=='ok'||!Array.isArray(d.t))throw Error('No valid OHLC history returned for '+symbol);const rows=[];for(let i=0;i<d.t.length;i++){const vals=[Number(d.t[i])*1000,Number(d.o?.[i]),Number(d.h?.[i]),Number(d.l?.[i]),Number(d.c?.[i]),Number(d.v?.[i]||0)];if(vals.slice(1,5).every(Number.isFinite))rows.push(vals)}if(rows.length<12)throw Error('At least 12 valid candles are needed; received '+rows.length);const highs=pivots(rows,'high'),lows=pivots(rows,'low'),res=lineFor(highs),sup=lineFor(lows),last=rows[rows.length-1],prev=rows[rows.length-2],avgVol=rows.slice(-21,-1).reduce((a,x)=>a+(x[5]||0),0)/Math.max(1,Math.min(20,rows.length-1)),volRatio=avgVol>0?(last[5]||0)/avgVol:null;const lineCard=(title,l,kind)=>{if(!l)return '<div class="np-ai-line"><strong>'+title+'</strong><span class="np-pva-muted">Not enough confirmed swing points.</span></div>';const now=l.p.v+l.slope*(rows.length-1-l.p.i);const direction=l.slope>0?'rising':l.slope<0?'falling':'flat';return '<div class="np-ai-line"><strong>'+title+' · '+direction+'</strong><div>Approx. current level: <b>'+now.toFixed(2)+'</b></div><div class="np-pva-muted">Swing points: '+fmtDate(l.p.t)+' ('+l.p.v.toFixed(2)+') → '+fmtDate(l.q.t)+' ('+l.q.v.toFixed(2)+') · '+l.hits+' nearby pivot fit(s)</div></div>'};const change=last[4]-prev[4],pct=prev[4]?change/prev[4]*100:0;host.innerHTML='<div class="np-pva-metrics"><div class="np-pva-metric"><span class="np-pva-muted">Symbol / candles</span><b>'+esc(symbol)+'</b><span class="np-pva-muted">'+rows.length+' candles</span></div><div class="np-pva-metric"><span class="np-pva-muted">Last close</span><b>'+last[4].toFixed(2)+'</b><span class="'+(change>=0?'np-pva-up':'np-pva-down')+'">'+(change>=0?'+':'')+pct.toFixed(2)+'% last candle</span></div></div>'+lineCard('Potential resistance trendline',res,'high')+lineCard('Potential support trendline',sup,'low')+'<div class="np-ai-line"><strong>Volume check</strong>'+(volRatio===null?'Historical volume baseline unavailable.':'Latest volume is '+volRatio.toFixed(2)+'× the preceding average')+'<div class="np-pva-muted">A breakout is not confirmed by this calculation alone; verify close, volume and broader market context.</div></div>'}catch(e){host.innerHTML='<p class="np-pva-muted">Trendline analysis failed: '+esc(e.message)+'. Ensure the symbol and existing OHLC data feed are available.</p>'}}
+})();
+</script>
 
-<style id="tz-unusual-trades-left-fix">
-/* Keep Unusual Trades in the normal left-hand grid position; never center or span it. */
-#tradersZoneModal .tz-sheet {
-  max-height: 90dvh !important;
-  overflow-y: auto !important;
-  overscroll-behavior: contain;
-  padding-bottom: max(18px, env(safe-area-inset-bottom)) !important;
-}
-#tradersZoneModal .tz-module-grid {
-  display: grid !important;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
-  grid-auto-flow: row !important;
-  align-items: stretch !important;
-  overflow: visible !important;
-}
-#tradersZoneModal .tz-module-grid > .tz-module:last-child {
-  grid-column: auto !important;
-  justify-self: stretch !important;
-  align-self: stretch !important;
-  width: 100% !important;
-  max-width: none !important;
-  min-width: 0 !important;
-  margin: 0 !important;
-  box-sizing: border-box !important;
-  position: relative !important;
-  left: auto !important;
-  right: auto !important;
-  transform: none !important;
-  visibility: visible !important;
-  opacity: 1 !important;
-}
-#tradersZoneModal .tz-module-grid > .tz-module:last-child b,
-#tradersZoneModal .tz-module-grid > .tz-module:last-child small {
-  white-space: normal !important;
-  overflow-wrap: anywhere !important;
-  word-break: normal !important;
-}
-</style>
 </body>
 </html><script>
 // NEPSE Pulse Professional Charting V1 extension
@@ -8315,7 +8304,7 @@ input,select{background:#fff!important;color:var(--text)!important}
 <div class="txp-head"><div><div class="txp-kicker">Pulse Charts · TradeX</div><h2>Professional Charting</h2><p class="txp-sub">NEPSE technical-analysis terminal powered by TradeX Chart.</p></div><div class="txp-status"><span id="txpDot" class="txp-dot"></span><span id="txpStatus">READY</span></div></div>
 <div class="txp-search"><input id="txpSymbol" list="txpSymbols" value="NABIL" placeholder="Search NEPSE symbol, e.g. NABIL" autocomplete="off"><datalist id="txpSymbols"></datalist><button id="txpLoad" class="txp-btn">Load Chart</button><button id="txpFullscreen" class="txp-btn alt">Fullscreen</button></div>
 <div class="txp-tools txp-timeframes"><span class="txp-group-label">CANDLE</span><button class="txp-pill txp-res active" data-txp-res="D">Daily</button><button class="txp-pill txp-res" data-txp-res="W">Weekly</button><button class="txp-pill txp-res" data-txp-res="M">Monthly</button><button class="txp-pill txp-res" data-txp-res="Y">Yearly</button></div>
-<div class="txp-tools txp-chart-controls"><span class="txp-group-label">VIEW</span><button class="txp-pill" id="txpFit">Fit All</button><button class="txp-pill" id="txpBack">Latest</button><span class="txp-group-label txp-ind-label">INDICATORS</span><button class="txp-pill" data-txp-ind="SMA">SMA 20</button><button class="txp-pill" data-txp-ind="EMA">EMA 20</button><button class="txp-pill" data-txp-ind="RSI">RSI 14</button><button class="txp-pill" data-txp-ind="MACD">MACD</button><button class="txp-pill" data-txp-ind="BB">Bollinger Bands</button><button class="txp-pill" data-txp-ind="ADX">ADX</button><button class="txp-pill" data-txp-ind="OBV">OBV</button><button class="txp-pill" data-txp-ind="Volume">Volume</button><button class="txp-pill" id="txpReset">Reset Indicators</button></div>
+<div class="txp-tools txp-chart-controls"><span class="txp-group-label">VIEW</span><button class="txp-pill" id="txpFit">Fit All</button><button class="txp-pill" id="txpBack">Latest</button><span class="txp-group-label txp-ind-label">INDICATORS</span><button class="txp-pill" data-txp-ind="SMA">SMA 20</button><button class="txp-pill" data-txp-ind="EMA">EMA 20</button><button class="txp-pill" data-txp-ind="RSI">RSI 14</button><button class="txp-pill" data-txp-ind="MACD">MACD</button><button class="txp-pill" data-txp-ind="BB">Bollinger Bands</button><button class="txp-pill" data-txp-ind="ADX">ADX</button><button class="txp-pill" data-txp-ind="OBV">OBV</button><button class="txp-pill" data-txp-ind="Volume">Volume</button><button class="txp-pill" id="txpReset">Reset Indicators</button><button class="txp-pill" id="txpAiTrendlines">✦ AI Trendlines</button></div>
 <div class="txp-chart-shell" id="txpShell"><div id="txpChartMount"><div id="txpLoading" class="txp-loading">Loading TradeX Chart…</div></div></div><div class="txp-foot"><span id="txpInfo">NEPSE Pulse datafeed · Daily OHLCV</span><span>TradeX Chart · GPL-3.0</span></div>
 </section>
 <script type="module" id="nepse-pulse-tradex-chart">
@@ -8339,6 +8328,7 @@ $('txpSector')?.addEventListener('change',e=>{const v=e.currentTarget.value;if(v
 $('txpFullscreen')?.addEventListener('click',async()=>{const shell=$('txpShell');try{if(document.fullscreenElement)await document.exitFullscreen();else await shell?.requestFullscreen?.()}catch(e){console.warn('Fullscreen:',e)}setTimeout(resizeTradeX,80)});
 document.addEventListener('fullscreenchange',()=>setTimeout(resizeTradeX,120));
 $('txpReset')?.addEventListener('click',resetIndicators);
+$('txpAiTrendlines')?.addEventListener('click',()=>{try{openPriceVolumeActions();setTimeout(runAiTrendlines,100)}catch(e){console.warn(e)}});
 $('txpFit')?.addEventListener('click',()=>setViewRange('all'));
 $('txpBack')?.addEventListener('click',()=>{try{chart?.jumpToEnd?.(false)}catch(e){}});
 document.querySelectorAll('[data-txp-res]').forEach(b=>b.addEventListener('click',()=>{resolution=b.dataset.txpRes;document.querySelectorAll('[data-txp-res]').forEach(x=>x.classList.toggle('active',x===b));render($('txpSymbol').value,resolution)}));
@@ -8670,149 +8660,33 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
 </script>
 
 
-<style id="tz-unusual-trades-grid-fix">
-/* Keep the final Traders Zone card aligned with the other two-column cards. */
-.traders-zone .tz-grid > .tz-card:last-child {
-  grid-column: 1 / -1 !important;
-  width: calc((100% - 10px) / 2) !important;
-  justify-self: center !important;
-  box-sizing: border-box !important;
-  min-width: 0 !important;
-  height: auto !important;
-  min-height: 142px !important;
-  white-space: normal !important;
-  overflow: visible !important;
-}
-.traders-zone .tz-grid > .tz-card:last-child b,
-.traders-zone .tz-grid > .tz-card:last-child small {
-  overflow-wrap: anywhere !important;
-  word-break: normal !important;
-}
-@media (max-width: 420px) {
-  .traders-zone .tz-grid > .tz-card:last-child { min-height: 132px !important; }
-}
+<style id="np-pva-ai-style">
+#npPvaPage{position:fixed;inset:0;z-index:100100;background:#f1f3f5;color:#101828;display:none;flex-direction:column;font-family:inherit}#npPvaPage.open{display:flex}.np-pva-head{background:#073536;color:#fff;padding:14px 16px;display:flex;align-items:center;gap:12px}.np-pva-head button{background:transparent;color:#fff;border:0;font-size:25px}.np-pva-title{font-size:20px;font-weight:800;flex:1}.np-pva-sub{font-size:12px;opacity:.8;font-weight:500}.np-pva-filters{padding:10px;display:flex;gap:8px;overflow:auto;background:#073536}.np-pva-filters input,.np-pva-filters select{min-width:115px;padding:10px;border-radius:9px;border:1px solid #527071;background:#104748;color:white}.np-pva-body{overflow:auto;padding:14px;flex:1}.np-pva-card{background:#fff;border-radius:16px;padding:16px;margin-bottom:12px;box-shadow:0 1px 3px #1018280a}.np-pva-card h3{margin:0 0 12px;font-size:17px}.np-pva-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.np-pva-metric{background:#f7f8fa;border-radius:12px;padding:12px}.np-pva-metric b{display:block;font-size:23px}.np-pva-muted{color:#667085;font-size:12px}.np-pva-bar{height:8px;background:#e8eaed;border-radius:9px;overflow:hidden;margin-top:8px}.np-pva-bar span{display:block;height:100%;float:left}.np-pva-row{display:flex;gap:10px;align-items:center;padding:12px 0;border-bottom:1px solid #eef0f3}.np-pva-row:last-child{border:0}.np-pva-symbol{font-weight:800;min-width:54px}.np-pva-grow{flex:1;min-width:0}.np-pva-pill{display:inline-block;border-radius:999px;padding:4px 8px;font-size:11px;font-weight:800;background:#eef2f6}.np-pva-up{color:#16864a}.np-pva-down{color:#d92d36}.np-pva-warn{color:#b54708}.np-ai-line{padding:11px;border-radius:12px;background:#f7f9fc;margin:8px 0;border:1px solid #e6eaf0}.np-ai-line strong{display:block;margin-bottom:4px}.np-ai-actions{display:flex;gap:8px;flex-wrap:wrap}.np-ai-actions button{border:0;background:#073536;color:#fff;border-radius:9px;padding:10px 12px}.np-ai-note{font-size:12px;color:#667085;line-height:1.5;margin-top:10px}@media(min-width:760px){.np-pva-body{max-width:1050px;width:100%;margin:0 auto}.np-pva-metrics{grid-template-columns:repeat(4,minmax(0,1fr))}}
 </style>
-
-
-<style id="tz-unusual-trades-grid-fix-v2">
-/* The final lone card in the Traders Zone drawer stays half-width and centered. */
-#tradersZoneModal .tz-module-grid > .tz-module:last-child {
-  grid-column: 1 / -1 !important;
-  justify-self: center !important;
-  width: calc((100% - 9px) / 2) !important;
-  max-width: calc((100% - 9px) / 2) !important;
-  min-width: 0 !important;
-  box-sizing: border-box !important;
-  align-self: stretch !important;
-  white-space: normal !important;
-  overflow-wrap: anywhere !important;
-}
-#tradersZoneModal .tz-module-grid > .tz-module:last-child b,
-#tradersZoneModal .tz-module-grid > .tz-module:last-child small {
-  display: block !important;
-  max-width: 100% !important;
-  white-space: normal !important;
-  overflow-wrap: anywhere !important;
-  word-break: normal !important;
-}
-#tradersZoneModal .tz-sheet > .sheet-head { margin-bottom: 12px; }
-</style>
-
-<style id="tz-unusual-trades-left-fix">
-/* Keep Unusual Trades in the normal left-hand grid position; never center or span it. */
-#tradersZoneModal .tz-sheet {
-  max-height: 90dvh !important;
-  overflow-y: auto !important;
-  overscroll-behavior: contain;
-  padding-bottom: max(18px, env(safe-area-inset-bottom)) !important;
-}
-#tradersZoneModal .tz-module-grid {
-  display: grid !important;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
-  grid-auto-flow: row !important;
-  align-items: stretch !important;
-  overflow: visible !important;
-}
-#tradersZoneModal .tz-module-grid > .tz-module:last-child {
-  grid-column: auto !important;
-  justify-self: stretch !important;
-  align-self: stretch !important;
-  width: 100% !important;
-  max-width: none !important;
-  min-width: 0 !important;
-  margin: 0 !important;
-  box-sizing: border-box !important;
-  position: relative !important;
-  left: auto !important;
-  right: auto !important;
-  transform: none !important;
-  visibility: visible !important;
-  opacity: 1 !important;
-}
-#tradersZoneModal .tz-module-grid > .tz-module:last-child b,
-#tradersZoneModal .tz-module-grid > .tz-module:last-child small {
-  white-space: normal !important;
-  overflow-wrap: anywhere !important;
-  word-break: normal !important;
-}
-</style>
-
-<style id="np-final-traders-auth-fix">
-/* Let every Traders Zone card scroll fully above the fixed bottom navigation. */
-#tradersZoneModal { z-index: 2000 !important; }
-#tradersZoneModal .tz-sheet {
-  box-sizing: border-box !important;
-  width: 100% !important;
-  max-height: calc(100vh - 12px) !important;
-  max-height: calc(100dvh - 12px) !important;
-  overflow-x: hidden !important;
-  overflow-y: auto !important;
-  padding-bottom: calc(120px + env(safe-area-inset-bottom, 0px)) !important;
-  overscroll-behavior: contain;
-}
-#tradersZoneModal .tz-grid {
-  display: grid !important;
-  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-  align-items: stretch !important;
-  gap: 10px !important;
-}
-#tradersZoneModal .tz-grid > .tz-card {
-  grid-column: auto !important;
-  justify-self: stretch !important;
-  width: 100% !important;
-  min-width: 0 !important;
-  box-sizing: border-box !important;
-  white-space: normal !important;
-  overflow-wrap: anywhere !important;
-}
-#tradersZoneModal .tz-grid > .tz-card:last-child {
-  grid-column: auto !important;
-  justify-self: start !important;
-}
-#deleteAccountBtn { color: #8b0000 !important; background: #ffe8e8 !important; border-color: #8b0000 !important; }
-@media (max-width: 420px) {
-  #tradersZoneModal .tz-sheet { padding-left: 12px !important; padding-right: 12px !important; }
-  #tradersZoneModal .tz-card { min-height: 132px !important; }
-}
-</style>
-<script id="np-final-signout-login-fix">
-/* Ensure a successful sign-out returns to the sign-in modal. */
-window.signOutPulse = async function () {
-  try {
-    const client = window.__NP_LOGIN_SUPABASE || (typeof window.__NP_GET_LOGIN_CLIENT === 'function' ? await window.__NP_GET_LOGIN_CLIENT() : null);
-    if (client) {
-      const { error } = await client.auth.signOut();
-      if (error) throw error;
-    }
-    if (typeof setAuthUser === 'function') setAuthUser(null);
-    if (typeof closeProfile === 'function') closeProfile();
-    if (typeof openLogin === 'function') openLogin();
-    if (typeof toast === 'function') toast('Signed out. Please sign in again.');
-  } catch (e) {
-    console.error('Pulse sign out failed', e);
-    if (typeof toast === 'function') toast(e?.message || 'Could not sign out. Please try again.');
-  }
-};
+<div id="npPvaPage" aria-label="Price Volume Actions">
+ <div class="np-pva-head"><button onclick="closePriceVolumeActions()" aria-label="Back">‹</button><div class="np-pva-title">Price Volume Actions<div class="np-pva-sub" id="npPvaSubtitle">NEPSE Pulse · Market activity</div></div><button onclick="loadPriceVolumeActions()" aria-label="Refresh">↻</button></div>
+ <div class="np-pva-filters"><input id="npPvaSearch" placeholder="Search symbol" oninput="renderPvaRows()"><select id="npPvaCategory" onchange="renderPvaRows()"><option value="all">All signals</option><option value="bullish">Bullish</option><option value="bearish">Bearish</option><option value="warning">Warning</option></select><select id="npPvaSort" onchange="renderPvaRows()"><option value="activity">Most active</option><option value="change">Price change</option><option value="volume">Volume</option></select></div>
+ <div class="np-pva-body"><div class="np-pva-card"><h3>◉ Market Sentiment</h3><div class="np-pva-metrics"><div class="np-pva-metric"><span class="np-pva-muted">Bullish signals</span><b id="npPvaBull" class="np-pva-up">—</b></div><div class="np-pva-metric"><span class="np-pva-muted">Bearish signals</span><b id="npPvaBear" class="np-pva-down">—</b></div><div class="np-pva-metric"><span class="np-pva-muted">Warnings</span><b id="npPvaWarn" class="np-pva-warn">—</b></div><div class="np-pva-metric"><span class="np-pva-muted">Symbols scanned</span><b id="npPvaCount">—</b></div></div><div class="np-pva-bar"><span id="npPvaBullBar" style="width:0;background:#4caf50"></span><span id="npPvaBearBar" style="width:0;background:#f04438"></span></div><p class="np-pva-muted" id="npPvaStatus">Loading live market snapshot…</p></div>
+ <div class="np-pva-card"><h3>Most Active Signals</h3><div id="npPvaRows"><p class="np-pva-muted">Fetching data from the existing NEPSE Pulse backend…</p></div></div>
+ <div class="np-pva-card"><h3>✦ AI Trendline Detection</h3><p class="np-pva-muted">Analyze real OHLC candles for the currently selected chart symbol.</p><div class="np-ai-actions"><button onclick="runAiTrendlines()">Analyze current chart</button><button onclick="openProfessionalChart()">Open chart</button></div><div id="npAiTrendResults" style="margin-top:10px"><p class="np-pva-muted">Select a stock in Professional Charting, then run analysis.</p></div><p class="np-ai-note">Trendlines and signals are algorithmic technical-analysis estimates, not guarantees or personalized investment advice.</p></div>
+ </div>
+</div>
+<script id="np-pva-ai-logic">
+(function(){
+'use strict';
+const $=id=>document.getElementById(id);let pvaRows=[];const backend=()=>String(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
+window.openPriceVolumeActions=function(){ $('npPvaPage').classList.add('open');try{closeFeatures()}catch(e){}loadPriceVolumeActions()};
+window.closePriceVolumeActions=function(){ $('npPvaPage').classList.remove('open')};
+function arrFromMarket(d){let x=d?.data??d?.stocks??d?.result??d?.marketData??d;if(Array.isArray(x))return x;for(const k of ['stocks','companies','securities','data','market','rows','items'])if(Array.isArray(x?.[k]))return x[k];return []}
+function num(...v){for(const x of v){const n=Number(x);if(x!==null&&x!==''&&Number.isFinite(n))return n}return 0}
+window.loadPriceVolumeActions=async function(){ $('npPvaStatus').textContent='Refreshing market snapshot…';try{const r=await fetch(backend()+'/api/market?_pva='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});if(!r.ok)throw Error('Market API HTTP '+r.status);const d=await r.json();const rows=arrFromMarket(d);pvaRows=rows.map(x=>({symbol:String(x.symbol||x.ticker||x.code||x.securitySymbol||'').trim().toUpperCase(),name:String(x.name||x.companyName||x.securityName||''),ltp:num(x.ltp,x.lastTradedPrice,x.close,x.price),change:num(x.change,x.pointChange),pct:num(x.changePercent,x.percentageChange,x.change_pct),volume:num(x.volume,x.totalTradeQuantity,x.quantity),turnover:num(x.turnover,x.totalTradeValue),transactions:num(x.transactions,x.totalTransactions)})).filter(x=>x.symbol);pvaRows=pvaRows.map(x=>({...x,signal:x.pct>0?'bullish':x.pct<0?'bearish':'warning',activity:x.volume+Math.sqrt(Math.max(0,x.turnover))}));const bull=pvaRows.filter(x=>x.signal==='bullish').length,bear=pvaRows.filter(x=>x.signal==='bearish').length,warn=pvaRows.length-bull-bear,total=Math.max(1,pvaRows.length);$('npPvaBull').textContent=bull.toLocaleString();$('npPvaBear').textContent=bear.toLocaleString();$('npPvaWarn').textContent=warn.toLocaleString();$('npPvaCount').textContent=pvaRows.length.toLocaleString();$('npPvaBullBar').style.width=(bull/total*100)+'%';$('npPvaBearBar').style.width=(bear/total*100)+'%';$('npPvaStatus').textContent='Direction inferred from reported price change; unusual-volume rules require a historical baseline. '+new Date().toLocaleTimeString();renderPvaRows()}catch(e){$('npPvaStatus').textContent='Could not load market snapshot: '+e.message+'. Check backend availability; no synthetic market values are shown.';$('npPvaRows').innerHTML='<p class="np-pva-muted">Market data is unavailable. Try Refresh when the existing backend is online.</p>';}}
+window.renderPvaRows=function(){const q=($('npPvaSearch')?.value||'').trim().toUpperCase(),cat=$('npPvaCategory')?.value||'all',sort=$('npPvaSort')?.value||'activity';let rows=pvaRows.filter(x=>(!q||x.symbol.includes(q)||x.name.toUpperCase().includes(q))&&(cat==='all'||x.signal===cat));rows.sort((a,b)=>sort==='change'?Math.abs(b.pct)-Math.abs(a.pct):sort==='volume'?b.volume-a.volume:b.activity-a.activity);const host=$('npPvaRows');if(!rows.length){host.innerHTML='<p class="np-pva-muted">No matching symbols in the current market response.</p>';return}host.innerHTML=rows.slice(0,100).map(x=>'<div class="np-pva-row"><div class="np-pva-symbol">'+esc(x.symbol)+'</div><div class="np-pva-grow"><div>'+esc(x.name||x.symbol)+'</div><div class="np-pva-muted">LTP '+(x.ltp?x.ltp.toLocaleString(undefined,{maximumFractionDigits:2}):'—')+' · Vol '+x.volume.toLocaleString()+'</div></div><div style="text-align:right"><b class="'+(x.pct>0?'np-pva-up':x.pct<0?'np-pva-down':'np-pva-warn')+'">'+(x.pct>0?'+':'')+x.pct.toFixed(2)+'%</b><div><span class="np-pva-pill">'+x.signal+'</span></div></div></div>').join('')};
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function pivots(rows,kind,span=3){const out=[];for(let i=span;i<rows.length-span;i++){const v=rows[i][kind==='high'?2:3];if(!Number.isFinite(v))continue;let ok=true;for(let j=i-span;j<=i+span;j++){if(j===i)continue;const other=rows[j][kind==='high'?2:3];if(!Number.isFinite(other)||(kind==='high'?other>v:other<v)){ok=false;break}}if(ok)out.push({i,v,t:rows[i][0]})}return out}
+function fmtDate(t){return new Date(t).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'})}
+function lineFor(points){if(points.length<2)return null;let best=null;for(let a=0;a<points.length-1;a++)for(let b=a+1;b<points.length;b++){const p=points[a],q=points[b],slope=(q.v-p.v)/(q.i-p.i);let hits=0,violations=0;for(const r of points){const projected=p.v+slope*(r.i-p.i);if(Math.abs(projected-r.v)<=Math.max(0.01,p.v*0.012))hits++;if((slope>=0&&r.v<projected-p.v*.025)||(slope<0&&r.v>projected+p.v*.025))violations++}const score=hits*3-violations;if(!best||score>best.score)best={p,q,slope,score,hits}}return best}
+window.runAiTrendlines=async function(){const symbol=(document.getElementById('txpSymbol')?.value||'NABIL').trim().toUpperCase();const resolution=window.npTrendResolution||'D';const host=$('npAiTrendResults');host.innerHTML='<p class="np-pva-muted">Loading candles for '+esc(symbol)+'…</p>';try{const url=backend()+'/api/tv/history?symbol='+encodeURIComponent(symbol)+'&resolution='+encodeURIComponent(resolution)+'&countback=500&_ai='+Date.now();const r=await fetch(url,{cache:'no-store',headers:{Accept:'application/json'}});if(!r.ok)throw Error('History HTTP '+r.status);const d=await r.json();if(d.s!=='ok'||!Array.isArray(d.t))throw Error('No valid OHLC history returned for '+symbol);const rows=[];for(let i=0;i<d.t.length;i++){const vals=[Number(d.t[i])*1000,Number(d.o?.[i]),Number(d.h?.[i]),Number(d.l?.[i]),Number(d.c?.[i]),Number(d.v?.[i]||0)];if(vals.slice(1,5).every(Number.isFinite))rows.push(vals)}if(rows.length<12)throw Error('At least 12 valid candles are needed; received '+rows.length);const highs=pivots(rows,'high'),lows=pivots(rows,'low'),res=lineFor(highs),sup=lineFor(lows),last=rows[rows.length-1],prev=rows[rows.length-2],avgVol=rows.slice(-21,-1).reduce((a,x)=>a+(x[5]||0),0)/Math.max(1,Math.min(20,rows.length-1)),volRatio=avgVol>0?(last[5]||0)/avgVol:null;const lineCard=(title,l,kind)=>{if(!l)return '<div class="np-ai-line"><strong>'+title+'</strong><span class="np-pva-muted">Not enough confirmed swing points.</span></div>';const now=l.p.v+l.slope*(rows.length-1-l.p.i);const direction=l.slope>0?'rising':l.slope<0?'falling':'flat';return '<div class="np-ai-line"><strong>'+title+' · '+direction+'</strong><div>Approx. current level: <b>'+now.toFixed(2)+'</b></div><div class="np-pva-muted">Swing points: '+fmtDate(l.p.t)+' ('+l.p.v.toFixed(2)+') → '+fmtDate(l.q.t)+' ('+l.q.v.toFixed(2)+') · '+l.hits+' nearby pivot fit(s)</div></div>'};const change=last[4]-prev[4],pct=prev[4]?change/prev[4]*100:0;host.innerHTML='<div class="np-pva-metrics"><div class="np-pva-metric"><span class="np-pva-muted">Symbol / candles</span><b>'+esc(symbol)+'</b><span class="np-pva-muted">'+rows.length+' candles</span></div><div class="np-pva-metric"><span class="np-pva-muted">Last close</span><b>'+last[4].toFixed(2)+'</b><span class="'+(change>=0?'np-pva-up':'np-pva-down')+'">'+(change>=0?'+':'')+pct.toFixed(2)+'% last candle</span></div></div>'+lineCard('Potential resistance trendline',res,'high')+lineCard('Potential support trendline',sup,'low')+'<div class="np-ai-line"><strong>Volume check</strong>'+(volRatio===null?'Historical volume baseline unavailable.':'Latest volume is '+volRatio.toFixed(2)+'× the preceding average')+'<div class="np-pva-muted">A breakout is not confirmed by this calculation alone; verify close, volume and broader market context.</div></div>'}catch(e){host.innerHTML='<p class="np-pva-muted">Trendline analysis failed: '+esc(e.message)+'. Ensure the symbol and existing OHLC data feed are available.</p>'}}
+})();
 </script>
 
 </body>
