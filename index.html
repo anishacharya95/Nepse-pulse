@@ -5617,7 +5617,7 @@ window.openTechnicalScreener=open;window.PULSE_TECHNICAL_SCREENER={load,open,ren
     const liveLosers=Array.isArray(lastState.losers)?lastState.losers:[];
     const gainers=(liveGainers.length?liveGainers:[...rs].filter(r=>change(r)!==null).sort((a,b)=>change(b)-change(a)));
     const losers=(liveLosers.length?liveLosers:[...rs].filter(r=>change(r)!==null).sort((a,b)=>change(a)-change(b)));
-    const moverRows=(moverMode==='gainers'?gainers:losers).slice(0,5);
+    const moverRows=(moverMode==='gainers'?gainers:losers).slice(0,10);
     q('#pulseMoversRows').innerHTML=moverRows.map(r=>{
       const c=change(r), cls=c>=0?'up':'down';
       return `<div class="pulse-row"><b>${sym(r)}</b><span class="${cls}">${ch(r)===null?'—':fmt(ch(r))}</span><span class="${cls}">${c===null?'—':fmt(c)+'%'}</span><span>${price(r)===null?'—':fmt(price(r))}</span></div>`;
@@ -5628,7 +5628,7 @@ window.openTechnicalScreener=open;window.PULSE_TECHNICAL_SCREENER={load,open,ren
     else if(liqMode==='transactions')lr.sort((a,b)=>(n(pick(b,['transactions','tradeCount','totalTrades','trades']))||-1)-(n(pick(a,['transactions','tradeCount','totalTrades','trades']))||-1));
     else lr.sort((a,b)=>(turnover(b)||-1)-(turnover(a)||-1));
 
-    q('#pulseLiquidityRows').innerHTML=lr.slice(0,5).map(r=>{
+    q('#pulseLiquidityRows').innerHTML=lr.slice(0,10).map(r=>{
       const c=change(r);
       const value=liqMode==='volume'?vol(r):liqMode==='transactions'?pick(r,['transactions','tradeCount','totalTrades','trades']):turnover(r);
       return `<div class="pulse-row"><b>${sym(r)}</b><span>${liqMode==='turnover'?money(value):fmt(value,0)}</span><span class="${c>=0?'up':'down'}">${price(r)===null?'—':fmt(price(r))} ${c===null?'':`(${fmt(c)}%)`}</span></div>`;
@@ -6800,7 +6800,7 @@ header.topbar, header.topbar .toprow, .mobile-exact-topbar {
     setText('[data-breadth="positive"] b',fmt0(rows.filter(r=>(r.pct??0)>=9.9).length));
     setText('[data-breadth="negative"] b',fmt0(rows.filter(r=>(r.pct??0)<=-9.9).length));
 
-    const movers=s.gainers.slice(0,5);
+    const movers=s.gainers.slice(0,10);
     const moversEl=document.getElementById('pulseMoversRows');
     if(moversEl)moversEl.innerHTML=movers.map(r=>`<div class="pulse-row"><b>${escapeHtml(r.symbol)}</b><span class="up">${r.change===null?'—':fmt(r.change,2)}</span><span class="up">${r.pct===null?'—':(r.pct>=0?'+':'')+fmt(r.pct,2)+'%'}</span><span>${fmt(r.ltp,2)}</span></div>`).join('')||'<div class="pulse-row"><span>No verified rows</span></div>';
     renderLiquidity(rows);
@@ -6824,7 +6824,7 @@ header.topbar, header.topbar .toprow, .mobile-exact-topbar {
     if(mode==='volume')list.sort((a,b)=>(b.volume??-1)-(a.volume??-1));
     else if(mode==='transactions')list.sort((a,b)=>(b.transactions??-1)-(a.transactions??-1));
     else list.sort((a,b)=>(b.turnover??-1)-(a.turnover??-1));
-    el.innerHTML=list.slice(0,5).map(r=>{
+    el.innerHTML=list.slice(0,10).map(r=>{
       const value=mode==='volume'?r.volume:mode==='transactions'?r.transactions:r.turnover;
       return `<div class="pulse-row"><b>${escapeHtml(r.symbol)}</b><span>${mode==='turnover'?money(value):fmt0(value)}</span><span class="${(r.pct??0)>=0?'up':'down'}">${fmt(r.ltp,2)}${r.pct===null?'':` (${r.pct>=0?'+':''}${fmt(r.pct,2)}%)`}</span></div>`;
     }).join('')||'<div class="pulse-row"><span>No verified rows</span></div>';
@@ -6879,7 +6879,7 @@ header.topbar, header.topbar .toprow, .mobile-exact-topbar {
   function rows(list){return Array.isArray(list)?list.map(norm).filter(x=>x.symbol):[]}
   function render(){
     const el=document.getElementById('pulseMoversRows'); if(!el)return;
-    const list=(moverMode==='losers'?snapshot.losers:snapshot.gainers).slice(0,5);
+    const list=(moverMode==='losers'?snapshot.losers:snapshot.gainers).slice(0,10);
     el.innerHTML=list.map(r=>{
       const cls=(r.pct??r.change??0)>=0?'up':'down';
       return `<div class="pulse-row"><b>${esc(r.symbol)}</b><span class="${cls}">${r.change===null?'—':(r.change>=0?'+':'')+r.change.toFixed(2)}</span><span class="${cls}">${r.pct===null?'—':(r.pct>=0?'+':'')+r.pct.toFixed(2)+'%'}</span><span>${r.ltp===null?'—':r.ltp.toFixed(2)}</span></div>`;
@@ -8852,6 +8852,43 @@ window.runAiTrendlines=async function(){const symbol=(document.getElementById('n
  window.openAiTrendlineDetection=function(){const p=$ai('npAiTrendPage');if(p)p.classList.add('open');try{closeFeatures()}catch(e){}loadAiStockOptions();const chartSymbol=($ai('txpSymbol')?.value||'').trim().toUpperCase();if(chartSymbol&&$ai('npAiTrendSymbol')&&!$ai('npAiTrendSymbol').value)$ai('npAiTrendSymbol').value=chartSymbol;};
  window.closeAiTrendlineDetection=function(){$ai('npAiTrendPage')?.classList.remove('open')};
  window.loadAiStockOptions=async function(){const list=$ai('npAiTrendStockOptions');if(!list)return;try{const base=String(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');const r=await fetch(base+'/api/market?_aitrendstocks='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});if(!r.ok)return;const d=await r.json();let rows=d?.data??d?.stocks??d?.result??d?.marketData??d;if(!Array.isArray(rows)){for(const k of ['stocks','companies','securities','data','market','rows','items'])if(Array.isArray(rows?.[k])){rows=rows[k];break}}if(!Array.isArray(rows))return;const unique=new Map();for(const x of rows){const symbol=String(x.symbol||x.ticker||x.code||x.securitySymbol||'').trim().toUpperCase();const name=String(x.name||x.companyName||x.securityName||'').trim();if(symbol)unique.set(symbol,{symbol,name})}list.innerHTML=[...unique.values()].sort((a,b)=>a.symbol.localeCompare(b.symbol)).map(x=>'<option value="'+x.symbol+'">'+x.name.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))+'</option>').join('')}catch(e){/* manual symbol entry remains available */}};
+})();
+</script>
+
+
+<!-- NEPSE Pulse: clickable top-10 market rows -->
+<style id="pulse-market-stock-row-interaction">
+#pulseMoversRows .pulse-row,#pulseLiquidityRows .pulse-row{cursor:pointer;min-height:44px}
+#pulseMoversRows .pulse-row:active,#pulseLiquidityRows .pulse-row:active{background:#eef7f2}
+#pulseMoversRows .pulse-row b,#pulseLiquidityRows .pulse-row b{color:#123d3b}
+#pulseMoversRows .pulse-row:focus-visible,#pulseLiquidityRows .pulse-row:focus-visible{outline:2px solid #16864a;outline-offset:-2px}
+</style>
+<script id="pulse-market-stock-click-v1">
+(function(){
+  if(window.__PULSE_MARKET_STOCK_CLICK_V1__) return;
+  window.__PULSE_MARKET_STOCK_CLICK_V1__=true;
+  document.addEventListener('click',function(event){
+    const row=event.target && event.target.closest && event.target.closest('#pulseMoversRows .pulse-row,#pulseLiquidityRows .pulse-row');
+    if(!row) return;
+    const symbol=(row.dataset.symbol || row.querySelector('b')?.textContent || '').trim().toUpperCase();
+    if(!symbol || /^(NO VERIFIED|LOADING|—)$/i.test(symbol)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if(typeof window.npOpenCompany==='function'){
+      window.npOpenCompany(symbol);
+    }else if(typeof window.openCompanyPage==='function'){
+      window.openCompanyPage(symbol);
+    }else if(typeof window.openStockXRay==='function'){
+      const input=document.getElementById('xrSymbol');
+      if(input) input.value=symbol;
+      window.openStockXRay();
+      if(typeof window.loadStockXRay==='function') window.loadStockXRay();
+    }else{
+      const input=document.getElementById('searchBox');
+      if(input) input.value=symbol;
+      if(typeof window.searchPulse==='function') window.searchPulse();
+    }
+  },true);
 })();
 </script>
 
