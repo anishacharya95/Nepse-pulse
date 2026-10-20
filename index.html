@@ -5615,8 +5615,17 @@ window.openTechnicalScreener=open;window.PULSE_TECHNICAL_SCREENER={load,open,ren
 
     const liveGainers=Array.isArray(lastState.gainers)?lastState.gainers:[];
     const liveLosers=Array.isArray(lastState.losers)?lastState.losers:[];
-    const gainers=(liveGainers.length?liveGainers:[...rs].filter(r=>change(r)!==null).sort((a,b)=>change(b)-change(a)));
-    const losers=(liveLosers.length?liveLosers:[...rs].filter(r=>change(r)!==null).sort((a,b)=>change(a)-change(b)));
+    // Some backend responses contain only six pre-ranked movers. Fill the remaining
+    // slots from the full live market rows, without duplicating symbols or inventing data.
+    const completeMovers=(primary,mode)=>{
+      const qualifies=r=>change(r)!==null&&(mode==='gainers'?change(r)>0:change(r)<0);
+      const sorted=[...rs].filter(qualifies).sort((a,b)=>mode==='gainers'?change(b)-change(a):change(a)-change(b));
+      const out=[],seen=new Set();
+      [...primary.filter(qualifies),...sorted].forEach(r=>{const s=sym(r);if(s&&!seen.has(s)&&out.length<10){seen.add(s);out.push(r)}});
+      return out;
+    };
+    const gainers=completeMovers(liveGainers,'gainers');
+    const losers=completeMovers(liveLosers,'losers');
     const moverRows=(moverMode==='gainers'?gainers:losers).slice(0,10);
     q('#pulseMoversRows').innerHTML=moverRows.map(r=>{
       const c=change(r), cls=c>=0?'up':'down';
@@ -6879,7 +6888,15 @@ header.topbar, header.topbar .toprow, .mobile-exact-topbar {
   function rows(list){return Array.isArray(list)?list.map(norm).filter(x=>x.symbol):[]}
   function render(){
     const el=document.getElementById('pulseMoversRows'); if(!el)return;
-    const list=(moverMode==='losers'?snapshot.losers:snapshot.gainers).slice(0,10);
+    const primary=moverMode==='losers'?snapshot.losers:snapshot.gainers;
+    const engine=window.PULSE_FEED_ENGINE||window.PULSE_FEED;
+    let feed={};try{feed=typeof engine?.state==='function'?engine.state():(engine?.state||{});}catch(_e){}
+    const live=Array.isArray(feed.live)?feed.live:[];
+    const pct=r=>{for(const k of ['perChange','percentChange','percentageChange','changePercent','pChange','percentage','pct','change']){const v=r?.[k];if(v!==null&&v!==undefined&&v!==''){const n=Number(String(v).replace(/,/g,''));if(Number.isFinite(n))return n;}}return null;};
+    const symOf=r=>String(r?.symbol??r?.Symbol??r?.stockSymbol??r?.scrip??r?.ticker??'').trim().toUpperCase();
+    const extras=live.map(norm).filter(r=>r.symbol&&(moverMode==='losers'?(r.pct??r.change)!==null&&(r.pct??r.change)<0:(r.pct??r.change)!==null&&(r.pct??r.change)>0)).sort((a,b)=>moverMode==='losers'?(a.pct??a.change)-(b.pct??b.change):(b.pct??b.change)-(a.pct??a.change));
+    const list=[],seen=new Set();
+    [...primary,...extras].forEach(r=>{const s=String(r.symbol||symOf(r)).toUpperCase();if(s&&!seen.has(s)&&list.length<10){seen.add(s);list.push(r)}});
     el.innerHTML=list.map(r=>{
       const cls=(r.pct??r.change??0)>=0?'up':'down';
       return `<div class="pulse-row"><b>${esc(r.symbol)}</b><span class="${cls}">${r.change===null?'—':(r.change>=0?'+':'')+r.change.toFixed(2)}</span><span class="${cls}">${r.pct===null?'—':(r.pct>=0?'+':'')+r.pct.toFixed(2)+'%'}</span><span>${r.ltp===null?'—':r.ltp.toFixed(2)}</span></div>`;
