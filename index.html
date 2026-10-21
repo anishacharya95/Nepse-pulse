@@ -1730,6 +1730,49 @@ input:focus,select:focus,textarea:focus{border-color:var(--np-blue)!important;bo
 }
 </style>
 
+<style id="np-premium-chart-movers-v2">
+
+/* NEPSE Pulse chart & movers premium refinement */
+.nepse-chart-card{
+  position:relative!important;overflow:hidden!important;
+  border:1px solid rgba(148,163,184,.22)!important;
+  border-radius:28px!important;
+  background:linear-gradient(155deg,#ffffff 0%,#fbfdff 68%,#f4f8ff 100%)!important;
+  box-shadow:0 18px 48px rgba(15,35,65,.075),inset 0 1px 0 rgba(255,255,255,.95)!important;
+  padding:clamp(18px,3.4vw,30px)!important;
+}
+.nepse-chart-head{align-items:flex-start!important;gap:14px!important;}
+.nepse-chart-title{font-size:clamp(22px,4vw,29px)!important;font-weight:800!important;letter-spacing:-.045em!important;color:#132744!important;}
+.nepse-chart-sub{margin-top:6px!important;color:#78869a!important;font-size:13px!important;font-weight:550!important;}
+.nepse-chart-arrow{display:none!important;}
+.nepse-chart-switch{margin-top:0!important;padding:4px!important;border:1px solid #e5ebf4!important;border-radius:16px!important;background:#f1f5fb!important;}
+.nepse-chart-switch button{border-radius:12px!important;font-weight:700!important;padding:10px 15px!important;color:#66758a!important;}
+.nepse-chart-switch button.active{background:#102e54!important;box-shadow:0 4px 12px rgba(16,46,84,.2)!important;color:#fff!important;}
+.nepse-chart-wrap{height:clamp(270px,54vw,390px)!important;margin-top:22px!important;}
+#nepseDashboardCanvas{filter:drop-shadow(0 2px 1px rgba(21,80,56,.04));}
+.nepse-chart-empty{border-radius:18px!important;background:linear-gradient(135deg,rgba(241,246,252,.7),rgba(255,255,255,.35))!important;font-weight:600!important;}
+.nepse-chart-ranges{gap:8px!important;margin-top:20px!important;}
+.nepse-chart-ranges button{border:1px solid #e8edf5!important;border-radius:14px!important;background:#f1f5fa!important;color:#58677c!important;font-weight:750!important;transition:transform .18s ease,box-shadow .18s ease,background .18s ease!important;}
+.nepse-chart-ranges button:active{transform:scale(.97)!important;}
+.nepse-chart-ranges button.active{background:linear-gradient(135deg,#12375f,#0b2749)!important;border-color:#12375f!important;box-shadow:0 6px 14px rgba(16,46,84,.2)!important;color:white!important;}
+#pulseMoversRows{display:flex!important;flex-direction:column!important;gap:0!important;}
+#pulseMoversRows .pulse-row{min-height:58px!important;display:grid!important;grid-template-columns:minmax(68px,1.15fr) minmax(54px,.8fr) minmax(64px,.9fr) minmax(72px,1fr)!important;align-items:center!important;gap:8px!important;padding:11px 10px!important;border-bottom:1px solid #edf1f6!important;border-radius:0!important;background:transparent!important;font-size:13px!important;}
+#pulseMoversRows .pulse-row:last-child{border-bottom:0!important;}
+#pulseMoversRows .pulse-row b{font-weight:800!important;color:#172b46!important;letter-spacing:.01em!important;}
+#pulseMoversRows .pulse-row .up{color:#159765!important;font-weight:750!important;}
+#pulseMoversRows .pulse-row .down{color:#dc4856!important;font-weight:750!important;}
+.pulse-segment{padding:5px!important;border-radius:16px!important;background:#f0f4fa!important;gap:4px!important;}
+.pulse-segment button{border-radius:12px!important;font-weight:750!important;}
+.pulse-segment button.active{background:#102e54!important;color:#fff!important;box-shadow:0 4px 12px rgba(16,46,84,.16)!important;}
+@media(max-width:480px){
+ .nepse-chart-card{padding:17px 14px 18px!important;border-radius:24px!important;}
+ .nepse-chart-wrap{height:285px!important;margin-top:16px!important;}
+ .nepse-chart-ranges{gap:5px!important;margin-top:16px!important;}
+ .nepse-chart-ranges button{font-size:12px!important;padding:10px 2px!important;border-radius:11px!important;}
+ #pulseMoversRows .pulse-row{grid-template-columns:minmax(56px,1fr) minmax(48px,.78fr) minmax(56px,.88fr) minmax(60px,.9fr)!important;gap:5px!important;padding:10px 5px!important;font-size:12px!important;}
+}
+@media(prefers-reduced-motion:reduce){.nepse-chart-ranges button{transition:none!important;}}
+</style>
 </head>
 <body>
 
@@ -6432,7 +6475,7 @@ header.topbar .feature-btn{
    if(!d || d.ok===false) throw new Error('Central Command Center returned no verified market snapshot');
    const s=d.summary||{}, b=d.breadth||{}, n=d.nepse||{};
    const nVal=pick(n,['close','currentValue','indexValue','value','latest','current']);
-   const nCh=pick(n,['change','pointChange','changeValue','difference']);
+   const nCh=pick(n,['change','pointChange','changeValue','difference','changeAmount']);
    const nPct=pick(n,['perChange','percentChange','percentageChange','changePercent','pChange']);
    const top=(d.movers||{}).gainers||[], low=(d.movers||{}).losers||[];
    const turnover=(d.activity||{}).turnover||[], volume=(d.activity||{}).volume||[], transactions=(d.activity||{}).transactions||[];
@@ -7076,7 +7119,7 @@ header.topbar, header.topbar .toprow, .mobile-exact-topbar {
     symbol:String(pick(x,['symbol','ticker','securityName','stockSymbol'])??'').trim(),
     ltp:n(pick(x,['ltp','lastPrice','price','close','closingPrice'])),
     change:n(pick(x,['change','pointChange','changeValue','difference'])),
-    pct:n(pick(x,['perChange','percentChange','percentageChange','changePercent','pChange','percentage'])),
+    pct:n(pick(x,['pct','perChange','percentChange','percentageChange','changePercent','pChange','percentage'])),
   });
   function rows(list){return Array.isArray(list)?list.map(norm).filter(x=>x.symbol):[]}
   function render(){
@@ -7089,10 +7132,21 @@ header.topbar, header.topbar .toprow, .mobile-exact-topbar {
     document.querySelectorAll('[data-mover-tab]').forEach(b=>b.classList.toggle('active',b.dataset.moverTab===moverMode));
   }
   function setSnapshot(d){
+    // Prefer the backend's dedicated movers lists, but derive the full top 10
+    // from the complete market rows when those lists are absent or incomplete.
     const g=rows(d?.gainers);
     const l=rows(d?.losers);
-    snapshot.gainers=g.length?g:[];
-    snapshot.losers=l.length?l:[];
+    const source=rows(d?.live||d?.companies||d?.rows||d?.data||d?.results);
+    const normalizedSource=source.map(r=>{
+      const change=r.change===null&&r.ltp!==null?null:r.change;
+      let pct=r.pct;
+      if(pct===null){const prev=n(pick(r,['previousClose','previousClosingPrice','prevClose','previousPrice']));if(change!==null&&prev) pct=change/prev*100;}
+      return {...r,change,pct};
+    }).filter(r=>r.symbol&&r.pct!==null);
+    const derivedG=[...normalizedSource].sort((a,b)=>b.pct-a.pct);
+    const derivedL=[...normalizedSource].sort((a,b)=>a.pct-b.pct);
+    snapshot.gainers=(g.length>=10?g:derivedG.length>=10?derivedG:g).slice(0,10);
+    snapshot.losers=(l.length>=10?l:derivedL.length>=10?derivedL:l).slice(0,10);
     render();
   }
   document.addEventListener('click',e=>{
