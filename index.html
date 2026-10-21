@@ -1,5 +1,170 @@
 <!doctype html>
 <html lang="en">
+  
+<!-- NEPSE PULSE PREMIUM VISUAL UPGRADE V1 -->
+<style id="np-premium-visual-v1">
+:root {
+  --np-bg: #f3f6fb;
+  --np-card: #ffffff;
+  --np-text: #152238;
+  --np-muted: #718096;
+  --np-border: #e0e7f0;
+  --np-green: #138a58;
+  --np-red: #d94350;
+  --np-blue: #315ce8;
+}
+
+html, body {
+  background: var(--np-bg) !important;
+  color: var(--np-text) !important;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  overflow-x: hidden;
+}
+
+.topbar {
+  background: rgba(248, 250, 253, .96) !important;
+  border-bottom: 1px solid var(--np-border) !important;
+  box-shadow: 0 3px 16px rgba(20, 39, 70, .035);
+}
+
+.brand {
+  letter-spacing: -.8px;
+  font-weight: 900;
+}
+
+.pulse {
+  color: var(--np-blue) !important;
+}
+
+.hero {
+  border-radius: 24px !important;
+  box-shadow: 0 12px 32px rgba(17, 37, 73, .10) !important;
+}
+
+#pulse-home-market-dashboard {
+  background: transparent !important;
+}
+
+#pulse-home-market-dashboard .pulse-market-strip,
+#pulse-home-market-dashboard .pulse-home-card {
+  background: var(--np-card) !important;
+  color: var(--np-text) !important;
+  border: 1px solid var(--np-border) !important;
+  border-radius: 20px !important;
+  box-shadow: 0 5px 22px rgba(23, 43, 77, .045) !important;
+}
+
+#pulse-home-market-dashboard .pulse-market-strip {
+  padding: 18px 15px !important;
+}
+
+#pulse-home-market-dashboard .pulse-market-name {
+  color: var(--np-text) !important;
+  font-weight: 900;
+  letter-spacing: -1px;
+}
+
+#pulse-home-market-dashboard .pulse-market-meta {
+  color: var(--np-muted) !important;
+}
+
+#pulse-home-market-dashboard .pulse-home-card {
+  padding: 16px 12px !important;
+  margin-bottom: 4px;
+}
+
+#pulse-home-market-dashboard .pulse-card-top h2 {
+  color: var(--np-text) !important;
+  font-weight: 850;
+  letter-spacing: -.4px;
+}
+
+#pulse-home-market-dashboard .pulse-card-top p {
+  color: var(--np-muted) !important;
+}
+
+#pulse-home-market-dashboard .pulse-segment {
+  background: #eef2f8 !important;
+  border: 1px solid #e6ebf3;
+  border-radius: 13px !important;
+}
+
+#pulse-home-market-dashboard .pulse-segment button {
+  border-radius: 10px !important;
+  font-weight: 750;
+}
+
+#pulse-home-market-dashboard .pulse-segment button.active {
+  background: var(--np-blue) !important;
+  color: #fff !important;
+  box-shadow: 0 3px 9px rgba(49, 92, 232, .18);
+}
+
+#pulse-home-market-dashboard .pulse-liquidity-card
+.pulse-segment button.active {
+  background: #1678bd !important;
+}
+
+#pulse-home-market-dashboard .pulse-row {
+  border-top: 1px solid #edf1f6 !important;
+  color: var(--np-text) !important;
+}
+
+#pulse-home-market-dashboard .pulse-row .up {
+  color: var(--np-green) !important;
+}
+
+#pulse-home-market-dashboard .pulse-row .down {
+  color: var(--np-red) !important;
+}
+
+#pulse-home-market-dashboard .pulse-summary-grid > div {
+  background: #f4f7fc !important;
+  border: 1px solid #e8edf5;
+  border-radius: 15px !important;
+}
+
+#pulse-home-market-dashboard .pulse-summary-grid label {
+  color: var(--np-muted) !important;
+}
+
+#pulse-home-market-dashboard .pulse-breadth-row {
+  border: 1px solid var(--np-border);
+  box-shadow: none !important;
+}
+
+.search, .card, .market-card, .metric-box {
+  border-radius: 16px;
+}
+
+button, input, select, textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button {
+  touch-action: manipulation;
+}
+
+.bottom {
+  box-shadow: 0 -5px 24px rgba(18, 35, 62, .07);
+  backdrop-filter: blur(18px);
+}
+
+.sheet {
+  border-radius: 24px 24px 0 0;
+}
+
+@media (max-width: 380px) {
+  #pulse-home-market-dashboard .pulse-home-card {
+    padding: 13px 9px !important;
+  }
+}
+</style>
+<!-- END NEPSE PULSE PREMIUM VISUAL UPGRADE V1 -->
+
 <head>
 <script>window.NEPSE_PULSE_BACKEND_URL = 'https://nepse-pulse-1.onrender.com';</script>
 <script src="config.js?v=4"></script>
