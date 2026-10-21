@@ -9628,3 +9628,104 @@ window.npPvaLiveRows=[];window.npPvaRefreshSentiment=async function(){const pvaS
 const priorLoad=window.loadPriceVolumeActions;window.loadPriceVolumeActions=async function(){await window.npPvaRefreshSentiment()};const priorOpen=window.openAiTrendlineDetection;window.openAiTrendlineDetection=function(){if(typeof priorOpen==='function')priorOpen()};window.addEventListener('pulse-central-snapshot',()=>{if(!window.npPvaLiveRows.length)window.npPvaRefreshSentiment()});window.addEventListener('pulse-feed-update',()=>{if(!window.npPvaLiveRows.length)window.npPvaRefreshSentiment()});document.addEventListener('DOMContentLoaded',()=>{if(byId('npPvaPage'))window.npPvaRefreshSentiment()});
 })();
 </script>
+
+
+<!-- NEPSE PULSE NAVIGATION + CHART UX REPAIR -->
+<style id="np-final-chart-nav-repair">
+/* Keep the dashboard chart clear and make its controls easy to tap on phones. */
+.nepse-chart-card .nepse-chart-switch,
+.nepse-chart-card .nepse-chart-ranges { position:relative; z-index:4; }
+.nepse-chart-card .nepse-chart-switch button,
+.nepse-chart-card .nepse-chart-ranges button { touch-action:manipulation; pointer-events:auto; }
+.nepse-chart-card .nepse-chart-wrap { touch-action:pan-y; }
+#v21-bottom-nav, .bottom.mobile-exact-bottom, .bottom.mobile-exact-bottom .nav {
+  pointer-events:auto!important;
+}
+#v21-bottom-nav button, .bottom.mobile-exact-bottom .nav button {
+  position:relative; z-index:2; pointer-events:auto!important; touch-action:manipulation;
+}
+</style>
+<script id="np-final-nav-repair">
+(function(){
+  'use strict';
+  function closeOverlays(){
+    ['pulseFeatureWorkspace','featureDrawer','npAllMarket','traderModuleModal','tradersZoneModal','stockXRayModal','loginModal']
+      .forEach(function(id){
+        var el=document.getElementById(id);
+        if(el && el.classList.contains('open')) el.classList.remove('open');
+      });
+  }
+  function activate(btn){
+    var label=((btn.innerText||btn.textContent||'')+' '+(btn.getAttribute('aria-label')||'')).replace(/\s+/g,' ').trim();
+    if(!label)return;
+    var nav=btn.closest('.nav');
+    if(nav)nav.querySelectorAll('button').forEach(function(b){b.classList.toggle('active',b===btn);});
+    if(/^\s*home\b/i.test(label)){closeOverlays();document.body.classList.remove('v22-profile-tab-active');window.scrollTo({top:0,behavior:'smooth'});return;}
+    if(/^\s*market(s)?\b/i.test(label)){
+      closeOverlays();document.body.classList.remove('v22-profile-tab-active');
+      if(typeof window.npOpenAllMarket==='function')window.npOpenAllMarket();
+      else if(typeof window.setNav==='function')window.setNav(btn,'Markets');
+      return;
+    }
+    if(/^\s*screener\b/i.test(label)){
+      closeOverlays();document.body.classList.remove('v22-profile-tab-active');
+      if(typeof window.openTechnicalScreener==='function')window.openTechnicalScreener();
+      else if(typeof window.openModule==='function')window.openModule('Screener');
+      else if(typeof window.toast==='function')window.toast('Screener is temporarily unavailable. Please reload and try again.');
+      return;
+    }
+    if(/^\s*profile\b/i.test(label)){
+      closeOverlays();
+      if(typeof window.setupProfileTab==='function')window.setupProfileTab();
+      document.body.classList.add('v22-profile-tab-active');
+      var profile=document.getElementById('v22-profile-tab-view');
+      if(profile){profile.style.removeProperty('display');profile.style.removeProperty('pointer-events');}
+      window.scrollTo({top:0,behavior:'smooth'});return;
+    }
+    if(/^\s*more\b/i.test(label)){
+      document.body.classList.remove('v22-profile-tab-active');
+      if(typeof window.openFeatures==='function')window.openFeatures();
+      else if(typeof window.toast==='function')window.toast('Features menu is temporarily unavailable.');
+    }
+  }
+  document.addEventListener('click',function(e){
+    var btn=e.target&&e.target.closest&&e.target.closest('#v21-bottom-nav button,.bottom.mobile-exact-bottom .nav button,.nav button');
+    if(!btn)return;
+    var label=(btn.innerText||btn.textContent||'').trim();
+    if(!/^(Home|Market|Markets|Screener|Profile|More)$/i.test(label))return;
+    // Run after existing inline handlers so this recovery layer can restore the correct view.
+    setTimeout(function(){activate(btn);},0);
+  },true);
+})();
+</script>
+<script id="np-final-intraday-chart-guard">
+(function(){
+  var originalFetch=null;
+  function boot(){
+    var card=document.querySelector('.nepse-chart-card');
+    if(!card)return;
+    var daily=card.querySelector('[data-nepse-range="1D"]');
+    var subtitle=document.getElementById('nepseChartSubtitle');
+    if(daily){
+      daily.setAttribute('aria-label','Show intraday NEPSE index chart');
+      daily.title='Intraday chart for today';
+    }
+    // Keep 1D explicitly tied to the intraday graph endpoint; never substitute daily candles.
+    var load=window.PULSE_LOAD_NEPSE_INTRADAY;
+    if(typeof load==='function' && daily){
+      daily.addEventListener('click',function(){
+        if(subtitle)subtitle.textContent='Intraday NEPSE index';
+      });
+    }
+  }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
+})();
+</script>
+
+<style id="np-remove-chart-checkbox-bar">
+/* Remove any checkbox/checkbox-label strip if injected into the dashboard chart. */
+.nepse-chart-card input[type="checkbox"],
+.nepse-chart-card label:has(input[type="checkbox"]),
+.nepse-chart-card .checkbox-bar,
+.nepse-chart-card .check-bar { display:none!important; }
+</style>
