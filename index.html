@@ -1,170 +1,5 @@
 <!doctype html>
 <html lang="en">
-  
-<!-- NEPSE PULSE PREMIUM VISUAL UPGRADE V1 -->
-<style id="np-premium-visual-v1">
-:root {
-  --np-bg: #f3f6fb;
-  --np-card: #ffffff;
-  --np-text: #152238;
-  --np-muted: #718096;
-  --np-border: #e0e7f0;
-  --np-green: #138a58;
-  --np-red: #d94350;
-  --np-blue: #315ce8;
-}
-
-html, body {
-  background: var(--np-bg) !important;
-  color: var(--np-text) !important;
-  -webkit-font-smoothing: antialiased;
-}
-
-body {
-  overflow-x: hidden;
-}
-
-.topbar {
-  background: rgba(248, 250, 253, .96) !important;
-  border-bottom: 1px solid var(--np-border) !important;
-  box-shadow: 0 3px 16px rgba(20, 39, 70, .035);
-}
-
-.brand {
-  letter-spacing: -.8px;
-  font-weight: 900;
-}
-
-.pulse {
-  color: var(--np-blue) !important;
-}
-
-.hero {
-  border-radius: 24px !important;
-  box-shadow: 0 12px 32px rgba(17, 37, 73, .10) !important;
-}
-
-#pulse-home-market-dashboard {
-  background: transparent !important;
-}
-
-#pulse-home-market-dashboard .pulse-market-strip,
-#pulse-home-market-dashboard .pulse-home-card {
-  background: var(--np-card) !important;
-  color: var(--np-text) !important;
-  border: 1px solid var(--np-border) !important;
-  border-radius: 20px !important;
-  box-shadow: 0 5px 22px rgba(23, 43, 77, .045) !important;
-}
-
-#pulse-home-market-dashboard .pulse-market-strip {
-  padding: 18px 15px !important;
-}
-
-#pulse-home-market-dashboard .pulse-market-name {
-  color: var(--np-text) !important;
-  font-weight: 900;
-  letter-spacing: -1px;
-}
-
-#pulse-home-market-dashboard .pulse-market-meta {
-  color: var(--np-muted) !important;
-}
-
-#pulse-home-market-dashboard .pulse-home-card {
-  padding: 16px 12px !important;
-  margin-bottom: 4px;
-}
-
-#pulse-home-market-dashboard .pulse-card-top h2 {
-  color: var(--np-text) !important;
-  font-weight: 850;
-  letter-spacing: -.4px;
-}
-
-#pulse-home-market-dashboard .pulse-card-top p {
-  color: var(--np-muted) !important;
-}
-
-#pulse-home-market-dashboard .pulse-segment {
-  background: #eef2f8 !important;
-  border: 1px solid #e6ebf3;
-  border-radius: 13px !important;
-}
-
-#pulse-home-market-dashboard .pulse-segment button {
-  border-radius: 10px !important;
-  font-weight: 750;
-}
-
-#pulse-home-market-dashboard .pulse-segment button.active {
-  background: var(--np-blue) !important;
-  color: #fff !important;
-  box-shadow: 0 3px 9px rgba(49, 92, 232, .18);
-}
-
-#pulse-home-market-dashboard .pulse-liquidity-card
-.pulse-segment button.active {
-  background: #1678bd !important;
-}
-
-#pulse-home-market-dashboard .pulse-row {
-  border-top: 1px solid #edf1f6 !important;
-  color: var(--np-text) !important;
-}
-
-#pulse-home-market-dashboard .pulse-row .up {
-  color: var(--np-green) !important;
-}
-
-#pulse-home-market-dashboard .pulse-row .down {
-  color: var(--np-red) !important;
-}
-
-#pulse-home-market-dashboard .pulse-summary-grid > div {
-  background: #f4f7fc !important;
-  border: 1px solid #e8edf5;
-  border-radius: 15px !important;
-}
-
-#pulse-home-market-dashboard .pulse-summary-grid label {
-  color: var(--np-muted) !important;
-}
-
-#pulse-home-market-dashboard .pulse-breadth-row {
-  border: 1px solid var(--np-border);
-  box-shadow: none !important;
-}
-
-.search, .card, .market-card, .metric-box {
-  border-radius: 16px;
-}
-
-button, input, select, textarea {
-  -webkit-tap-highlight-color: transparent;
-}
-
-button {
-  touch-action: manipulation;
-}
-
-.bottom {
-  box-shadow: 0 -5px 24px rgba(18, 35, 62, .07);
-  backdrop-filter: blur(18px);
-}
-
-.sheet {
-  border-radius: 24px 24px 0 0;
-}
-
-@media (max-width: 380px) {
-  #pulse-home-market-dashboard .pulse-home-card {
-    padding: 13px 9px !important;
-  }
-}
-</style>
-<!-- END NEPSE PULSE PREMIUM VISUAL UPGRADE V1 -->
-
 <head>
 <script>window.NEPSE_PULSE_BACKEND_URL = 'https://nepse-pulse-1.onrender.com';</script>
 <script src="config.js?v=4"></script>
@@ -176,7 +11,7 @@ button {
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="preconnect" href="https://unpkg.com" crossorigin>
 <link rel="preconnect" href="https://charting-library.tradingview-widget.com" crossorigin>
-<meta name="theme-color" content="#ffffff">
+<meta name="theme-color" content="#101d35">
 <meta name="nepse-pulse-chart-revision" content="red-green-market-direction-v2">
 <meta name="description" content="NEPSE Pulse — premium Nepal market intelligence terminal • Central Feed + Portfolio + Dividends + Screener + Floorsheet + Sector V5">
 <title>NEPSE Pulse — Nepal Market Intelligence</title>
@@ -1693,6 +1528,208 @@ main { padding-bottom: calc(190px + env(safe-area-inset-bottom)) !important; }
 #pulseFeatureWorkspace:not(.open) { contain-intrinsic-size: 1px 600px; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior:auto !important; animation-duration:0.001ms !important; animation-iteration-count:1 !important; } }
 </style>
+
+<style id="nepse-pulse-premium-design-system-v1">
+/* NEPSE Pulse premium UI layer — presentation only; existing data and handlers remain untouched. */
+:root{
+  color-scheme:light;
+  --np-bg:#f3f6fb;
+  --np-panel:#ffffff;
+  --np-panel-soft:#f7f9fc;
+  --np-line:#e1e7f0;
+  --np-ink:#14213a;
+  --np-muted:#68778e;
+  --np-navy:#101d35;
+  --np-navy-2:#172b4d;
+  --np-blue:#3768e8;
+  --np-blue-soft:#edf2ff;
+  --np-green:#13865c;
+  --np-green-soft:#eaf7f0;
+  --np-red:#cf4654;
+  --np-red-soft:#fff0f1;
+  --np-radius:20px;
+  --np-shadow:0 8px 26px rgba(17,35,66,.055);
+}
+html,body{background:var(--np-bg)!important;color:var(--np-ink)!important}
+body{font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;letter-spacing:-.01em;overflow-x:clip}
+button,input,select,textarea{font:inherit}
+button{cursor:pointer; -webkit-tap-highlight-color:transparent}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,a:focus-visible{outline:3px solid rgba(55,104,232,.32);outline-offset:2px}
+.app{width:100%;max-width:1120px;margin:0 auto}
+main{padding:14px 18px 150px!important;min-width:0}
+.topbar,.topbar.mobile-exact-topbar{
+  position:sticky!important;top:0;z-index:100;
+  padding:0 18px 12px!important;
+  background:rgba(16,29,53,.97)!important;color:#f8fbff!important;
+  border:0!important;border-bottom:1px solid rgba(255,255,255,.09)!important;
+  box-shadow:0 8px 22px rgba(12,24,44,.13);backdrop-filter:blur(18px)
+}
+.mobile-exact-head{max-width:1084px;min-height:66px!important;margin:auto;display:flex;align-items:center;gap:12px;padding:0!important}
+.mobile-menu{width:40px;height:40px;border:1px solid rgba(255,255,255,.15)!important;border-radius:13px!important;background:rgba(255,255,255,.08)!important;color:#fff!important;font-size:19px!important}
+.brand.mobile-brand{font-size:21px!important;letter-spacing:-.7px!important;font-weight:850!important;gap:8px;min-width:0}
+.brand-mark{display:grid;place-items:center;width:34px;height:34px;border-radius:11px;background:linear-gradient(145deg,#4f7df0,#2c55be);color:#fff!important;font-size:23px!important;box-shadow:0 5px 14px rgba(55,104,232,.25)}
+.brand .pulse{color:#91b2ff!important}
+.mobile-head-actions{display:flex;align-items:center;gap:8px}
+.mobile-icon,.mobile-avatar{width:38px;height:38px;border:1px solid rgba(255,255,255,.16)!important;border-radius:12px!important;background:rgba(255,255,255,.08)!important;color:#f7faff!important}
+.mobile-avatar{background:#e8efff!important;color:#233e78!important;font-weight:850}
+.mobile-exact-search{max-width:1084px;margin:0 auto;display:flex;align-items:center;gap:10px;padding:0 12px;height:43px;border:1px solid rgba(255,255,255,.14);border-radius:13px;background:rgba(255,255,255,.08);color:#aebfdd}
+.mobile-exact-search>span{font-size:21px;line-height:1}
+.mobile-exact-search input{width:100%;min-width:0;background:transparent!important;border:0!important;outline:0!important;color:#fff!important;font-size:13px}
+.mobile-exact-search input::placeholder{color:#aebbd0!important}
+.mobile-feed-state{max-width:1084px;margin:9px auto 0;display:flex;align-items:center;gap:7px;color:#c5d3e8!important;font-size:10px!important;font-weight:750;letter-spacing:.06em}
+.mobile-feed-state .dot{width:7px;height:7px;box-shadow:0 0 0 4px rgba(98,217,120,.12);background:#62d978!important}
+.mobile-feed-time{margin-left:auto;color:#9baec9!important;font-size:10px}
+#npMarketCard.np-market-card{
+  width:100%!important;margin:10px 0 14px!important;padding:22px!important;
+  border:1px solid #263d60!important;border-radius:23px!important;
+  background:linear-gradient(135deg,#142747 0%,#101d35 62%,#182c4b 100%)!important;
+  color:#f8fbff!important;box-shadow:0 14px 32px rgba(13,29,54,.15)!important
+}
+.np-market-top{align-items:center}
+.np-market-name{color:#dce7fb!important;font-size:13px!important;letter-spacing:.12em!important;font-weight:800!important}
+.np-market-status{font-size:10px!important;padding:7px 10px!important;background:rgba(255,255,255,.08)!important;color:#e8d59b!important;border:1px solid rgba(255,255,255,.1)}
+.np-market-status.open{background:rgba(25,167,112,.17)!important;color:#9be5c3!important}
+.np-market-main{align-items:flex-end!important;flex-wrap:wrap;gap:13px!important;margin:18px 0 20px!important}
+.np-index{font-size:clamp(42px,8vw,62px)!important;letter-spacing:-.055em!important;color:#fff!important;font-variant-numeric:tabular-nums}
+.np-index.up{color:#70dfaa!important}.np-index.down{color:#ff8790!important}
+.np-change{font-size:clamp(17px,3.5vw,23px)!important;font-variant-numeric:tabular-nums}
+.np-change.up{color:#70dfaa!important}.np-change:not(.up){color:#ff929a}
+.np-market-bottom{gap:18px!important;flex-wrap:wrap}
+.np-breadth{font-size:12px!important;color:#bdcbe0!important;gap:7px!important}
+.np-breadth b{font-size:16px!important;color:#fff!important;font-variant-numeric:tabular-nums}
+.np-breadth span{color:#bdcbe0!important}
+.np-market-arrow{display:none!important}
+.np-market-time{color:#9bacc7!important;font-size:10px!important;margin-top:15px!important}
+#pulse-home-market-dashboard{width:100%!important;max-width:none!important;margin:0 auto!important;padding:0 0 30px!important}
+#pulse-home-market-dashboard .pulse-intelligence-title{display:flex!important;align-items:flex-end!important;justify-content:space-between!important;gap:12px!important;padding:20px 2px 15px!important}
+#pulse-home-market-dashboard .pulse-eyebrow{font-size:10px!important;letter-spacing:.16em!important;color:var(--np-blue)!important}
+#pulse-home-market-dashboard .pulse-intelligence-title h1{font-size:clamp(23px,4vw,31px)!important;line-height:1.15!important;letter-spacing:-.8px!important;color:var(--np-ink)!important}
+#pulse-home-market-dashboard .pulse-intelligence-title p{color:var(--np-muted)!important;font-size:12px!important}
+#pulse-home-market-dashboard .pulse-live-dot{background:var(--np-green-soft)!important;color:var(--np-green)!important;border:1px solid #cfeadb!important;white-space:nowrap}
+#pulse-home-market-dashboard .pulse-market-strip{display:none!important}
+#pulse-home-market-dashboard .pulse-breadth-row{display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr))!important;gap:1px!important;overflow:hidden!important;border:1px solid var(--np-line)!important;border-radius:16px!important;background:var(--np-line)!important;box-shadow:none!important;margin:0 0 14px!important}
+#pulse-home-market-dashboard .pulse-breadth{min-width:0;min-height:67px!important;padding:11px 4px!important;background:#fff!important;color:var(--np-ink)!important}
+#pulse-home-market-dashboard .pulse-breadth small{font-size:9px!important;color:var(--np-muted)!important;letter-spacing:.03em}
+#pulse-home-market-dashboard .pulse-breadth b{font-size:21px!important;color:var(--np-ink)!important;font-variant-numeric:tabular-nums}
+#pulse-home-market-dashboard .pulse-breadth.advance b,#pulse-home-market-dashboard .pulse-breadth.positive b{color:var(--np-green)!important}
+#pulse-home-market-dashboard .pulse-breadth.decline b,#pulse-home-market-dashboard .pulse-breadth.negative b{color:var(--np-red)!important}
+#pulse-home-market-dashboard .pulse-breadth.unchanged b{color:var(--np-blue)!important}
+#pulse-home-market-dashboard .nepse-chart-card{display:block!important;margin:0 0 14px!important;padding:19px 16px 15px!important;background:var(--np-panel)!important;border:1px solid var(--np-line)!important;border-radius:var(--np-radius)!important;box-shadow:var(--np-shadow)!important}
+#pulse-home-market-dashboard .nepse-chart-title{font-size:18px!important;color:var(--np-ink)!important;letter-spacing:-.4px!important}
+#pulse-home-market-dashboard .nepse-chart-sub{color:var(--np-muted)!important;font-size:11px!important}
+#pulse-home-market-dashboard .nepse-chart-arrow{display:none!important}
+#pulse-home-market-dashboard .nepse-chart-switch{margin:-36px 0 12px auto!important;background:#f0f3f9!important}
+#pulse-home-market-dashboard .nepse-chart-switch button{font-size:11px!important;padding:8px 12px!important;color:var(--np-muted)!important}
+#pulse-home-market-dashboard .nepse-chart-switch button.active,#pulse-home-market-dashboard .nepse-chart-ranges button.active{background:var(--np-navy)!important;color:#fff!important}
+#pulse-home-market-dashboard .nepse-chart-wrap{height:230px!important}
+#pulse-home-market-dashboard .nepse-chart-ranges{gap:5px!important}
+#pulse-home-market-dashboard .nepse-chart-ranges button{background:#f1f4f9!important;color:#526078!important;border-radius:9px!important;font-size:11px!important;padding:9px 2px!important}
+#pulse-home-market-dashboard .pulse-home-grid{display:grid!important;grid-template-columns:minmax(0,1fr)!important;gap:14px!important;margin-top:0!important}
+#pulse-home-market-dashboard .pulse-home-card{min-width:0;margin:0!important;padding:18px!important;border:1px solid var(--np-line)!important;border-radius:var(--np-radius)!important;background:var(--np-panel)!important;box-shadow:var(--np-shadow)!important}
+#pulse-home-market-dashboard .pulse-card-top{margin:0 0 15px!important;align-items:center!important}
+#pulse-home-market-dashboard .pulse-card-top h2{font-size:17px!important;letter-spacing:-.3px!important;color:var(--np-ink)!important}
+#pulse-home-market-dashboard .pulse-card-top p{display:block!important;font-size:11px!important;color:var(--np-muted)!important;margin-top:4px!important}
+#pulse-home-market-dashboard .pulse-card-icon{display:grid!important;place-items:center;width:34px;height:34px;border-radius:11px;background:var(--np-blue-soft)!important;color:var(--np-blue)!important;font-size:17px!important}
+#pulse-home-market-dashboard .pulse-segment{display:flex!important;justify-content:stretch!important;gap:4px!important;width:100%!important;max-width:none!important;margin:0 0 13px!important;padding:4px!important;border:1px solid #e6ebf3!important;border-radius:12px!important;background:#f5f7fb!important}
+#pulse-home-market-dashboard .pulse-segment button{flex:1;min-width:0;border-radius:9px!important;padding:10px 5px!important;font-size:11px!important;font-weight:750!important;color:#65738a!important;background:transparent!important}
+#pulse-home-market-dashboard .pulse-segment button.active{background:var(--np-navy)!important;color:#fff!important;box-shadow:0 2px 5px rgba(16,29,53,.12)!important}
+#pulse-home-market-dashboard .pulse-liquidity-card .pulse-segment button.active{background:var(--np-blue)!important}
+#pulse-home-market-dashboard .pulse-table-head,#pulse-home-market-dashboard .pulse-row,#pulse-home-market-dashboard .pulse-table-row{grid-template-columns:minmax(0,1.3fr) minmax(0,.75fr) minmax(0,.85fr) minmax(0,.78fr)!important;gap:6px!important}
+#pulse-home-market-dashboard .pulse-table-head{padding:5px 7px 9px!important;color:#8591a4!important;font-size:9px!important;letter-spacing:.06em!important}
+#pulse-home-market-dashboard .pulse-row,#pulse-home-market-dashboard .pulse-table-row{min-height:49px!important;padding:10px 7px!important;border-top:1px solid #edf0f5!important;font-size:12px!important;font-variant-numeric:tabular-nums}
+#pulse-home-market-dashboard .pulse-row b{font-size:12px!important;color:var(--np-ink)!important}
+#pulse-home-market-dashboard .pulse-row .up{color:var(--np-green)!important;font-weight:750}
+#pulse-home-market-dashboard .pulse-row .down{color:var(--np-red)!important;font-weight:750}
+#pulse-home-market-dashboard .v21-symbol{font-size:12px!important;color:var(--np-ink)!important}
+#pulse-home-market-dashboard .v21-name{color:#8290a4!important}
+#pulse-home-market-dashboard .v21-company-logo{width:30px!important;height:30px!important;flex-basis:30px!important}
+#pulse-home-market-dashboard .pulse-liquidity-card .pulse-table-head,#pulse-home-market-dashboard .pulse-liquidity-card .pulse-table-row{grid-template-columns:minmax(0,1.35fr) minmax(0,1fr) minmax(0,.8fr)!important}
+#pulse-home-market-dashboard .pulse-summary-grid{gap:8px!important}
+#pulse-home-market-dashboard .pulse-summary-grid>div{background:#f7f9fc!important;border:1px solid #edf1f6!important;border-radius:13px!important;padding:12px 10px!important;min-height:76px!important}
+#pulse-home-market-dashboard .pulse-summary-grid span{background:var(--np-blue-soft)!important;color:var(--np-blue)!important;border-radius:10px!important}
+#pulse-home-market-dashboard .pulse-summary-grid label{color:var(--np-muted)!important;font-size:10px!important}
+#pulse-home-market-dashboard .pulse-summary-grid b{color:var(--np-ink)!important;font-size:13px!important;font-variant-numeric:tabular-nums}
+#v21-bottom-nav{
+  left:50%!important;right:auto!important;bottom:calc(9px + env(safe-area-inset-bottom))!important;
+  transform:translateX(-50%);width:calc(100% - 24px)!important;max-width:620px!important;
+  padding:6px!important;gap:3px!important;border-radius:19px!important;
+  background:rgba(16,29,53,.97)!important;border:1px solid rgba(255,255,255,.1)!important;
+  box-shadow:0 12px 36px rgba(14,28,51,.24)!important;backdrop-filter:blur(18px)
+}
+#v21-bottom-nav button{min-width:0;min-height:52px!important;border-radius:13px!important;color:#aab9d1!important;font-size:10px!important;font-weight:700!important}
+#v21-bottom-nav button.active{background:#253b60!important;color:#fff!important;box-shadow:inset 0 0 0 1px rgba(150,181,255,.14)}
+#v21-bottom-nav .v21-icon{font-size:19px!important;line-height:21px!important;margin-bottom:3px!important}
+.drawer,.modal,.pulse-feature-workspace{backdrop-filter:blur(7px)}
+.sheet,.pulse-feature-sheet{border:1px solid var(--np-line)!important;background:#fff!important;color:var(--np-ink)!important;box-shadow:0 -18px 60px rgba(12,27,50,.2)!important}
+.sheet{border-radius:24px 24px 0 0!important;padding:20px 17px calc(24px + env(safe-area-inset-bottom))!important}
+.grab{background:#c8d1df!important}
+.sheet-head h2,.pulse-workspace-head h2{font-size:20px!important;font-weight:850!important;letter-spacing:-.5px;color:var(--np-ink)!important}
+.close,.pulse-workspace-close{background:#f1f4f9!important;border:1px solid var(--np-line)!important;color:var(--np-ink)!important;border-radius:11px!important}
+#featureDrawer .feature-list{display:flex;flex-direction:column;gap:8px}
+#featureDrawer .feature-group{margin:13px 3px 3px!important;color:#8290a4!important;font-size:10px!important;letter-spacing:.13em!important}
+#featureDrawer .feature-item{display:block;width:100%;padding:14px!important;border:1px solid var(--np-line)!important;border-radius:14px!important;background:#fff!important;color:var(--np-ink)!important;box-shadow:0 2px 7px rgba(17,35,66,.025);text-align:left}
+#featureDrawer .feature-item b{font-size:13px!important;color:var(--np-ink)!important}
+#featureDrawer .feature-item small{font-size:11px!important;color:var(--np-muted)!important}
+.feature-item:active,.tz-card:active,.tz-module:active{transform:scale(.99)}
+.tz-card,.tz-module,.card,.market-card,.metric-box,.scan-row,.module-hero,.profile-row,.q-card,.q-item,.xray-card,.xr-card{
+  border-color:var(--np-line)!important;border-radius:16px!important;box-shadow:none!important
+}
+.module-hero{background:linear-gradient(135deg,#f6f8fc,#fff)!important}
+.auth-title{color:var(--np-ink)!important;letter-spacing:-.7px}
+.auth-sub,.note{color:var(--np-muted)!important}
+.auth-btn{background:#fff!important;border:1px solid var(--np-line)!important;color:var(--np-ink)!important;border-radius:13px!important}
+.auth-btn:active,.primary:active,.np-login-primary:active{transform:translateY(1px)}
+input,select,textarea{border-radius:11px}
+input:focus,select:focus,textarea:focus{border-color:var(--np-blue)!important;box-shadow:0 0 0 3px rgba(55,104,232,.10)}
+.primary,.np-login-primary{background:var(--np-blue)!important;color:#fff!important;border-radius:12px!important;box-shadow:0 5px 12px rgba(55,104,232,.16)}
+.secondary{background:#edf2fa!important;color:var(--np-ink)!important;border:1px solid var(--np-line)!important;border-radius:12px!important}
+#np-login-gate{background:radial-gradient(ellipse at 50% 0%,#203c68 0%,#101d35 46%,#091323 100%)!important}
+#np-login-gate .np-login-inner{border-radius:24px!important;box-shadow:0 22px 70px rgba(0,0,0,.28)!important}
+.toast{border-radius:13px!important;box-shadow:0 12px 35px rgba(12,27,50,.18)!important}
+.scan-row{background:#fff!important}
+.scan-table{font-variant-numeric:tabular-nums}
+.scan-table th{background:#f5f7fb!important}
+@media(min-width:760px){
+  main{padding:20px 24px 145px!important}
+  #pulse-home-market-dashboard .pulse-home-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important}
+  #pulse-home-market-dashboard .pulse-summary-card{grid-column:1/-1}
+  #pulse-home-market-dashboard .nepse-chart-card{grid-column:1/-1}
+  #npMarketCard.np-market-card{padding:26px 28px!important}
+}
+@media(max-width:520px){
+  .topbar,.topbar.mobile-exact-topbar{padding:0 12px 10px!important}
+  .mobile-exact-head{min-height:59px!important;gap:8px}
+  .brand.mobile-brand{font-size:18px!important}
+  .brand-mark{width:30px;height:30px;font-size:20px!important}
+  .mobile-menu,.mobile-icon,.mobile-avatar{width:35px;height:35px}
+  main{padding:10px 11px 145px!important}
+  #npMarketCard.np-market-card{padding:18px 15px!important;border-radius:19px!important}
+  .np-market-bottom{gap:12px!important}
+  #pulse-home-market-dashboard .pulse-intelligence-title{padding-top:15px!important}
+  #pulse-home-market-dashboard .pulse-breadth{min-height:61px!important;padding:9px 2px!important}
+  #pulse-home-market-dashboard .pulse-breadth small{font-size:8px!important}
+  #pulse-home-market-dashboard .pulse-breadth b{font-size:18px!important}
+  #pulse-home-market-dashboard .pulse-home-card{padding:15px 11px!important}
+  #pulse-home-market-dashboard .pulse-segment button{font-size:10px!important;padding:10px 2px!important}
+  #pulse-home-market-dashboard .pulse-table-head,#pulse-home-market-dashboard .pulse-row,#pulse-home-market-dashboard .pulse-table-row{gap:4px!important}
+  #pulse-home-market-dashboard .pulse-row,#pulse-home-market-dashboard .pulse-table-row{font-size:11px!important}
+  #pulse-home-market-dashboard .pulse-row b{font-size:11px!important}
+  #v21-bottom-nav{width:calc(100% - 16px)!important;bottom:calc(6px + env(safe-area-inset-bottom))!important}
+  #v21-bottom-nav button{min-height:49px!important;font-size:9px!important}
+}
+@media(max-width:360px){
+  .mobile-head-actions{gap:5px}
+  .mobile-icon{display:none}
+  #npMarketCard.np-market-card{padding:16px 12px!important}
+  .np-index{font-size:39px!important}
+  #pulse-home-market-dashboard .pulse-breadth small{font-size:7px!important}
+  #pulse-home-market-dashboard .pulse-table-head{font-size:8px!important}
+}
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}
+}
+</style>
+
 </head>
 <body>
 
@@ -5780,17 +5817,8 @@ window.openTechnicalScreener=open;window.PULSE_TECHNICAL_SCREENER={load,open,ren
 
     const liveGainers=Array.isArray(lastState.gainers)?lastState.gainers:[];
     const liveLosers=Array.isArray(lastState.losers)?lastState.losers:[];
-    // Some backend responses contain only six pre-ranked movers. Fill the remaining
-    // slots from the full live market rows, without duplicating symbols or inventing data.
-    const completeMovers=(primary,mode)=>{
-      const qualifies=r=>change(r)!==null&&(mode==='gainers'?change(r)>0:change(r)<0);
-      const sorted=[...rs].filter(qualifies).sort((a,b)=>mode==='gainers'?change(b)-change(a):change(a)-change(b));
-      const out=[],seen=new Set();
-      [...primary.filter(qualifies),...sorted].forEach(r=>{const s=sym(r);if(s&&!seen.has(s)&&out.length<10){seen.add(s);out.push(r)}});
-      return out;
-    };
-    const gainers=completeMovers(liveGainers,'gainers');
-    const losers=completeMovers(liveLosers,'losers');
+    const gainers=(liveGainers.length?liveGainers:[...rs].filter(r=>change(r)!==null).sort((a,b)=>change(b)-change(a)));
+    const losers=(liveLosers.length?liveLosers:[...rs].filter(r=>change(r)!==null).sort((a,b)=>change(a)-change(b)));
     const moverRows=(moverMode==='gainers'?gainers:losers).slice(0,10);
     q('#pulseMoversRows').innerHTML=moverRows.map(r=>{
       const c=change(r), cls=c>=0?'up':'down';
@@ -7053,15 +7081,7 @@ header.topbar, header.topbar .toprow, .mobile-exact-topbar {
   function rows(list){return Array.isArray(list)?list.map(norm).filter(x=>x.symbol):[]}
   function render(){
     const el=document.getElementById('pulseMoversRows'); if(!el)return;
-    const primary=moverMode==='losers'?snapshot.losers:snapshot.gainers;
-    const engine=window.PULSE_FEED_ENGINE||window.PULSE_FEED;
-    let feed={};try{feed=typeof engine?.state==='function'?engine.state():(engine?.state||{});}catch(_e){}
-    const live=Array.isArray(feed.live)?feed.live:[];
-    const pct=r=>{for(const k of ['perChange','percentChange','percentageChange','changePercent','pChange','percentage','pct','change']){const v=r?.[k];if(v!==null&&v!==undefined&&v!==''){const n=Number(String(v).replace(/,/g,''));if(Number.isFinite(n))return n;}}return null;};
-    const symOf=r=>String(r?.symbol??r?.Symbol??r?.stockSymbol??r?.scrip??r?.ticker??'').trim().toUpperCase();
-    const extras=live.map(norm).filter(r=>r.symbol&&(moverMode==='losers'?(r.pct??r.change)!==null&&(r.pct??r.change)<0:(r.pct??r.change)!==null&&(r.pct??r.change)>0)).sort((a,b)=>moverMode==='losers'?(a.pct??a.change)-(b.pct??b.change):(b.pct??b.change)-(a.pct??a.change));
-    const list=[],seen=new Set();
-    [...primary,...extras].forEach(r=>{const s=String(r.symbol||symOf(r)).toUpperCase();if(s&&!seen.has(s)&&list.length<10){seen.add(s);list.push(r)}});
+    const list=(moverMode==='losers'?snapshot.losers:snapshot.gainers).slice(0,10);
     el.innerHTML=list.map(r=>{
       const cls=(r.pct??r.change??0)>=0?'up':'down';
       return `<div class="pulse-row"><b>${esc(r.symbol)}</b><span class="${cls}">${r.change===null?'—':(r.change>=0?'+':'')+r.change.toFixed(2)}</span><span class="${cls}">${r.pct===null?'—':(r.pct>=0?'+':'')+r.pct.toFixed(2)+'%'}</span><span>${r.ltp===null?'—':r.ltp.toFixed(2)}</span></div>`;
@@ -7256,7 +7276,7 @@ document.addEventListener('click',e=>{const tr=e.target.closest('#npamRows tr[da
     window.addEventListener('resize',resize);
     if(window.ResizeObserver)new ResizeObserver(resize).observe(wrap);
 
-    const rangeMap={1D:2,1W:7,1M:31,6M:140,1Y:260,ALL:5000};
+    const rangeMap={'1D':2,'1W':7,'1M':31,'6M':140,'1Y':260,'ALL':5000};
     let currentRange='1Y';
     let requestSeq=0;
 
