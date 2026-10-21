@@ -8052,11 +8052,15 @@ window.runAiTrendlines=async function(){const symbol=(document.getElementById('n
    let rows=unique(raw.length?raw:getArray(payload.data,['data','results','rows','records','items']));
    if(!rows.length){const candidates=Object.values(payload||{}).find(Array.isArray)||[];rows=unique(candidates);}
    state.rows=rows.filter(r=>r.symbol&&r.ltp!==null);
-   const dedicatedG=unique(getArray(payload,['gainers']));const dedicatedL=unique(getArray(payload,['losers']));
-   const valid=state.rows.filter(r=>r.pct!==null);
-   const derivedG=[...valid].sort((a,b)=>b.pct-a.pct);const derivedL=[...valid].sort((a,b)=>a.pct-b.pct);
-   state.gainers=derivedG.length>10?derivedG:(dedicatedG.length?dedicatedG:derivedG);
-   state.losers=derivedL.length>10?derivedL:(dedicatedL.length?dedicatedL:derivedL);
+   const dedicatedG=unique(getArray(payload,['gainers'])).filter(r=>(r.pct??r.change??0)>0);
+   const dedicatedL=unique(getArray(payload,['losers'])).filter(r=>(r.pct??r.change??0)<0);
+   // Keep the two datasets strictly separate: positive movers are gainers,
+   // negative movers are losers. Never populate either list with all stocks.
+   const valid=state.rows.filter(r=>r.pct!==null || r.change!==null);
+   const derivedG=valid.filter(r=>(r.pct??r.change??0)>0).sort((a,b)=>(b.pct??b.change)-(a.pct??a.change));
+   const derivedL=valid.filter(r=>(r.pct??r.change??0)<0).sort((a,b)=>(a.pct??a.change)-(b.pct??b.change));
+   state.gainers=derivedG.length?derivedG:dedicatedG;
+   state.losers=derivedL.length?derivedL:dedicatedL;
    render();
  }
  async function refresh(){try{const res=await fetch(BACKEND+'/api/market?_view_more='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});if(!res.ok)throw new Error('Market feed unavailable');const data=await res.json();if(data&&data.ok!==false)applyPayload(data);}catch(e){console.warn('NEPSE Pulse View More could not refresh market rows:',e);}}
@@ -9379,11 +9383,15 @@ window.runAiTrendlines=async function(){const symbol=(document.getElementById('n
    let rows=unique(raw.length?raw:getArray(payload.data,['data','results','rows','records','items']));
    if(!rows.length){const candidates=Object.values(payload||{}).find(Array.isArray)||[];rows=unique(candidates);}
    state.rows=rows.filter(r=>r.symbol&&r.ltp!==null);
-   const dedicatedG=unique(getArray(payload,['gainers']));const dedicatedL=unique(getArray(payload,['losers']));
-   const valid=state.rows.filter(r=>r.pct!==null);
-   const derivedG=[...valid].sort((a,b)=>b.pct-a.pct);const derivedL=[...valid].sort((a,b)=>a.pct-b.pct);
-   state.gainers=derivedG.length>10?derivedG:(dedicatedG.length?dedicatedG:derivedG);
-   state.losers=derivedL.length>10?derivedL:(dedicatedL.length?dedicatedL:derivedL);
+   const dedicatedG=unique(getArray(payload,['gainers'])).filter(r=>(r.pct??r.change??0)>0);
+   const dedicatedL=unique(getArray(payload,['losers'])).filter(r=>(r.pct??r.change??0)<0);
+   // Keep the two datasets strictly separate: positive movers are gainers,
+   // negative movers are losers. Never populate either list with all stocks.
+   const valid=state.rows.filter(r=>r.pct!==null || r.change!==null);
+   const derivedG=valid.filter(r=>(r.pct??r.change??0)>0).sort((a,b)=>(b.pct??b.change)-(a.pct??a.change));
+   const derivedL=valid.filter(r=>(r.pct??r.change??0)<0).sort((a,b)=>(a.pct??a.change)-(b.pct??b.change));
+   state.gainers=derivedG.length?derivedG:dedicatedG;
+   state.losers=derivedL.length?derivedL:dedicatedL;
    render();
  }
  async function refresh(){try{const res=await fetch(BACKEND+'/api/market?_view_more='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});if(!res.ok)throw new Error('Market feed unavailable');const data=await res.json();if(data&&data.ok!==false)applyPayload(data);}catch(e){console.warn('NEPSE Pulse View More could not refresh market rows:',e);}}
