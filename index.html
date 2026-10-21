@@ -5836,18 +5836,50 @@ window.openTechnicalScreener=open;window.PULSE_TECHNICAL_SCREENER={load,open,ren
 </script>
 
 
+
+<style id="np-market-view-more-styles">
+.np-view-more{display:block;margin:12px 4px 0 auto;padding:7px 2px;border:0;background:transparent;color:#159879;font:700 14px/1.3 inherit;cursor:pointer;text-align:right}
+.np-view-more:focus-visible{outline:2px solid #159879;outline-offset:3px;border-radius:5px}
+.np-view-more[hidden]{display:none!important}
+#pulse-home-market-dashboard #pulseMoversRows .pulse-row,#pulse-home-market-dashboard #pulseLiquidityRows .pulse-row{cursor:pointer}
+</style>
 <script id="pulse-home-dashboard-js">
 (function(){
   const q=(s,r=document)=>r.querySelector(s), qa=(s,r=document)=>[...r.querySelectorAll(s)];
-  let moverMode='gainers', liqMode='turnover', lastState=null;
+  let moverMode='gainers', liqMode='turnover', lastState=null, showMovers=false, showLiquidity=false;
 
-  function n(v){const x=Number(v);return Number.isFinite(x)?x:null}
-  function pick(o,keys){for(const k of keys){if(o&&o[k]!==undefined&&o[k]!==null&&o[k]!=='')return o[k]}return null}
+  function n(v){if(v===null||v===undefined||v==='')return null;const x=Number(v);return Number.isFinite(x)?x:null}
+  function pick(o,keys){
+    if(!o||typeof o!=='object')return null;
+    const norm=x=>String(x).toLowerCase().replace(/[^a-z0-9]/g,'');
+    const map={};Object.keys(o).forEach(k=>map[norm(k)]=o[k]);
+    for(const k of keys){const v=map[norm(k)];if(v!==undefined&&v!==null&&v!=='')return v;}
+    return null;
+  }
   function rows(state){
-    if(Array.isArray(state?.live) && state.live.length) return state.live;
-    if(Array.isArray(state?.liveMarket) && state.liveMarket.length) return state.liveMarket;
-    if(Array.isArray(state?.securities) && state.securities.length) return state.securities;
-    return [];
+    if(!state||typeof state!=='object')return [];
+    const root=state.data&&typeof state.data==='object'?{...state,...state.data}:state;
+    const names=['live','liveMarket','securities','companies','rows','stocks','gainers','losers','turnover','topTurnover','top_turnover','volume','topVolume','top_volume','transactions','topTransactions','top_transactions','trades','topTrades'];
+    const bySymbol=new Map();
+    for(const name of names){
+      const list=Array.isArray(root[name])?root[name]:[];
+      for(const raw of list){
+        if(!raw||typeof raw!=='object')continue;
+        const symbol=String(pick(raw,['symbol','stockSymbol','securitySymbol','ticker','scrip','code','security_code'])||'').trim().toUpperCase();
+        if(!symbol)continue;
+        const old=bySymbol.get(symbol)||{};
+        // Keep values from each dedicated list, including metrics not present in live quotes.
+        bySymbol.set(symbol,{...old,...raw,symbol});
+      }
+    }
+    const primary=['live','liveMarket','securities'];
+    const ordered=[];const seen=new Set();
+    for(const name of primary){for(const raw of (Array.isArray(root[name])?root[name]:[])){const symbol=String(pick(raw,['symbol','stockSymbol','securitySymbol','ticker','scrip','code','security_code'])||'').trim().toUpperCase();if(symbol&&bySymbol.has(symbol)&&!seen.has(symbol)){ordered.push(bySymbol.get(symbol));seen.add(symbol)}}}
+    for(const [symbol,row] of bySymbol)if(!seen.has(symbol))ordered.push(row);
+    return ordered;
+  }
+  function transactionCount(r){
+    return n(pick(r,['transactions','transaction','totalTransactions','totalTransaction','numberOfTransactions','noOfTransactions','noOfTransaction','totalNoOfTransactions','totalTransactionCount','transactionCount','tradeCount','totalTrades','totalTrade','numberOfTrades','noOfTrades','tradesCount','totalTradesCount','totalTradeCount','totalNumberOfTransactions','total_number_of_transactions','transactionsCount','transaction_count','total_transactions','total_trade_count','totalTradesCount','noOfTrades','no_of_transactions','totalNoOfTrades','totalNoOfTransaction']));
   }
   function change(r){
     const direct=n(pick(r,['percentageChange','percentChange','changePercent','changePct','pChange','perChange','perchange','percentagechange','percentchange','changePercentage','percent_change']));
@@ -5864,7 +5896,7 @@ window.openTechnicalScreener=open;window.PULSE_TECHNICAL_SCREENER={load,open,ren
   }
   function vol(r){return n(pick(r,['volume','totalTradedQuantity','quantity','shares','tradedShares','shareVolume']))}
   function turnover(r){return n(pick(r,['turnover','totalTradedValue','value','totalTradeValue','totalTradedValue']))}
-  function sym(r){return pick(r,['symbol','Symbol','ticker','stockSymbol','securitySymbol'])||'—'}
+  function sym(r){return pick(r,['symbol','ticker','stockSymbol','securitySymbol','scrip','securityCode','security_code','code'])||'—'}
 
   function fmt(v,dec=2){return n(v)===null?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:dec})}
   function money(v){if(n(v)===null)return '—';let x=Math.abs(Number(v));if(x>=1e9)return (x/1e9).toFixed(2)+' Arab';if(x>=1e7)return (x/1e7).toFixed(2)+' Cr';if(x>=1e5)return (x/1e5).toFixed(2)+' L';return fmt(x)}
@@ -5928,7 +5960,7 @@ window.openTechnicalScreener=open;window.PULSE_TECHNICAL_SCREENER={load,open,ren
     const unc=rs.filter(r=>(change(r)||0)===0).length;
     const scrips=summaryValue(['tradedscrips','scripstraded']) ?? rs.length;
     const totalVol=summaryValue(['totaltradedshares','tradedshares','totalvolume']) ?? rs.reduce((a,r)=>a+(vol(r)||0),0);
-    const transactions=summaryValue(['totaltransactions','transactions']) ?? rs.reduce((a,r)=>a+(n(pick(r,['transactions','tradeCount','totalTrades','trades']))||0),0);
+    const transactions=summaryValue(['totaltransactions','transactions','totaltrades','numberoftransactions']) ?? rs.reduce((a,r)=>a+(transactionCount(r)||0),0);
     const marketCap=rs.reduce((a,r)=>a+(n(pick(r,['market_cap','marketcap','marketCapitalization']))||0),0) || summaryValue(['marketcap','totalmarketcap']);
     const floatCap=summaryValue(['floatmarketcap','totalfloatmarketcap']);
 
@@ -5963,24 +5995,37 @@ window.openTechnicalScreener=open;window.PULSE_TECHNICAL_SCREENER={load,open,ren
 
     const liveGainers=Array.isArray(lastState.gainers)?lastState.gainers:[];
     const liveLosers=Array.isArray(lastState.losers)?lastState.losers:[];
-    const gainers=(liveGainers.length?liveGainers:[...rs].filter(r=>change(r)!==null).sort((a,b)=>change(b)-change(a)));
-    const losers=(liveLosers.length?liveLosers:[...rs].filter(r=>change(r)!==null).sort((a,b)=>change(a)-change(b)));
-    const moverRows=(moverMode==='gainers'?gainers:losers).slice(0,10);
+    const positiveMovers=rs.filter(r=>change(r)!==null&&change(r)>0).sort((a,b)=>change(b)-change(a));
+    const negativeMovers=rs.filter(r=>change(r)!==null&&change(r)<0).sort((a,b)=>change(a)-change(b));
+    const gainers=(positiveMovers.length?positiveMovers:liveGainers.map(r=>rs.find(x=>String(sym(x)).toUpperCase()===String(sym(r)).toUpperCase())||r).filter(r=>change(r)===null||change(r)>0));
+    const losers=(negativeMovers.length?negativeMovers:liveLosers.map(r=>rs.find(x=>String(sym(x)).toUpperCase()===String(sym(r)).toUpperCase())||r).filter(r=>change(r)===null||change(r)<0));
+    const selectedMovers=moverMode==='gainers'?gainers:losers;
+    const moverRows=showMovers?selectedMovers:selectedMovers.slice(0,10);
     q('#pulseMoversRows').innerHTML=moverRows.map(r=>{
       const c=change(r), cls=c>=0?'up':'down';
-      return `<div class="pulse-row"><b>${sym(r)}</b><span class="${cls}">${ch(r)===null?'—':fmt(ch(r))}</span><span class="${cls}">${c===null?'—':fmt(c)+'%'}</span><span>${price(r)===null?'—':fmt(price(r))}</span></div>`;
+      return `<div class="pulse-row" data-symbol="${String(sym(r)).replace(/[^A-Z0-9._-]/gi,'')}" tabindex="0"><b>${sym(r)}</b><span class="${cls}">${ch(r)===null?'—':(ch(r)>0?'+':'')+fmt(ch(r))}</span><span class="${cls}">${c===null?'—':(c>0?'+':'')+fmt(c)+'%'}</span><span>${price(r)===null?'—':fmt(price(r))}</span></div>`;
     }).join('')||'<div class="pulse-row"><span>No verified rows</span></div>';
+    const moversMore=q('#npMoversMore');
+    if(moversMore){moversMore.hidden=selectedMovers.length<=10;moversMore.textContent=showMovers?'View Less ↑':'View More >';moversMore.setAttribute('aria-expanded',String(showMovers));}
 
     let lr=[...rs];
-    if(liqMode==='volume')lr.sort((a,b)=>(vol(b)||-1)-(vol(a)||-1));
-    else if(liqMode==='transactions')lr.sort((a,b)=>(n(pick(b,['transactions','tradeCount','totalTrades','trades']))||-1)-(n(pick(a,['transactions','tradeCount','totalTrades','trades']))||-1));
-    else lr.sort((a,b)=>(turnover(b)||-1)-(turnover(a)||-1));
-
-    q('#pulseLiquidityRows').innerHTML=lr.slice(0,10).map(r=>{
+    if(liqMode==='volume')lr.sort((a,b)=>(vol(b)??-1)-(vol(a)??-1));
+    else if(liqMode==='transactions')lr.sort((a,b)=>(transactionCount(b)??-1)-(transactionCount(a)??-1));
+    else lr.sort((a,b)=>(turnover(b)??-1)-(turnover(a)??-1));
+    // In Transactions mode use the dedicated transaction leaderboard first when supplied.
+    if(liqMode==='transactions'){
+      const activityRoot=lastState.data&&typeof lastState.data==='object'?{...lastState,...lastState.data}:lastState;
+      const dedicated=Array.isArray(activityRoot.transactions)?activityRoot.transactions:Array.isArray(activityRoot.topTransactions)?activityRoot.topTransactions:Array.isArray(activityRoot.top_transactions)?activityRoot.top_transactions:Array.isArray(activityRoot.trades)?activityRoot.trades:[];
+      if(dedicated.length){const merged=new Map(lr.map(r=>[String(sym(r)).toUpperCase(),r]));lr=dedicated.map(raw=>{const symbol=String(sym(raw)).toUpperCase();return {...(merged.get(symbol)||{}),...raw,symbol}}).filter(r=>sym(r)&&transactionCount(r)!==null).sort((a,b)=>transactionCount(b)-transactionCount(a));}
+    }
+    const liquidRows=showLiquidity?lr:lr.slice(0,10);
+    q('#pulseLiquidityRows').innerHTML=liquidRows.map(r=>{
       const c=change(r);
-      const value=liqMode==='volume'?vol(r):liqMode==='transactions'?pick(r,['transactions','tradeCount','totalTrades','trades']):turnover(r);
-      return `<div class="pulse-row"><b>${sym(r)}</b><span>${liqMode==='turnover'?money(value):fmt(value,0)}</span><span class="${c>=0?'up':'down'}">${price(r)===null?'—':fmt(price(r))} ${c===null?'':`(${fmt(c)}%)`}</span></div>`;
+      const value=liqMode==='volume'?vol(r):liqMode==='transactions'?transactionCount(r):turnover(r);
+      return `<div class="pulse-row" data-symbol="${String(sym(r)).replace(/[^A-Z0-9._-]/gi,'')}" tabindex="0"><b>${sym(r)}</b><span>${liqMode==='turnover'?money(value):fmt(value,0)}</span><span class="${c>=0?'up':'down'}">${price(r)===null?'—':fmt(price(r))} ${c===null?'':`(${c>0?'+':''}${fmt(c)}%)`}</span></div>`;
     }).join('')||'<div class="pulse-row"><span>No verified rows</span></div>';
+    const liquidityMore=q('#npLiquidityMore');
+    if(liquidityMore){liquidityMore.hidden=lr.length<=10;liquidityMore.textContent=showLiquidity?'View Less ↑':'View More >';liquidityMore.setAttribute('aria-expanded',String(showLiquidity));}
 
     const sm={
       turnover:turnoverTotal,
@@ -5996,8 +6041,12 @@ window.openTechnicalScreener=open;window.PULSE_TECHNICAL_SCREENER={load,open,ren
     });
   }
 
-  qa('[data-mover-tab]').forEach(b=>b.onclick=()=>{moverMode=b.dataset.moverTab;qa('[data-mover-tab]').forEach(x=>x.classList.toggle('active',x===b));render(lastState)});
-  qa('[data-liq-tab]').forEach(b=>b.onclick=()=>{liqMode=b.dataset.liqTab;qa('[data-liq-tab]').forEach(x=>x.classList.toggle('active',x===b));render(lastState)});
+  qa('[data-mover-tab]').forEach(b=>b.onclick=()=>{moverMode=b.dataset.moverTab==='losers'?'losers':'gainers';showMovers=false;qa('[data-mover-tab]').forEach(x=>x.classList.toggle('active',x===b));render(lastState)});
+  qa('[data-liq-tab]').forEach(b=>b.onclick=()=>{liqMode=['turnover','volume','transactions'].includes(b.dataset.liqTab)?b.dataset.liqTab:'turnover';showLiquidity=false;qa('[data-liq-tab]').forEach(x=>x.classList.toggle('active',x===b));render(lastState)});
+  q('#npMoversMore')?.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();showMovers=!showMovers;render(lastState);});
+  q('#npLiquidityMore')?.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();showLiquidity=!showLiquidity;render(lastState);});
+  document.addEventListener('click',e=>{const row=e.target.closest?.('#pulseMoversRows .pulse-row[data-symbol],#pulseLiquidityRows .pulse-row[data-symbol]');if(!row)return;const symbol=row.dataset.symbol;if(!symbol)return;const input=document.getElementById('searchBox');if(input)input.value=symbol;if(typeof window.searchPulse==='function')window.searchPulse();});
+  document.addEventListener('keydown',e=>{if(e.key!=='Enter'&&e.key!==' ')return;const row=e.target.closest?.('#pulseMoversRows .pulse-row[data-symbol],#pulseLiquidityRows .pulse-row[data-symbol]');if(row){e.preventDefault();row.click();}});
 
   function hook(){
     if(window.PULSE_FEED_ENGINE?.state) render(window.PULSE_FEED_ENGINE.state());
@@ -8003,89 +8052,6 @@ window.runAiTrendlines=async function(){const symbol=(document.getElementById('n
 })();
 </script>
 
-
-<style id="np-market-view-more-styles">
-.np-view-more{display:block;margin:12px 4px 0 auto;padding:7px 2px;border:0;background:transparent;color:#159879;font:700 14px/1.3 inherit;cursor:pointer;text-align:right}
-.np-view-more:focus-visible{outline:2px solid #159879;outline-offset:3px;border-radius:5px}
-.np-view-more[hidden]{display:none!important}
-#pulse-home-market-dashboard #pulseMoversRows .pulse-row,#pulse-home-market-dashboard #pulseLiquidityRows .pulse-row{cursor:pointer}
-</style>
-<script id="np-market-view-more-functional">
-(function(){
- 'use strict';
- const BACKEND=(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
- const state={rows:[],gainers:[],losers:[],showMovers:false,showLiquidity:false,moverMode:'gainers',liqMode:'turnover'};
- const $=s=>document.querySelector(s);
- const num=v=>{if(v===null||v===undefined||v==='')return null;const n=Number(String(v).replace(/,/g,''));return Number.isFinite(n)?n:null};
- const key=s=>String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');
- function pick(o,keys){if(!o||typeof o!=='object')return null;const m={};Object.keys(o).forEach(k=>m[key(k)]=o[k]);for(const k of keys){const v=m[key(k)];if(v!==undefined&&v!==null&&v!=='')return v;}return null;}
- function getArray(o,names){for(const name of names){if(Array.isArray(o?.[name]))return o[name];}return [];}
- function normalize(o){
-   const ltp=num(pick(o,['ltp','lastTradedPrice','lastPrice','price','closePrice','closingPrice','close','currentPrice']));
-   const prev=num(pick(o,['previousClose','previousClosingPrice','prevClose','previousPrice','previousDayClose']));
-   let change=num(pick(o,['change','pointChange','changeValue','priceChange','difference']));
-   let pct=num(pick(o,['pct','perChange','percentChange','percentageChange','changePercent','changePct','pChange','changePercentage']));
-   if(change===null&&ltp!==null&&prev!==null)change=ltp-prev;
-   if(pct===null&&change!==null&&prev!==null&&prev!==0)pct=change/prev*100;
-   const symbol=String(pick(o,['symbol','stockSymbol','securitySymbol','symbolName','companySymbol','scrip','ticker','code','security_code'])||'').trim().toUpperCase();
-   return {symbol,ltp,change,pct,volume:num(pick(o,['volume','tradedShares','quantity','totalTradedQuantity','totalTradeQuantity','shareVolume','totalVolume','totalSharesTraded','totalTradeQuantity'])),turnover:num(pick(o,['turnover','totalTurnover','totalTradeValue','totalTradedValue','value','totalAmount','totalTradeAmount','amount','totalTurnoverValue'])),transactions:num(pick(o,['transactions','totalTransactions','numberOfTransactions','totalTrades','tradeCount','transactionCount','totalTransactionCount','noOfTransactions','noOfTransaction','numberOfTrades','noOfTrades','totalNoOfTransactions','totalTradesCount','tradeCount']))};
- }
- function unique(list){const seen=new Set();return list.map(normalize).filter(r=>r.symbol&&!seen.has(r.symbol)&&seen.add(r.symbol));}
- function fmt(v,d=2){return v===null||v===undefined?'—':Number(v).toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d});}
- function fmt0(v){return v===null||v===undefined?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:0});}
- function money(v){if(v===null||v===undefined)return '—';const a=Math.abs(v);if(a>=1e9)return (v/1e9).toFixed(2)+' Arab';if(a>=1e7)return (v/1e7).toFixed(2)+' Cr';if(a>=1e5)return (v/1e5).toFixed(2)+' L';return fmt(v,2);}
- function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
- function rowHtml(r,liquidity){const cls=(r.pct??r.change??0)>=0?'up':'down';if(!liquidity)return `<div class="pulse-row" data-symbol="${esc(r.symbol)}" tabindex="0"><b>${esc(r.symbol)}</b><span class="${cls}">${r.change===null?'—':(r.change>0?'+':'')+fmt(r.change)}</span><span class="${cls}">${r.pct===null?'—':(r.pct>0?'+':'')+fmt(r.pct)+'%'}</span><span>${fmt(r.ltp)}</span></div>`;const value=state.liqMode==='turnover'?money(r.turnover):fmt0(state.liqMode==='volume'?r.volume:r.transactions);return `<div class="pulse-row" data-symbol="${esc(r.symbol)}" tabindex="0"><b>${esc(r.symbol)}</b><span>${value}</span><span class="${cls}">${fmt(r.ltp)}${r.pct===null?'':` (${r.pct>0?'+':''}${fmt(r.pct)}%)`}</span></div>`;}
- function updateButtons(){const a=$('#npMoversMore'),b=$('#npLiquidityMore');if(a){a.hidden=(state.moverMode==='gainers'?state.gainers:state.losers).length<=10;a.textContent=state.showMovers?'View Less ↑':'View More >';a.setAttribute('aria-expanded',String(state.showMovers));}if(b){b.hidden=state.rows.length<=10;b.textContent=state.showLiquidity?'View Less ↑':'View More >';b.setAttribute('aria-expanded',String(state.showLiquidity));}}
- function render(){
-   const list=state.moverMode==='losers'?state.losers:state.gainers;
-   const shown=state.showMovers?list:list.slice(0,10);
-   const movers=$('#pulseMoversRows');if(movers)movers.innerHTML=shown.map(r=>rowHtml(r,false)).join('')||'<div class="pulse-row"><span>No verified rows</span></div>';
-   const sorted=[...state.rows].sort((a,b)=>{const av=state.liqMode==='volume'?a.volume:state.liqMode==='transactions'?a.transactions:a.turnover;const bv=state.liqMode==='volume'?b.volume:state.liqMode==='transactions'?b.transactions:b.turnover;return (bv??-1)-(av??-1);});
-   const liquid=$('#pulseLiquidityRows');if(liquid)liquid.innerHTML=(state.showLiquidity?sorted:sorted.slice(0,10)).map(r=>rowHtml(r,true)).join('')||'<div class="pulse-row"><span>No verified rows</span></div>';
-   document.querySelectorAll('[data-mover-tab]').forEach(b=>b.classList.toggle('active',b.dataset.moverTab===state.moverMode));
-   document.querySelectorAll('[data-liq-tab]').forEach(b=>b.classList.toggle('active',b.dataset.liqTab===state.liqMode));
-   updateButtons();
- }
- function applyPayload(payload){
-   // Combine the complete stock universe with dedicated market-activity lists.
-   // APIs often return transaction/turnover counts separately from live quotes.
-   const sourceArrays=[];
-   const addArrays=(obj,names)=>names.forEach(name=>{if(Array.isArray(obj?.[name]))sourceArrays.push(...obj[name]);});
-   addArrays(payload,['live','companies','rows','stocks','gainers','losers','turnover','topTurnover','top_turnover','volume','topVolume','top_volume','transactions','topTransactions','top_transactions','trades','topTrades']);
-   addArrays(payload?.data,['data','results','rows','records','items','gainers','losers','turnover','volume','transactions','trades']);
-   if(!sourceArrays.length){const candidates=Object.values(payload||{}).find(Array.isArray)||[];sourceArrays.push(...candidates);}
-   // Merge records by symbol instead of discarding later metric-only rows.
-   const merged=new Map();
-   for(const raw of sourceArrays){
-     const r=normalize(raw);if(!r.symbol)continue;
-     const prev=merged.get(r.symbol)||{symbol:r.symbol,ltp:null,change:null,pct:null,volume:null,turnover:null,transactions:null};
-     for(const k of ['ltp','change','pct','volume','turnover','transactions'])if(r[k]!==null&&r[k]!==undefined)prev[k]=r[k];
-     merged.set(r.symbol,prev);
-   }
-   state.rows=[...merged.values()].filter(r=>r.symbol);
-   const dedicatedG=unique(getArray(payload,['gainers'])).filter(r=>(r.pct??r.change??0)>0);
-   const dedicatedL=unique(getArray(payload,['losers'])).filter(r=>(r.pct??r.change??0)<0);
-   const valid=state.rows.filter(r=>r.pct!==null || r.change!==null);
-   const derivedG=valid.filter(r=>(r.pct??r.change??0)>0).sort((a,b)=>(b.pct??b.change)-(a.pct??a.change));
-   const derivedL=valid.filter(r=>(r.pct??r.change??0)<0).sort((a,b)=>(a.pct??a.change)-(b.pct??b.change));
-   // Prefer the full merged quote universe when available; otherwise use the
-   // dedicated positive/negative lists without mixing gainers and losers.
-   state.gainers=derivedG.length?derivedG:dedicatedG;
-   state.losers=derivedL.length?derivedL:dedicatedL;
-   render();
- }
- async function refresh(){try{const res=await fetch(BACKEND+'/api/market?_view_more='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});if(!res.ok)throw new Error('Market feed unavailable');const data=await res.json();if(data&&data.ok!==false)applyPayload(data);}catch(e){console.warn('NEPSE Pulse View More could not refresh market rows:',e);}}
- document.addEventListener('click',e=>{
-   const more=e.target.closest?.('#npMoversMore,#npLiquidityMore');if(more){e.preventDefault();e.stopPropagation();if(more.id==='npMoversMore')state.showMovers=!state.showMovers;else state.showLiquidity=!state.showLiquidity;if(!state.rows.length)refresh();else render();return;}
-   const mt=e.target.closest?.('[data-mover-tab]');if(mt){state.moverMode=mt.dataset.moverTab==='losers'?'losers':'gainers';state.showMovers=false;render();return;}
-   const lt=e.target.closest?.('[data-liq-tab]');if(lt){state.liqMode=lt.dataset.liqTab||'turnover';state.showLiquidity=false;render();}
- },true);
- window.addEventListener('pulse-central-snapshot',e=>{const d=e.detail||{};if(Array.isArray(d.live)||Array.isArray(d.companies)||Array.isArray(d.rows)||Array.isArray(d.gainers))applyPayload(d);});
- if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',refresh,{once:true});else refresh();
-})();
-</script>
-
 </body>
 </html><script>
 // NEPSE Pulse Professional Charting V1 extension
@@ -9343,89 +9309,6 @@ window.runAiTrendlines=async function(){const symbol=(document.getElementById('n
       if(typeof window.searchPulse==='function') window.searchPulse();
     }
   },true);
-})();
-</script>
-
-
-<style id="np-market-view-more-styles">
-.np-view-more{display:block;margin:12px 4px 0 auto;padding:7px 2px;border:0;background:transparent;color:#159879;font:700 14px/1.3 inherit;cursor:pointer;text-align:right}
-.np-view-more:focus-visible{outline:2px solid #159879;outline-offset:3px;border-radius:5px}
-.np-view-more[hidden]{display:none!important}
-#pulse-home-market-dashboard #pulseMoversRows .pulse-row,#pulse-home-market-dashboard #pulseLiquidityRows .pulse-row{cursor:pointer}
-</style>
-<script id="np-market-view-more-functional">
-(function(){
- 'use strict';
- const BACKEND=(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
- const state={rows:[],gainers:[],losers:[],showMovers:false,showLiquidity:false,moverMode:'gainers',liqMode:'turnover'};
- const $=s=>document.querySelector(s);
- const num=v=>{if(v===null||v===undefined||v==='')return null;const n=Number(String(v).replace(/,/g,''));return Number.isFinite(n)?n:null};
- const key=s=>String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');
- function pick(o,keys){if(!o||typeof o!=='object')return null;const m={};Object.keys(o).forEach(k=>m[key(k)]=o[k]);for(const k of keys){const v=m[key(k)];if(v!==undefined&&v!==null&&v!=='')return v;}return null;}
- function getArray(o,names){for(const name of names){if(Array.isArray(o?.[name]))return o[name];}return [];}
- function normalize(o){
-   const ltp=num(pick(o,['ltp','lastTradedPrice','lastPrice','price','closePrice','closingPrice','close','currentPrice']));
-   const prev=num(pick(o,['previousClose','previousClosingPrice','prevClose','previousPrice','previousDayClose']));
-   let change=num(pick(o,['change','pointChange','changeValue','priceChange','difference']));
-   let pct=num(pick(o,['pct','perChange','percentChange','percentageChange','changePercent','changePct','pChange','changePercentage']));
-   if(change===null&&ltp!==null&&prev!==null)change=ltp-prev;
-   if(pct===null&&change!==null&&prev!==null&&prev!==0)pct=change/prev*100;
-   const symbol=String(pick(o,['symbol','stockSymbol','securitySymbol','symbolName','companySymbol','scrip','ticker','code','security_code'])||'').trim().toUpperCase();
-   return {symbol,ltp,change,pct,volume:num(pick(o,['volume','tradedShares','quantity','totalTradedQuantity','totalTradeQuantity','shareVolume','totalVolume','totalSharesTraded','totalTradeQuantity'])),turnover:num(pick(o,['turnover','totalTurnover','totalTradeValue','totalTradedValue','value','totalAmount','totalTradeAmount','amount','totalTurnoverValue'])),transactions:num(pick(o,['transactions','totalTransactions','numberOfTransactions','totalTrades','tradeCount','transactionCount','totalTransactionCount','noOfTransactions','noOfTransaction','numberOfTrades','noOfTrades','totalNoOfTransactions','totalTradesCount','tradeCount']))};
- }
- function unique(list){const seen=new Set();return list.map(normalize).filter(r=>r.symbol&&!seen.has(r.symbol)&&seen.add(r.symbol));}
- function fmt(v,d=2){return v===null||v===undefined?'—':Number(v).toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d});}
- function fmt0(v){return v===null||v===undefined?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:0});}
- function money(v){if(v===null||v===undefined)return '—';const a=Math.abs(v);if(a>=1e9)return (v/1e9).toFixed(2)+' Arab';if(a>=1e7)return (v/1e7).toFixed(2)+' Cr';if(a>=1e5)return (v/1e5).toFixed(2)+' L';return fmt(v,2);}
- function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
- function rowHtml(r,liquidity){const cls=(r.pct??r.change??0)>=0?'up':'down';if(!liquidity)return `<div class="pulse-row" data-symbol="${esc(r.symbol)}" tabindex="0"><b>${esc(r.symbol)}</b><span class="${cls}">${r.change===null?'—':(r.change>0?'+':'')+fmt(r.change)}</span><span class="${cls}">${r.pct===null?'—':(r.pct>0?'+':'')+fmt(r.pct)+'%'}</span><span>${fmt(r.ltp)}</span></div>`;const value=state.liqMode==='turnover'?money(r.turnover):fmt0(state.liqMode==='volume'?r.volume:r.transactions);return `<div class="pulse-row" data-symbol="${esc(r.symbol)}" tabindex="0"><b>${esc(r.symbol)}</b><span>${value}</span><span class="${cls}">${fmt(r.ltp)}${r.pct===null?'':` (${r.pct>0?'+':''}${fmt(r.pct)}%)`}</span></div>`;}
- function updateButtons(){const a=$('#npMoversMore'),b=$('#npLiquidityMore');if(a){a.hidden=(state.moverMode==='gainers'?state.gainers:state.losers).length<=10;a.textContent=state.showMovers?'View Less ↑':'View More >';a.setAttribute('aria-expanded',String(state.showMovers));}if(b){b.hidden=state.rows.length<=10;b.textContent=state.showLiquidity?'View Less ↑':'View More >';b.setAttribute('aria-expanded',String(state.showLiquidity));}}
- function render(){
-   const list=state.moverMode==='losers'?state.losers:state.gainers;
-   const shown=state.showMovers?list:list.slice(0,10);
-   const movers=$('#pulseMoversRows');if(movers)movers.innerHTML=shown.map(r=>rowHtml(r,false)).join('')||'<div class="pulse-row"><span>No verified rows</span></div>';
-   const sorted=[...state.rows].sort((a,b)=>{const av=state.liqMode==='volume'?a.volume:state.liqMode==='transactions'?a.transactions:a.turnover;const bv=state.liqMode==='volume'?b.volume:state.liqMode==='transactions'?b.transactions:b.turnover;return (bv??-1)-(av??-1);});
-   const liquid=$('#pulseLiquidityRows');if(liquid)liquid.innerHTML=(state.showLiquidity?sorted:sorted.slice(0,10)).map(r=>rowHtml(r,true)).join('')||'<div class="pulse-row"><span>No verified rows</span></div>';
-   document.querySelectorAll('[data-mover-tab]').forEach(b=>b.classList.toggle('active',b.dataset.moverTab===state.moverMode));
-   document.querySelectorAll('[data-liq-tab]').forEach(b=>b.classList.toggle('active',b.dataset.liqTab===state.liqMode));
-   updateButtons();
- }
- function applyPayload(payload){
-   // Combine the complete stock universe with dedicated market-activity lists.
-   // APIs often return transaction/turnover counts separately from live quotes.
-   const sourceArrays=[];
-   const addArrays=(obj,names)=>names.forEach(name=>{if(Array.isArray(obj?.[name]))sourceArrays.push(...obj[name]);});
-   addArrays(payload,['live','companies','rows','stocks','gainers','losers','turnover','topTurnover','top_turnover','volume','topVolume','top_volume','transactions','topTransactions','top_transactions','trades','topTrades']);
-   addArrays(payload?.data,['data','results','rows','records','items','gainers','losers','turnover','volume','transactions','trades']);
-   if(!sourceArrays.length){const candidates=Object.values(payload||{}).find(Array.isArray)||[];sourceArrays.push(...candidates);}
-   // Merge records by symbol instead of discarding later metric-only rows.
-   const merged=new Map();
-   for(const raw of sourceArrays){
-     const r=normalize(raw);if(!r.symbol)continue;
-     const prev=merged.get(r.symbol)||{symbol:r.symbol,ltp:null,change:null,pct:null,volume:null,turnover:null,transactions:null};
-     for(const k of ['ltp','change','pct','volume','turnover','transactions'])if(r[k]!==null&&r[k]!==undefined)prev[k]=r[k];
-     merged.set(r.symbol,prev);
-   }
-   state.rows=[...merged.values()].filter(r=>r.symbol);
-   const dedicatedG=unique(getArray(payload,['gainers'])).filter(r=>(r.pct??r.change??0)>0);
-   const dedicatedL=unique(getArray(payload,['losers'])).filter(r=>(r.pct??r.change??0)<0);
-   const valid=state.rows.filter(r=>r.pct!==null || r.change!==null);
-   const derivedG=valid.filter(r=>(r.pct??r.change??0)>0).sort((a,b)=>(b.pct??b.change)-(a.pct??a.change));
-   const derivedL=valid.filter(r=>(r.pct??r.change??0)<0).sort((a,b)=>(a.pct??a.change)-(b.pct??b.change));
-   // Prefer the full merged quote universe when available; otherwise use the
-   // dedicated positive/negative lists without mixing gainers and losers.
-   state.gainers=derivedG.length?derivedG:dedicatedG;
-   state.losers=derivedL.length?derivedL:dedicatedL;
-   render();
- }
- async function refresh(){try{const res=await fetch(BACKEND+'/api/market?_view_more='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});if(!res.ok)throw new Error('Market feed unavailable');const data=await res.json();if(data&&data.ok!==false)applyPayload(data);}catch(e){console.warn('NEPSE Pulse View More could not refresh market rows:',e);}}
- document.addEventListener('click',e=>{
-   const more=e.target.closest?.('#npMoversMore,#npLiquidityMore');if(more){e.preventDefault();e.stopPropagation();if(more.id==='npMoversMore')state.showMovers=!state.showMovers;else state.showLiquidity=!state.showLiquidity;if(!state.rows.length)refresh();else render();return;}
-   const mt=e.target.closest?.('[data-mover-tab]');if(mt){state.moverMode=mt.dataset.moverTab==='losers'?'losers':'gainers';state.showMovers=false;render();return;}
-   const lt=e.target.closest?.('[data-liq-tab]');if(lt){state.liqMode=lt.dataset.liqTab||'turnover';state.showLiquidity=false;render();}
- },true);
- window.addEventListener('pulse-central-snapshot',e=>{const d=e.detail||{};if(Array.isArray(d.live)||Array.isArray(d.companies)||Array.isArray(d.rows)||Array.isArray(d.gainers))applyPayload(d);});
- if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',refresh,{once:true});else refresh();
 })();
 </script>
 
