@@ -1773,6 +1773,107 @@ input:focus,select:focus,textarea:focus{border-color:var(--np-blue)!important;bo
 }
 @media(prefers-reduced-motion:reduce){.nepse-chart-ranges button{transition:none!important;}}
 </style>
+
+<style id="nepse-pulse-premium-charting-v2">
+/* Premium chart terminal: visual polish only; preserve existing chart/data logic. */
+#professional-charting-v8{
+  --txp-ink:#14233b;--txp-muted:#718096;--txp-line:#e4eaf2;
+  margin:20px 12px 34px!important;border:1px solid #e0e7f0!important;
+  border-radius:24px!important;background:linear-gradient(180deg,#fff 0%,#fbfdff 100%)!important;
+  box-shadow:0 18px 48px rgba(16,35,63,.09),0 2px 8px rgba(16,35,63,.035)!important;
+  color:var(--txp-ink);isolation:isolate
+}
+#professional-charting-v8 .txp-head{
+  padding:22px 22px 18px!important;align-items:flex-start!important;gap:14px;
+  background:radial-gradient(ellipse at 100% 0%,rgba(35,116,222,.09),transparent 48%),#fff;
+  border-bottom:1px solid #edf1f6
+}
+#professional-charting-v8 .txp-kicker{
+  display:inline-flex;align-items:center;gap:7px;text-transform:uppercase;
+  letter-spacing:.13em;font-size:10px!important;font-weight:900!important;color:#2876d1!important
+}
+#professional-charting-v8 .txp-kicker:before{content:"";width:7px;height:7px;border-radius:50%;background:#25a56a;box-shadow:0 0 0 4px rgba(37,165,106,.12)}
+#professional-charting-v8 .txp-head h2{margin:7px 0 5px!important;font-size:clamp(22px,3vw,30px)!important;letter-spacing:-.045em!important;color:#14233b!important;line-height:1.15}
+#professional-charting-v8 .txp-sub{margin:0!important;color:#77859a!important;font-size:13px!important;line-height:1.5}
+#professional-charting-v8 .txp-status{
+  white-space:nowrap;border:1px solid #dce9e4;background:#f0faf5;color:#17764e;
+  border-radius:999px;padding:8px 11px;font-size:9px;font-weight:900;letter-spacing:.045em
+}
+#professional-charting-v8 .txp-dot{box-shadow:0 0 0 4px rgba(37,165,106,.11)}
+#professional-charting-v8 .txp-search{
+  display:flex;align-items:center;gap:9px;padding:16px 22px 14px!important;
+  background:#fbfcfe;border-bottom:1px solid #edf1f6
+}
+#professional-charting-v8 .txp-search input,#professional-charting-v8 .txp-search select{
+  min-width:0;flex:1;border:1px solid #dce4ef!important;border-radius:13px!important;
+  min-height:44px;padding:0 14px!important;background:#fff!important;color:#14233b!important;
+  box-shadow:inset 0 1px 2px rgba(15,23,42,.025);font-size:13px!important;outline:none
+}
+#professional-charting-v8 .txp-search input:focus,#professional-charting-v8 .txp-search select:focus{
+  border-color:#6ba5ed!important;box-shadow:0 0 0 3px rgba(43,121,217,.12)!important
+}
+#professional-charting-v8 .txp-btn{
+  min-height:42px;border:1px solid #16345b!important;border-radius:12px!important;
+  background:linear-gradient(135deg,#16345b,#20548d)!important;color:#fff!important;
+  padding:10px 15px!important;font-size:12px!important;font-weight:850!important;
+  box-shadow:0 5px 12px rgba(22,52,91,.14);transition:transform .15s,box-shadow .15s
+}
+#professional-charting-v8 .txp-btn:hover{transform:translateY(-1px);box-shadow:0 8px 18px rgba(22,52,91,.2)}
+#professional-charting-v8 .txp-btn.alt{background:#fff!important;color:#294261!important;border-color:#dce4ef!important;box-shadow:none}
+#professional-charting-v8 .txp-tools{
+  padding:12px 22px 7px!important;gap:7px!important;align-items:center;
+  background:#fff
+}
+#professional-charting-v8 .txp-timeframes{padding-top:15px!important}
+#professional-charting-v8 .txp-group-label{font-size:9px!important;letter-spacing:.12em!important;color:#8390a3!important;opacity:1!important;margin-right:3px}
+#professional-charting-v8 .txp-pill{
+  border:1px solid #e1e7f0!important;border-radius:999px!important;
+  background:#f7f9fc!important;color:#53647b!important;padding:8px 12px!important;
+  font-size:10px!important;font-weight:800!important;white-space:nowrap;
+  transition:background .15s,border-color .15s,color .15s,transform .15s
+}
+#professional-charting-v8 .txp-pill:hover{background:#edf4ff!important;border-color:#c8dcf7!important;color:#1f5fa8!important}
+#professional-charting-v8 .txp-pill.active{
+  background:#17365d!important;color:#fff!important;border-color:#17365d!important;
+  box-shadow:0 3px 8px rgba(23,54,93,.17)
+}
+#professional-charting-v8 .txp-chart-shell{
+  margin:8px 16px 14px!important;min-height:590px!important;
+  border:1px solid #e0e7f0!important;border-radius:18px!important;overflow:hidden;
+  background:#fff!important;box-shadow:0 4px 16px rgba(19,43,75,.035)
+}
+#professional-charting-v8 #txpChartMount{min-height:590px!important;height:590px!important;background:#fff}
+#professional-charting-v8 .txp-loading{background:rgba(255,255,255,.96)!important;color:#53647b!important;font-size:13px!important;font-weight:700}
+#professional-charting-v8 .txp-foot{
+  padding:12px 20px!important;color:#7c899b!important;background:#fbfcfe;
+  border-top:1px solid #edf1f6!important;font-size:10px!important
+}
+#professional-charting-v8 button:focus-visible{outline:3px solid rgba(43,121,217,.35);outline-offset:2px}
+@media(max-width:800px){
+  #professional-charting-v8{margin:12px 8px 24px!important;border-radius:19px!important}
+  #professional-charting-v8 .txp-head{padding:18px 16px 15px!important}
+  #professional-charting-v8 .txp-head h2{font-size:23px!important}
+  #professional-charting-v8 .txp-search{padding:13px 14px 12px!important;display:grid;grid-template-columns:minmax(0,1fr) auto}
+  #professional-charting-v8 .txp-search input{grid-column:1/-1;width:100%}
+  #professional-charting-v8 .txp-search .txp-btn{width:100%;padding:10px 9px!important}
+  #professional-charting-v8 .txp-tools{padding:10px 14px 7px!important;overflow-x:auto;flex-wrap:nowrap!important;scrollbar-width:none}
+  #professional-charting-v8 .txp-tools::-webkit-scrollbar{display:none}
+  #professional-charting-v8 .txp-group-label{flex:0 0 auto}
+  #professional-charting-v8 .txp-pill{flex:0 0 auto}
+  #professional-charting-v8 .txp-chart-shell{margin:8px 8px 12px!important;min-height:510px!important;border-radius:14px!important}
+  #professional-charting-v8 #txpChartMount{height:510px!important;min-height:510px!important}
+  #professional-charting-v8 .txp-foot{padding:10px 12px!important;flex-wrap:wrap}
+}
+@media(max-width:390px){
+  #professional-charting-v8 .txp-status{font-size:8px;padding:7px 8px}
+  #professional-charting-v8 .txp-head{gap:8px}
+  #professional-charting-v8 .txp-chart-shell{margin-left:5px!important;margin-right:5px!important}
+}
+@media(prefers-reduced-motion:reduce){
+  #professional-charting-v8 *,#professional-charting-v8 *:before,#professional-charting-v8 *:after{transition:none!important;scroll-behavior:auto!important}
+}
+</style>
+
 </head>
 <body>
 
