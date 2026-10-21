@@ -6045,13 +6045,14 @@ window.openTechnicalScreener=open;window.PULSE_TECHNICAL_SCREENER={load,open,ren
   };
   const normalize=v=>{
     const rows=arr(v);
-    const objs=rows.filter(o=>o&&typeof o==='object'&&!Array.isArray(o));
+    const objs=rows.filter(o=>o&&typeof o==='object');
     const isNepse=o=>{
       const id=n(pick(o,['id','indexid','index_id','exchangeindexid']));
       const name=String(pick(o,['index','indexname','name','symbol'])??'').trim().toUpperCase();
       return id===58 || name==='NEPSE' || name==='NEPSE INDEX' || name.startsWith('NEPSE INDEX');
     };
-    const scoped=objs.some(isNepse)?objs.filter(isNepse):objs;
+    const objectRows=objs.filter(o=>!Array.isArray(o));
+    const scoped=objectRows.some(isNepse)?objectRows.filter(isNepse):objs;
     return scoped.map(o=>{
       if(Array.isArray(o)){
         const ts=n(o[0]),val=n(o[1]);
@@ -6230,7 +6231,18 @@ window.openTechnicalScreener=open;window.PULSE_TECHNICAL_SCREENER={load,open,ren
       console.warn('NEPSE real chart unavailable:',e);
     }
     history=ok?normalize(raw):[];
-    if(subtitle) subtitle.textContent=history.length ? (range==='1D'?'Live intraday NEPSE index':'NEPSE daily index history') : 'Real market history unavailable';
+    if(range==='1D' && history.length){
+      const today=new Date();
+      const sameLocalDay=d=>{const t=new Date(d);return !Number.isNaN(t.getTime()) && t.getFullYear()===today.getFullYear() && t.getMonth()===today.getMonth() && t.getDate()===today.getDate();};
+      const intraday=history.filter(x=>sameLocalDay(x.date));
+      if(intraday.length) history=intraday;
+      else {
+        // Keep endpoint data visible if its timestamps are date-only or server-local; never label it as intraday.
+        const hasTime=history.some(x=>/T|\d{1,2}:\d{2}/.test(String(x.date||'')));
+        if(!hasTime && subtitle) subtitle.textContent='Intraday feed returned date-only data';
+      }
+    }
+    if(subtitle && !(range==='1D' && subtitle.textContent==='Intraday feed returned date-only data')) subtitle.textContent=history.length ? (range==='1D'?'Today · intraday NEPSE index':'NEPSE daily index history') : 'Real market history unavailable';
     draw();
   }
 
@@ -9630,102 +9642,59 @@ const priorLoad=window.loadPriceVolumeActions;window.loadPriceVolumeActions=asyn
 </script>
 
 
-<!-- NEPSE PULSE NAVIGATION + CHART UX REPAIR -->
-<style id="np-final-chart-nav-repair">
-/* Keep the dashboard chart clear and make its controls easy to tap on phones. */
-.nepse-chart-card .nepse-chart-switch,
-.nepse-chart-card .nepse-chart-ranges { position:relative; z-index:4; }
-.nepse-chart-card .nepse-chart-switch button,
-.nepse-chart-card .nepse-chart-ranges button { touch-action:manipulation; pointer-events:auto; }
-.nepse-chart-card .nepse-chart-wrap { touch-action:pan-y; }
-#v21-bottom-nav, .bottom.mobile-exact-bottom, .bottom.mobile-exact-bottom .nav {
-  pointer-events:auto!important;
+<!-- NEPSE Pulse verified UI fixes: chart polish + tab overlay routing -->
+<style id="np-verified-chart-ui-v2">
+#nepse-dashboard-chart.nepse-chart-card{
+  background:linear-gradient(155deg,#fff 0%,#fbfdff 72%,#f3f7ff 100%)!important;
+  border:1px solid #dfe7f0!important;border-radius:26px!important;
+  box-shadow:0 14px 38px rgba(18,42,74,.09)!important;
+  padding:20px 16px 16px!important;overflow:hidden!important;
 }
-#v21-bottom-nav button, .bottom.mobile-exact-bottom .nav button {
-  position:relative; z-index:2; pointer-events:auto!important; touch-action:manipulation;
-}
+#nepse-dashboard-chart .nepse-chart-head{align-items:flex-start!important;gap:12px!important;margin-bottom:10px!important}
+#nepse-dashboard-chart .nepse-chart-title{font-size:21px!important;font-weight:850!important;color:#142944!important;letter-spacing:-.035em!important}
+#nepse-dashboard-chart .nepse-chart-sub{font-size:13px!important;color:#728197!important;margin-top:4px!important}
+#nepse-dashboard-chart .nepse-chart-arrow{display:none!important}
+#nepse-dashboard-chart .nepse-chart-switch{display:flex!important;width:max-content!important;margin:0 0 8px auto!important;padding:4px!important;gap:4px!important;background:#edf2f8!important;border:1px solid #e1e8f1!important;border-radius:18px!important}
+#nepse-dashboard-chart .nepse-chart-switch button{border:0!important;border-radius:14px!important;background:transparent!important;color:#65758b!important;font-weight:750!important;padding:10px 17px!important;min-height:40px!important;touch-action:manipulation!important}
+#nepse-dashboard-chart .nepse-chart-switch button.active{background:#102f53!important;color:#fff!important;box-shadow:0 4px 12px rgba(16,47,83,.2)!important}
+#nepse-dashboard-chart .nepse-chart-wrap{height:300px!important;min-height:260px!important;background:#fff!important;border-radius:16px!important;position:relative!important;overflow:hidden!important}
+#nepse-dashboard-chart #nepseDashboardCanvas{display:block!important;width:100%!important;height:100%!important;touch-action:pan-y!important}
+#nepse-dashboard-chart .nepse-chart-ranges{display:grid!important;grid-template-columns:repeat(7,minmax(0,1fr))!important;gap:6px!important;margin-top:15px!important}
+#nepse-dashboard-chart .nepse-chart-ranges button{min-width:0!important;border:1px solid #e4eaf2!important;border-radius:13px!important;background:#f1f5fa!important;color:#5b6a7e!important;font-size:12px!important;font-weight:800!important;padding:12px 2px!important;min-height:43px!important;touch-action:manipulation!important}
+#nepse-dashboard-chart .nepse-chart-ranges button.active{background:#102f53!important;border-color:#102f53!important;color:#fff!important;box-shadow:0 5px 13px rgba(16,47,83,.2)!important}
+/* Hide only checkbox-like controls inside this chart, not the real Line/Candle and range buttons. */
+#nepse-dashboard-chart input[type=checkbox],#nepse-dashboard-chart .checkbox-bar,#nepse-dashboard-chart .check-bar{display:none!important}
+@media(max-width:420px){#nepse-dashboard-chart .nepse-chart-wrap{height:275px!important}#nepse-dashboard-chart.nepse-chart-card{padding:17px 12px 14px!important}#nepse-dashboard-chart .nepse-chart-ranges{gap:4px!important}#nepse-dashboard-chart .nepse-chart-ranges button{font-size:11px!important;padding:11px 1px!important}}
 </style>
-<script id="np-final-nav-repair">
+<script id="np-verified-bottom-tab-routing-v2">
 (function(){
   'use strict';
-  function closeOverlays(){
-    ['pulseFeatureWorkspace','featureDrawer','npAllMarket','traderModuleModal','tradersZoneModal','stockXRayModal','loginModal']
-      .forEach(function(id){
-        var el=document.getElementById(id);
-        if(el && el.classList.contains('open')) el.classList.remove('open');
-      });
+  function closeMarketLayer(){
+    var market=document.getElementById('npAllMarket');
+    if(market) market.classList.remove('open');
+    if(document.body) document.body.style.overflow='';
   }
-  function activate(btn){
-    var label=((btn.innerText||btn.textContent||'')+' '+(btn.getAttribute('aria-label')||'')).replace(/\s+/g,' ').trim();
-    if(!label)return;
-    var nav=btn.closest('.nav');
-    if(nav)nav.querySelectorAll('button').forEach(function(b){b.classList.toggle('active',b===btn);});
-    if(/^\s*home\b/i.test(label)){closeOverlays();document.body.classList.remove('v22-profile-tab-active');window.scrollTo({top:0,behavior:'smooth'});return;}
-    if(/^\s*market(s)?\b/i.test(label)){
-      closeOverlays();document.body.classList.remove('v22-profile-tab-active');
-      if(typeof window.npOpenAllMarket==='function')window.npOpenAllMarket();
-      else if(typeof window.setNav==='function')window.setNav(btn,'Markets');
-      return;
-    }
-    if(/^\s*screener\b/i.test(label)){
-      closeOverlays();document.body.classList.remove('v22-profile-tab-active');
-      if(typeof window.openTechnicalScreener==='function')window.openTechnicalScreener();
-      else if(typeof window.openModule==='function')window.openModule('Screener');
-      else if(typeof window.toast==='function')window.toast('Screener is temporarily unavailable. Please reload and try again.');
-      return;
-    }
-    if(/^\s*profile\b/i.test(label)){
-      closeOverlays();
-      if(typeof window.setupProfileTab==='function')window.setupProfileTab();
-      document.body.classList.add('v22-profile-tab-active');
-      var profile=document.getElementById('v22-profile-tab-view');
-      if(profile){profile.style.removeProperty('display');profile.style.removeProperty('pointer-events');}
-      window.scrollTo({top:0,behavior:'smooth'});return;
-    }
-    if(/^\s*more\b/i.test(label)){
-      document.body.classList.remove('v22-profile-tab-active');
-      if(typeof window.openFeatures==='function')window.openFeatures();
-      else if(typeof window.toast==='function')window.toast('Features menu is temporarily unavailable.');
-    }
+  function closeOtherLayers(){
+    ['pulseFeatureWorkspace','featureDrawer','traderModuleModal','tradersZoneModal','stockXRayModal','loginModal'].forEach(function(id){
+      var el=document.getElementById(id); if(el) el.classList.remove('open');
+    });
+    closeMarketLayer();
   }
+  // Screener was opening underneath the Market modal. Close that overlay first.
+  var oldScreener=window.openTechnicalScreener;
+  window.openTechnicalScreener=function(){
+    closeMarketLayer();
+    document.body.classList.remove('v22-profile-tab-active');
+    if(typeof oldScreener==='function') return oldScreener.apply(this,arguments);
+  };
+  var oldFeatures=window.openFeatures;
+  window.openFeatures=function(){closeMarketLayer(); if(typeof oldFeatures==='function') return oldFeatures.apply(this,arguments);};
   document.addEventListener('click',function(e){
-    var btn=e.target&&e.target.closest&&e.target.closest('#v21-bottom-nav button,.bottom.mobile-exact-bottom .nav button,.nav button');
-    if(!btn)return;
-    var label=(btn.innerText||btn.textContent||'').trim();
-    if(!/^(Home|Market|Markets|Screener|Profile|More)$/i.test(label))return;
-    // Run after existing inline handlers so this recovery layer can restore the correct view.
-    setTimeout(function(){activate(btn);},0);
+    var b=e.target&&e.target.closest&&e.target.closest('#v21-bottom-nav button,.bottom.mobile-exact-bottom .nav button');
+    if(!b)return;
+    var label=(b.innerText||b.textContent||'').replace(/[⌂⌁⌕●⋮]/g,'').trim().toLowerCase();
+    if(label==='screener'||label==='profile'||label==='more') closeMarketLayer();
+    if(label==='home') closeOtherLayers();
   },true);
 })();
 </script>
-<script id="np-final-intraday-chart-guard">
-(function(){
-  var originalFetch=null;
-  function boot(){
-    var card=document.querySelector('.nepse-chart-card');
-    if(!card)return;
-    var daily=card.querySelector('[data-nepse-range="1D"]');
-    var subtitle=document.getElementById('nepseChartSubtitle');
-    if(daily){
-      daily.setAttribute('aria-label','Show intraday NEPSE index chart');
-      daily.title='Intraday chart for today';
-    }
-    // Keep 1D explicitly tied to the intraday graph endpoint; never substitute daily candles.
-    var load=window.PULSE_LOAD_NEPSE_INTRADAY;
-    if(typeof load==='function' && daily){
-      daily.addEventListener('click',function(){
-        if(subtitle)subtitle.textContent='Intraday NEPSE index';
-      });
-    }
-  }
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
-})();
-</script>
-
-<style id="np-remove-chart-checkbox-bar">
-/* Remove any checkbox/checkbox-label strip if injected into the dashboard chart. */
-.nepse-chart-card input[type="checkbox"],
-.nepse-chart-card label:has(input[type="checkbox"]),
-.nepse-chart-card .checkbox-bar,
-.nepse-chart-card .check-bar { display:none!important; }
-</style>
