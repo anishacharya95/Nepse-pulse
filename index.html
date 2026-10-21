@@ -8028,7 +8028,7 @@ window.runAiTrendlines=async function(){const symbol=(document.getElementById('n
    if(change===null&&ltp!==null&&prev!==null)change=ltp-prev;
    if(pct===null&&change!==null&&prev!==null&&prev!==0)pct=change/prev*100;
    const symbol=String(pick(o,['symbol','stockSymbol','securitySymbol','symbolName','companySymbol','scrip','ticker','code','security_code'])||'').trim().toUpperCase();
-   return {symbol,ltp,change,pct,volume:num(pick(o,['volume','tradedShares','quantity','totalTradedQuantity','totalTradeQuantity','shareVolume'])),turnover:num(pick(o,['turnover','totalTurnover','totalTradeValue','totalTradedValue','value'])),transactions:num(pick(o,['transactions','totalTransactions','numberOfTransactions','totalTrades','tradeCount']))};
+   return {symbol,ltp,change,pct,volume:num(pick(o,['volume','tradedShares','quantity','totalTradedQuantity','totalTradeQuantity','shareVolume','totalVolume','totalSharesTraded','totalTradeQuantity'])),turnover:num(pick(o,['turnover','totalTurnover','totalTradeValue','totalTradedValue','value','totalAmount','totalTradeAmount','amount','totalTurnoverValue'])),transactions:num(pick(o,['transactions','totalTransactions','numberOfTransactions','totalTrades','tradeCount','transactionCount','totalTransactionCount','noOfTransactions','noOfTransaction','numberOfTrades','noOfTrades','totalNoOfTransactions','totalTradesCount','tradeCount']))};
  }
  function unique(list){const seen=new Set();return list.map(normalize).filter(r=>r.symbol&&!seen.has(r.symbol)&&seen.add(r.symbol));}
  function fmt(v,d=2){return v===null||v===undefined?'—':Number(v).toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d});}
@@ -8048,17 +8048,29 @@ window.runAiTrendlines=async function(){const symbol=(document.getElementById('n
    updateButtons();
  }
  function applyPayload(payload){
-   const raw=getArray(payload,['live','companies','rows','stocks']);
-   let rows=unique(raw.length?raw:getArray(payload.data,['data','results','rows','records','items']));
-   if(!rows.length){const candidates=Object.values(payload||{}).find(Array.isArray)||[];rows=unique(candidates);}
-   state.rows=rows.filter(r=>r.symbol&&r.ltp!==null);
+   // Combine the complete stock universe with dedicated market-activity lists.
+   // APIs often return transaction/turnover counts separately from live quotes.
+   const sourceArrays=[];
+   const addArrays=(obj,names)=>names.forEach(name=>{if(Array.isArray(obj?.[name]))sourceArrays.push(...obj[name]);});
+   addArrays(payload,['live','companies','rows','stocks','gainers','losers','turnover','topTurnover','top_turnover','volume','topVolume','top_volume','transactions','topTransactions','top_transactions','trades','topTrades']);
+   addArrays(payload?.data,['data','results','rows','records','items','gainers','losers','turnover','volume','transactions','trades']);
+   if(!sourceArrays.length){const candidates=Object.values(payload||{}).find(Array.isArray)||[];sourceArrays.push(...candidates);}
+   // Merge records by symbol instead of discarding later metric-only rows.
+   const merged=new Map();
+   for(const raw of sourceArrays){
+     const r=normalize(raw);if(!r.symbol)continue;
+     const prev=merged.get(r.symbol)||{symbol:r.symbol,ltp:null,change:null,pct:null,volume:null,turnover:null,transactions:null};
+     for(const k of ['ltp','change','pct','volume','turnover','transactions'])if(r[k]!==null&&r[k]!==undefined)prev[k]=r[k];
+     merged.set(r.symbol,prev);
+   }
+   state.rows=[...merged.values()].filter(r=>r.symbol);
    const dedicatedG=unique(getArray(payload,['gainers'])).filter(r=>(r.pct??r.change??0)>0);
    const dedicatedL=unique(getArray(payload,['losers'])).filter(r=>(r.pct??r.change??0)<0);
-   // Keep the two datasets strictly separate: positive movers are gainers,
-   // negative movers are losers. Never populate either list with all stocks.
    const valid=state.rows.filter(r=>r.pct!==null || r.change!==null);
    const derivedG=valid.filter(r=>(r.pct??r.change??0)>0).sort((a,b)=>(b.pct??b.change)-(a.pct??a.change));
    const derivedL=valid.filter(r=>(r.pct??r.change??0)<0).sort((a,b)=>(a.pct??a.change)-(b.pct??b.change));
+   // Prefer the full merged quote universe when available; otherwise use the
+   // dedicated positive/negative lists without mixing gainers and losers.
    state.gainers=derivedG.length?derivedG:dedicatedG;
    state.losers=derivedL.length?derivedL:dedicatedL;
    render();
@@ -9359,7 +9371,7 @@ window.runAiTrendlines=async function(){const symbol=(document.getElementById('n
    if(change===null&&ltp!==null&&prev!==null)change=ltp-prev;
    if(pct===null&&change!==null&&prev!==null&&prev!==0)pct=change/prev*100;
    const symbol=String(pick(o,['symbol','stockSymbol','securitySymbol','symbolName','companySymbol','scrip','ticker','code','security_code'])||'').trim().toUpperCase();
-   return {symbol,ltp,change,pct,volume:num(pick(o,['volume','tradedShares','quantity','totalTradedQuantity','totalTradeQuantity','shareVolume'])),turnover:num(pick(o,['turnover','totalTurnover','totalTradeValue','totalTradedValue','value'])),transactions:num(pick(o,['transactions','totalTransactions','numberOfTransactions','totalTrades','tradeCount']))};
+   return {symbol,ltp,change,pct,volume:num(pick(o,['volume','tradedShares','quantity','totalTradedQuantity','totalTradeQuantity','shareVolume','totalVolume','totalSharesTraded','totalTradeQuantity'])),turnover:num(pick(o,['turnover','totalTurnover','totalTradeValue','totalTradedValue','value','totalAmount','totalTradeAmount','amount','totalTurnoverValue'])),transactions:num(pick(o,['transactions','totalTransactions','numberOfTransactions','totalTrades','tradeCount','transactionCount','totalTransactionCount','noOfTransactions','noOfTransaction','numberOfTrades','noOfTrades','totalNoOfTransactions','totalTradesCount','tradeCount']))};
  }
  function unique(list){const seen=new Set();return list.map(normalize).filter(r=>r.symbol&&!seen.has(r.symbol)&&seen.add(r.symbol));}
  function fmt(v,d=2){return v===null||v===undefined?'—':Number(v).toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d});}
@@ -9379,17 +9391,29 @@ window.runAiTrendlines=async function(){const symbol=(document.getElementById('n
    updateButtons();
  }
  function applyPayload(payload){
-   const raw=getArray(payload,['live','companies','rows','stocks']);
-   let rows=unique(raw.length?raw:getArray(payload.data,['data','results','rows','records','items']));
-   if(!rows.length){const candidates=Object.values(payload||{}).find(Array.isArray)||[];rows=unique(candidates);}
-   state.rows=rows.filter(r=>r.symbol&&r.ltp!==null);
+   // Combine the complete stock universe with dedicated market-activity lists.
+   // APIs often return transaction/turnover counts separately from live quotes.
+   const sourceArrays=[];
+   const addArrays=(obj,names)=>names.forEach(name=>{if(Array.isArray(obj?.[name]))sourceArrays.push(...obj[name]);});
+   addArrays(payload,['live','companies','rows','stocks','gainers','losers','turnover','topTurnover','top_turnover','volume','topVolume','top_volume','transactions','topTransactions','top_transactions','trades','topTrades']);
+   addArrays(payload?.data,['data','results','rows','records','items','gainers','losers','turnover','volume','transactions','trades']);
+   if(!sourceArrays.length){const candidates=Object.values(payload||{}).find(Array.isArray)||[];sourceArrays.push(...candidates);}
+   // Merge records by symbol instead of discarding later metric-only rows.
+   const merged=new Map();
+   for(const raw of sourceArrays){
+     const r=normalize(raw);if(!r.symbol)continue;
+     const prev=merged.get(r.symbol)||{symbol:r.symbol,ltp:null,change:null,pct:null,volume:null,turnover:null,transactions:null};
+     for(const k of ['ltp','change','pct','volume','turnover','transactions'])if(r[k]!==null&&r[k]!==undefined)prev[k]=r[k];
+     merged.set(r.symbol,prev);
+   }
+   state.rows=[...merged.values()].filter(r=>r.symbol);
    const dedicatedG=unique(getArray(payload,['gainers'])).filter(r=>(r.pct??r.change??0)>0);
    const dedicatedL=unique(getArray(payload,['losers'])).filter(r=>(r.pct??r.change??0)<0);
-   // Keep the two datasets strictly separate: positive movers are gainers,
-   // negative movers are losers. Never populate either list with all stocks.
    const valid=state.rows.filter(r=>r.pct!==null || r.change!==null);
    const derivedG=valid.filter(r=>(r.pct??r.change??0)>0).sort((a,b)=>(b.pct??b.change)-(a.pct??a.change));
    const derivedL=valid.filter(r=>(r.pct??r.change??0)<0).sort((a,b)=>(a.pct??a.change)-(b.pct??b.change));
+   // Prefer the full merged quote universe when available; otherwise use the
+   // dedicated positive/negative lists without mixing gainers and losers.
    state.gainers=derivedG.length?derivedG:dedicatedG;
    state.losers=derivedL.length?derivedL:dedicatedL;
    render();
