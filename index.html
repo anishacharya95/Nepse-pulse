@@ -5838,7 +5838,9 @@ window.openTechnicalScreener=open;window.PULSE_TECHNICAL_SCREENER={load,open,ren
 
 
 <style id="np-market-view-more-styles">
-.np-view-more{display:block;margin:12px 4px 0 auto;padding:7px 2px;border:0;background:transparent;color:#159879;font:700 14px/1.3 inherit;cursor:pointer;text-align:right}
+.np-view-more{display:block;position:relative;z-index:8;pointer-events:auto;touch-action:manipulation;isolation:isolate;margin:12px 4px 0 auto;padding:9px 5px;min-height:38px;border:0;background:transparent;color:#159879;font:700 14px/1.3 inherit;cursor:pointer;text-align:right;-webkit-tap-highlight-color:rgba(21,152,121,.18)}
+#pulse-home-market-dashboard .pulse-home-card{position:relative}
+#pulse-home-market-dashboard .np-view-more{position:relative;z-index:20;pointer-events:auto}
 .np-view-more:focus-visible{outline:2px solid #159879;outline-offset:3px;border-radius:5px}
 .np-view-more[hidden]{display:none!important}
 #pulse-home-market-dashboard #pulseMoversRows .pulse-row,#pulse-home-market-dashboard #pulseLiquidityRows .pulse-row{cursor:pointer}
@@ -6043,8 +6045,24 @@ window.openTechnicalScreener=open;window.PULSE_TECHNICAL_SCREENER={load,open,ren
 
   qa('[data-mover-tab]').forEach(b=>b.onclick=()=>{moverMode=b.dataset.moverTab==='losers'?'losers':'gainers';showMovers=false;qa('[data-mover-tab]').forEach(x=>x.classList.toggle('active',x===b));render(lastState)});
   qa('[data-liq-tab]').forEach(b=>b.onclick=()=>{liqMode=['turnover','volume','transactions'].includes(b.dataset.liqTab)?b.dataset.liqTab:'turnover';showLiquidity=false;qa('[data-liq-tab]').forEach(x=>x.classList.toggle('active',x===b));render(lastState)});
-  q('#npMoversMore')?.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();showMovers=!showMovers;render(lastState);});
-  q('#npLiquidityMore')?.addEventListener('click',e=>{e.preventDefault();e.stopPropagation();showLiquidity=!showLiquidity;render(lastState);});
+  // View More controls use delegated capture-phase handling. This survives dashboard
+  // re-renders and avoids another dashboard/nav handler swallowing mobile taps.
+  document.addEventListener('click',function(e){
+    const button=e.target && e.target.closest ? e.target.closest('#npMoversMore, #npLiquidityMore') : null;
+    if(!button) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if(typeof e.stopImmediatePropagation==='function') e.stopImmediatePropagation();
+    if(button.id==='npMoversMore') showMovers=!showMovers;
+    else showLiquidity=!showLiquidity;
+    // Render from the most recent feed snapshot; if the feed has not arrived yet,
+    // keep the control responsive and let the next snapshot render the chosen state.
+    if(lastState) render(lastState);
+    else {
+      button.textContent=(button.id==='npMoversMore'?showMovers:showLiquidity)?'View Less ↑':'View More >';
+      button.setAttribute('aria-expanded',String(button.id==='npMoversMore'?showMovers:showLiquidity));
+    }
+  },true);
   document.addEventListener('click',e=>{const row=e.target.closest?.('#pulseMoversRows .pulse-row[data-symbol],#pulseLiquidityRows .pulse-row[data-symbol]');if(!row)return;const symbol=row.dataset.symbol;if(!symbol)return;const input=document.getElementById('searchBox');if(input)input.value=symbol;if(typeof window.searchPulse==='function')window.searchPulse();});
   document.addEventListener('keydown',e=>{if(e.key!=='Enter'&&e.key!==' ')return;const row=e.target.closest?.('#pulseMoversRows .pulse-row[data-symbol],#pulseLiquidityRows .pulse-row[data-symbol]');if(row){e.preventDefault();row.click();}});
 
