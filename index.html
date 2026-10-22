@@ -6498,6 +6498,17 @@ window.openTechnicalScreener=open;window.PULSE_TECHNICAL_SCREENER={load,open,ren
   captureLiveIndex(getState());
   resize();
   loadHistory();
+  // Refresh backend intraday history as the collector records more samples.
+  // Without this, a page opened before two points exist can remain blank until
+  // the user manually taps the 1D range again.
+  let intradayRefreshTimer=null;
+  function syncIntradayRefresh(){
+    if(intradayRefreshTimer){clearInterval(intradayRefreshTimer);intradayRefreshTimer=null;}
+    if(range==='1D') intradayRefreshTimer=setInterval(()=>{if(document.visibilityState!=='hidden')loadHistory();},60000);
+  }
+  $('[data-nepse-range]').forEach(b=>b.addEventListener('click',syncIntradayRefresh));
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&range==='1D')loadHistory();});
+  syncIntradayRefresh();
 })();
 </script>
 
