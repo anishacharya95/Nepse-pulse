@@ -1874,6 +1874,53 @@ input:focus,select:focus,textarea:focus{border-color:var(--np-blue)!important;bo
 }
 </style>
 
+
+
+<style id="np-integrated-chart-premium-v1">
+/* Chart enhancements use only values returned by the existing NEPSE history API. */
+#nepse-dashboard-chart.nepse-chart-card{
+  display:block!important;
+  padding:18px 15px 16px!important;
+  border:1px solid #e0e7ef!important;
+  border-radius:25px!important;
+  background:linear-gradient(155deg,#fff 0%,#fff 70%,#f5f9ff 100%)!important;
+  box-shadow:0 12px 30px rgba(16,35,65,.065)!important;
+}
+#nepse-dashboard-chart .nepse-chart-head{padding:0 150px 8px 3px!important;min-height:48px}
+#nepse-dashboard-chart .nepse-chart-title{font-size:24px!important;font-weight:850!important;letter-spacing:-.6px;color:#14243b!important}
+#nepse-dashboard-chart .nepse-chart-sub{font-size:11px!important;color:#78869a!important}
+#nepse-dashboard-chart .nepse-chart-arrow{display:none!important}
+#nepse-dashboard-chart .nepse-chart-switch{top:18px!important;right:14px!important;margin:0!important;background:#edf2f8!important;border:1px solid #e2e8f0}
+#nepse-dashboard-chart .nepse-chart-switch button{font-size:12px!important;padding:9px 13px!important;color:#607086!important}
+#nepse-dashboard-chart .nepse-chart-switch button.active{background:#102f55!important;color:#fff!important;box-shadow:0 3px 9px rgba(16,47,85,.18)}
+.np-chart-summary{display:grid;grid-template-columns:1.15fr 1fr 1fr 1fr;gap:7px;margin:9px 0 8px;padding:11px 10px;border:1px solid #edf1f5;border-radius:16px;background:#f8fafc}
+.np-chart-price,.np-chart-stat{min-width:0;display:flex;flex-direction:column;gap:5px}
+.np-chart-price span,.np-chart-stat span{font-size:9px;color:#7b8798;font-weight:750;white-space:nowrap}
+.np-chart-price strong{font-size:16px;line-height:1.15;color:#122b49;font-weight:900;overflow-wrap:anywhere}
+.np-chart-stat b{font-size:12px;color:#263b54;font-weight:850;overflow-wrap:anywhere}
+.np-chart-change{display:flex;flex-direction:column;justify-content:center;gap:4px;min-width:0}
+.np-chart-change strong{font-size:12px;font-weight:900;color:#15945a;white-space:nowrap}
+.np-chart-change span{font-size:9px;color:#15945a;font-weight:750;line-height:1.2}
+.np-chart-change.down strong,.np-chart-change.down span{color:#dc4b56}
+#nepse-dashboard-chart .nepse-chart-wrap{height:270px!important;margin-top:5px!important}
+#nepse-dashboard-chart #nepseDashboardCanvas{touch-action:pan-y}
+#nepse-dashboard-chart .nepse-chart-ranges{gap:6px!important;margin-top:13px!important}
+#nepse-dashboard-chart .nepse-chart-ranges button{border:1px solid #e3e9f1!important;background:#f0f4f9!important;color:#53647a!important;border-radius:11px!important;font-weight:800!important}
+#nepse-dashboard-chart .nepse-chart-ranges button.active{background:#102f55!important;border-color:#102f55!important;color:#fff!important;box-shadow:0 4px 10px rgba(16,47,85,.16)}
+@media(max-width:420px){
+ #nepse-dashboard-chart.nepse-chart-card{padding:16px 10px 13px!important;border-radius:22px!important}
+ #nepse-dashboard-chart .nepse-chart-head{padding-right:124px!important}
+ #nepse-dashboard-chart .nepse-chart-title{font-size:22px!important}
+ #nepse-dashboard-chart .nepse-chart-switch{right:10px!important;top:16px!important}
+ #nepse-dashboard-chart .nepse-chart-switch button{padding:8px 10px!important;font-size:11px!important}
+ .np-chart-summary{grid-template-columns:1.1fr 1fr;row-gap:12px;padding:11px}
+ .np-chart-price strong{font-size:18px}
+ #nepse-dashboard-chart .nepse-chart-wrap{height:245px!important}
+ #nepse-dashboard-chart .nepse-chart-ranges{gap:4px!important}
+ #nepse-dashboard-chart .nepse-chart-ranges button{font-size:11px!important;padding:10px 1px!important}
+}
+</style>
+
 </head>
 <body>
 
@@ -1982,9 +2029,16 @@ input:focus,select:focus,textarea:focus{border-color:var(--np-blue)!important;bo
     <div class="nepse-chart-arrow">→</div>
   </div>
 
-  <div class="nepse-chart-switch">
+  <div class="nepse-chart-switch" role="group" aria-label="Chart style">
     <button type="button" class="active" data-nepse-chart-type="line">Line</button>
     <button type="button" data-nepse-chart-type="candle">Candle</button>
+  </div>
+
+  <div class="np-chart-summary" aria-live="polite">
+    <div class="np-chart-price"><span>Latest index</span><strong id="npChartLatest">—</strong></div>
+    <div class="np-chart-change" id="npChartChange"><strong id="npChartChangeValue">—</strong><span id="npChartChangePct">Waiting for data</span></div>
+    <div class="np-chart-stat"><span>Period high</span><b id="npChartHigh">—</b></div>
+    <div class="np-chart-stat"><span>Period low</span><b id="npChartLow">—</b></div>
   </div>
 
   <div class="nepse-chart-wrap">
@@ -6095,6 +6149,15 @@ window.openTechnicalScreener=open;window.PULSE_TECHNICAL_SCREENER={load,open,ren
   let range='1D';
   let history=[];
   let resizeObserver=null;
+  // Persist timestamped points across days so 1D can show the latest completed
+  // trading session even when the market is closed or the app is reopened later.
+  const intradayStoreKey='nepsePulseIntradayV2';
+  let intradayPoints=[];
+  try{
+    const saved=JSON.parse(localStorage.getItem(intradayStoreKey)||'[]');
+    const cutoff=Date.now()-30*24*60*60*1000;
+    if(Array.isArray(saved)) intradayPoints=saved.filter(x=>x&&Number.isFinite(Number(x.close))&&Number.isFinite(new Date(x.date).getTime())&&new Date(x.date).getTime()>=cutoff).slice(-3000);
+  }catch(e){}
 
   const $=(s,r=document)=>Array.from(r.querySelectorAll(s));
   const n=v=>{
@@ -6151,6 +6214,42 @@ window.openTechnicalScreener=open;window.PULSE_TECHNICAL_SCREENER={load,open,ren
     return {};
   }
 
+  function captureLiveIndex(snapshot){
+    const st=snapshot&&typeof snapshot==='object'?(snapshot.state||snapshot.data||snapshot):getState();
+    if(!st||typeof st!=='object')return;
+    let candidates=[];
+    const idx=st.index;
+    if(Array.isArray(idx)) candidates=idx;
+    else if(idx&&typeof idx==='object') candidates=[idx];
+    // Some backend snapshots expose the index under summary/nepse wrappers.
+    if(!candidates.length){
+      for(const k of ['nepse','summary','marketIndex']){
+        const v=st[k]; if(Array.isArray(v))candidates.push(...v); else if(v&&typeof v==='object')candidates.push(v);
+      }
+    }
+    let value=null;
+    for(let i=candidates.length-1;i>=0;i--){
+      value=n(pick(candidates[i],['currentvalue','indexvalue','value','close','latest','current','ltp','lastprice','price']));
+      if(value!==null)break;
+    }
+    if(value===null)return;
+    const rawTime=st.updatedAt||st.updated_at||st.timestamp||st.time||new Date().toISOString();
+    const parsed=new Date(rawTime);
+    const time=Number.isFinite(parsed.getTime())?parsed:new Date();
+    // Do not discard the most recent completed session merely because today is
+    // a holiday or the market has closed. Ignore timestamps older than 30 days.
+    if(Date.now()-time.getTime()>30*24*60*60*1000 || time.getTime()>Date.now()+5*60*1000)return;
+    const point={date:time.toISOString(),open:null,high:null,low:null,close:value,volume:null};
+    const last=intradayPoints[intradayPoints.length-1];
+    // Deduplicate identical snapshots and avoid recording repeated values within 15 seconds.
+    if(last&&Math.abs(new Date(last.date).getTime()-time.getTime())<15000){
+      if(last.close===value)return;
+      intradayPoints[intradayPoints.length-1]=point;
+    }else intradayPoints.push(point);
+    intradayPoints=intradayPoints.filter(x=>Date.now()-new Date(x.date).getTime()<=30*24*60*60*1000).slice(-3000);
+    try{localStorage.setItem(intradayStoreKey,JSON.stringify(intradayPoints));}catch(e){}
+  }
+
   function resize(){
     const dpr=Math.max(1,window.devicePixelRatio||1);
     const rect=canvas.getBoundingClientRect();
@@ -6182,7 +6281,9 @@ window.openTechnicalScreener=open;window.PULSE_TECHNICAL_SCREENER={load,open,ren
     ctx.clearRect(0,0,W,H);
 
     const data=visibleData();
-    if(!data.length){
+    renderSummary();
+    if(!data.length || (range==='1D' && data.length<2)){
+      empty.textContent=range==='1D'?'Collecting live intraday points… Keep NEPSE Pulse open while the market feed updates.':'Waiting for verified NEPSE history…';
       empty.style.display='flex';
       return;
     }
@@ -6267,7 +6368,11 @@ window.openTechnicalScreener=open;window.PULSE_TECHNICAL_SCREENER={load,open,ren
 
       ctx.beginPath();
       pts.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
-      ctx.strokeStyle=lineColor;ctx.lineWidth=2.5;ctx.stroke();
+      ctx.strokeStyle=lineColor;ctx.lineWidth=5;ctx.globalAlpha=.12;ctx.stroke();
+      ctx.globalAlpha=1;
+      ctx.beginPath();
+      pts.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
+      ctx.strokeStyle=lineColor;ctx.lineWidth=2.6;ctx.lineJoin='round';ctx.lineCap='round';ctx.stroke();
     }else{
       const step=pw/Math.max(1,data.length);
       const body=Math.max(2,Math.min(10,step*.62));
@@ -6290,6 +6395,28 @@ window.openTechnicalScreener=open;window.PULSE_TECHNICAL_SCREENER={load,open,ren
 
   }
 
+  function renderSummary(){
+    const data=visibleData().filter(x=>Number.isFinite(x.close));
+    const put=(id,value)=>{const el=document.getElementById(id);if(el)el.textContent=value;};
+    const badge=document.getElementById('npChartChange');
+    if(!data.length){
+      put('npChartLatest','—');put('npChartHigh','—');put('npChartLow','—');
+      put('npChartChangeValue','—');put('npChartChangePct','Waiting for data');
+      if(badge)badge.classList.remove('down');
+      return;
+    }
+    const first=data[0].close,last=data[data.length-1].close;
+    const vals=data.map(x=>x.close);
+    const delta=last-first;
+    const pct=first!==0?(delta/first)*100:0;
+    put('npChartLatest',fmt(last));
+    put('npChartHigh',fmt(Math.max(...vals)));
+    put('npChartLow',fmt(Math.min(...vals)));
+    put('npChartChangeValue',(delta>0?'+':'')+fmt(delta));
+    put('npChartChangePct',(delta>0?'+':'')+pct.toFixed(2)+'% for selected range');
+    if(badge)badge.classList.toggle('down',delta<0);
+  }
+
   async function loadHistory(){
     let raw=null;
     let ok=false;
@@ -6297,8 +6424,8 @@ window.openTechnicalScreener=open;window.PULSE_TECHNICAL_SCREENER={load,open,ren
     try{
       if(range==='1D'){
         // 1D must be real intraday data. Never fall back to daily history.
-        raw=await fetch(backend+'/DailyNepseIndexGraph?_pulse='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw new Error('intraday graph HTTP '+r.status);return r.json();});
-        if(raw && raw.ok===false) throw new Error((raw.errors||[]).join('; ') || 'intraday history unavailable');
+        raw=await fetch(backend+'/api/index/intraday?_pulse='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw new Error('intraday history HTTP '+r.status);return r.json();});
+        if(raw && raw.ok===false) { console.info(raw.message || 'No backend intraday session stored yet'); }
         if(raw?.intraday===false && subtitle) subtitle.textContent='NEPSE daily history · intraday feed unavailable';
       }else{
         raw=await fetch(backend+'/api/history?index=58&_pulse='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw new Error('history HTTP '+r.status);return r.json();});
@@ -6308,18 +6435,35 @@ window.openTechnicalScreener=open;window.PULSE_TECHNICAL_SCREENER={load,open,ren
       console.warn('NEPSE real chart unavailable:',e);
     }
     history=ok?normalize(raw):[];
-    if(range==='1D' && history.length){
-      const today=new Date();
-      const sameLocalDay=d=>{const t=new Date(d);return !Number.isNaN(t.getTime()) && t.getFullYear()===today.getFullYear() && t.getMonth()===today.getMonth() && t.getDate()===today.getDate();};
-      const intraday=history.filter(x=>sameLocalDay(x.date));
-      if(intraday.length) history=intraday;
-      else {
-        // Keep endpoint data visible if its timestamps are date-only or server-local; never label it as intraday.
-        const hasTime=history.some(x=>/T|\d{1,2}:\d{2}/.test(String(x.date||'')));
-        if(!hasTime && subtitle) subtitle.textContent='Intraday feed returned date-only data';
+    if(range==='1D'){
+      const hasClockTime=x=>/T\d{2}:\d{2}|\d{1,2}:\d{2}/.test(String(x.date||''));
+      const latestSession=points=>{
+        const byDay=new Map();
+        points.filter(x=>hasClockTime(x)&&Number.isFinite(new Date(x.date).getTime())).forEach(x=>{
+          const d=new Date(x.date);const key=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');
+          if(!byDay.has(key))byDay.set(key,[]);byDay.get(key).push(x);
+        });
+        const days=Array.from(byDay.keys()).sort();
+        for(let i=days.length-1;i>=0;i--){const pts=byDay.get(days[i]).sort((a,b)=>new Date(a.date)-new Date(b.date));if(pts.length>=2)return {day:days[i],points:pts};}
+        return {day:null,points:[]};
+      };
+      // Prefer timestamped API history for the latest completed trading session.
+      // If the endpoint only has date-only daily records, use persisted real snapshots.
+      const apiSession=latestSession(history);
+      const savedSession=latestSession(intradayPoints);
+      if(apiSession.points.length>=2){
+        history=apiSession.points;
+        if(subtitle)subtitle.textContent='Intraday session · '+apiSession.day;
+      }else if(savedSession.points.length>=2){
+        history=savedSession.points;
+        if(subtitle)subtitle.textContent='Saved intraday session · '+savedSession.day;
+      }else{
+        history=[];
+        if(subtitle)subtitle.textContent='No saved intraday session yet · backend must provide timestamped intraday history';
       }
+    }else if(subtitle){
+      subtitle.textContent=history.length?'NEPSE daily index history':'Real market history unavailable';
     }
-    if(subtitle && !(range==='1D' && subtitle.textContent==='Intraday feed returned date-only data')) subtitle.textContent=history.length ? (range==='1D'?'Today · intraday NEPSE index':'NEPSE daily index history') : 'Real market history unavailable';
     draw();
   }
 
@@ -6334,12 +6478,24 @@ window.openTechnicalScreener=open;window.PULSE_TECHNICAL_SCREENER={load,open,ren
     loadHistory();
   }));
 
-  window.addEventListener('pulse-central-snapshot',()=>{loadHistory()});
+  window.addEventListener('pulse-central-snapshot',e=>{
+    captureLiveIndex(e.detail);
+    if(range==='1D'){
+      const byDay=new Map();
+      intradayPoints.forEach(x=>{const d=new Date(x.date);if(!Number.isFinite(d.getTime()))return;const key=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');if(!byDay.has(key))byDay.set(key,[]);byDay.get(key).push(x);});
+      const days=Array.from(byDay.keys()).sort();
+      let session=[];for(let i=days.length-1;i>=0;i--){const pts=byDay.get(days[i]).sort((a,b)=>new Date(a.date)-new Date(b.date));if(pts.length>=2){session=pts;break;}}
+      history=session;
+      if(subtitle)subtitle.textContent=history.length>=2?'Saved intraday session · '+new Date(history[0].date).toLocaleDateString():'Waiting for timestamped intraday points';
+      draw();
+    }
+  });
   if(window.ResizeObserver){
     resizeObserver=new ResizeObserver(resize);
     resizeObserver.observe(canvas.parentElement);
   }else window.addEventListener('resize',resize);
 
+  captureLiveIndex(getState());
   resize();
   loadHistory();
 })();
@@ -7298,68 +7454,7 @@ header.topbar, header.topbar .toprow, .mobile-exact-topbar {
 </script>
 
 
-<script id="nepse-pulse-final-movers-fix">
-(function(){
-  let moverMode='gainers';
-  let snapshot={gainers:[],losers:[]};
-  const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const n=v=>{const x=Number(v);return Number.isFinite(x)?x:null};
-  const pick=(o,keys)=>{for(const k of keys){if(o&&o[k]!==undefined&&o[k]!==null&&o[k]!=='')return o[k]}return null};
-  const norm=(x)=>({
-    symbol:String(pick(x,['symbol','ticker','securityName','stockSymbol'])??'').trim(),
-    ltp:n(pick(x,['ltp','lastPrice','price','close','closingPrice'])),
-    change:n(pick(x,['change','pointChange','changeValue','difference'])),
-    pct:n(pick(x,['pct','perChange','percentChange','percentageChange','changePercent','pChange','percentage'])),
-  });
-  function rows(list){return Array.isArray(list)?list.map(norm).filter(x=>x.symbol):[]}
-  function render(){
-    const el=document.getElementById('pulseMoversRows'); if(!el)return;
-    const list=(moverMode==='losers'?snapshot.losers:snapshot.gainers).slice(0,10);
-    el.innerHTML=list.map(r=>{
-      const cls=(r.pct??r.change??0)>=0?'up':'down';
-      return `<div class="pulse-row"><b>${esc(r.symbol)}</b><span class="${cls}">${r.change===null?'—':(r.change>=0?'+':'')+r.change.toFixed(2)}</span><span class="${cls}">${r.pct===null?'—':(r.pct>=0?'+':'')+r.pct.toFixed(2)+'%'}</span><span>${r.ltp===null?'—':r.ltp.toFixed(2)}</span></div>`;
-    }).join('') || '<div class="pulse-row"><span>No verified rows</span></div>';
-    document.querySelectorAll('[data-mover-tab]').forEach(b=>b.classList.toggle('active',b.dataset.moverTab===moverMode));
-  }
-  function setSnapshot(d){
-    // Prefer the backend's dedicated movers lists, but derive the full top 10
-    // from the complete market rows when those lists are absent or incomplete.
-    const g=rows(d?.gainers);
-    const l=rows(d?.losers);
-    const source=rows(d?.live||d?.companies||d?.rows||d?.data||d?.results);
-    const normalizedSource=source.map(r=>{
-      const change=r.change===null&&r.ltp!==null?null:r.change;
-      let pct=r.pct;
-      if(pct===null){const prev=n(pick(r,['previousClose','previousClosingPrice','prevClose','previousPrice']));if(change!==null&&prev) pct=change/prev*100;}
-      return {...r,change,pct};
-    }).filter(r=>r.symbol&&r.pct!==null);
-    const derivedG=[...normalizedSource].sort((a,b)=>b.pct-a.pct);
-    const derivedL=[...normalizedSource].sort((a,b)=>a.pct-b.pct);
-    snapshot.gainers=(g.length>=10?g:derivedG.length>=10?derivedG:g).slice(0,10);
-    snapshot.losers=(l.length>=10?l:derivedL.length>=10?derivedL:l).slice(0,10);
-    render();
-  }
-  document.addEventListener('click',e=>{
-    const b=e.target.closest?.('[data-mover-tab]');
-    if(!b)return;
-    moverMode=b.dataset.moverTab==='losers'?'losers':'gainers';
-    e.preventDefault();
-    e.stopImmediatePropagation();
-    render();
-  },true);
-  window.addEventListener('pulse-central-snapshot',e=>setSnapshot(e.detail||{}));
-  async function load(){
-    try{
-      const base=window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com';
-      const r=await fetch(base+'/api/market?_movers_fix='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});
-      if(!r.ok)return;
-      const d=await r.json();
-      setSnapshot(d);
-    }catch(_e){}
-  }
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',load,{once:true});else load();
-})();
-</script>
+<!-- Removed competing movers script: its capture handler kept the final controller stuck on Gainers. -->
 
 <script id="np-all-market-controller">
 (function(){let allRows=[];const $=id=>document.getElementById(id);const escv=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));const pick=(o,keys)=>{for(const k of keys){if(o&&o[k]!=null&&o[k]!=='')return o[k]}return null};const n=v=>{if(v==null||v==='')return null;const x=Number(String(v).replace(/,/g,''));return Number.isFinite(x)?x:null};const fmt=v=>{const x=n(v);return x==null?'—':x.toLocaleString(undefined,{maximumFractionDigits:2})};function rowsOf(v){if(Array.isArray(v))return v;if(!v||typeof v!=='object')return [];for(const k of ['live','companies','data','rows','result','results','content','records','items']){const x=v[k];if(Array.isArray(x)&&x.length)return x;if(x&&typeof x==='object'){const nested=rowsOf(x);if(nested.length)return nested}}return []}function norm(o){const sym=String(pick(o,['symbol','stockSymbol','securitySymbol','symbolName','companySymbol','scrip','ticker','code','security_code'])||'').toUpperCase();const ltp=n(pick(o,['ltp','lastTradedPrice','lastTradedPriceValue','closingPrice','closePrice','close','price']));const prev=n(pick(o,['previousClose','previousClosingPrice','prevClose','previousPrice']));let ch=n(pick(o,['change','pointChange','difference','changeAmount']));let pct=n(pick(o,['percentageChange','perChange','percentChange','changePercent','pChange','changePercentage']));if(pct==null&&ch!=null&&prev)pct=ch/prev*100;if(ch==null&&ltp!=null&&prev!=null)ch=ltp-prev;return {sym,company:pick(o,['companyName','securityName','name']),ltp,high:n(pick(o,['high','highPrice','maxPrice','dayHigh'])),low:n(pick(o,['low','lowPrice','minPrice','dayLow'])),ch,pct}}function render(){const q=($('npamSearch')?.value||'').trim().toUpperCase();const list=allRows.filter(r=>!q||r.sym.includes(q)||String(r.company||'').toUpperCase().includes(q));$('npamRows').innerHTML=list.map(r=>`<tr class="${(r.pct??0)>0?'up':(r.pct??0)<0?'down':'flat'}" data-symbol="${escv(r.sym)}"><td>${escv(r.sym)}</td><td>${fmt(r.ltp)}</td><td>${fmt(r.high)}</td><td>${fmt(r.low)}</td><td>${fmt(r.ch)}</td><td>${r.pct==null?'—':fmt(r.pct)+'%'}</td></tr>`).join('')||'<tr><td colspan="6" style="text-align:center;background:#073536">No company rows available</td></tr>';$('npamCount').textContent=`${list.length} companies`;}
@@ -9775,3 +9870,107 @@ const priorLoad=window.loadPriceVolumeActions;window.loadPriceVolumeActions=asyn
   },true);
 })();
 </script>
+
+
+<style id="np-guest-viewmore-final-css">
+#np-login-gate .np-login-guest{display:block!important;visibility:visible!important;opacity:1!important;position:relative!important;z-index:5!important;pointer-events:auto!important;min-height:44px!important;margin:14px auto 0!important;padding:10px 16px!important;border:1px solid #45618b!important;border-radius:12px!important;color:#d8e7ff!important;background:rgba(20,42,78,.8)!important;font-size:14px!important;font-weight:700!important;touch-action:manipulation!important}
+#npMoversMore,#npLiquidityMore{position:relative!important;z-index:2147483000!important;pointer-events:auto!important;touch-action:manipulation!important;min-height:48px!important;display:block;cursor:pointer}
+</style>
+<script id="np-guest-viewmore-transactions-final-controller">
+(function(){
+ 'use strict';
+ let state=null, moverMode='gainers', liqMode='turnover', expandedMovers=false, expandedLiq=false;
+ const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
+ const normKey=s=>String(s??'').toLowerCase().replace(/[^a-z0-9]/g,'');
+ const num=v=>{if(v===null||v===undefined||v==='')return null; if(typeof v==='string')v=v.replace(/[,\s]/g,'');const x=Number(v);return Number.isFinite(x)?x:null};
+ function pick(o,keys){if(!o||typeof o!=='object')return null;const m={};Object.keys(o).forEach(k=>m[normKey(k)]=o[k]);for(const k of keys){const v=m[normKey(k)];if(v!==undefined&&v!==null&&v!=='')return v;}return null}
+ function arrays(root,keys){const out=[];const roots=[root,root?.data,root?.market,root?.result,root?.payload].filter(x=>x&&typeof x==='object');for(const r of roots){if(Array.isArray(r)){if(r.length)out.push(r);continue}for(const k of keys){const a=r[k]??r[Object.keys(r).find(z=>normKey(z)===normKey(k))];if(Array.isArray(a)&&a.length)out.push(a)}}return out}
+ function symbol(r){return String(pick(r,['symbol','stockSymbol','securitySymbol','ticker','scrip','code','securityCode','companyCode','tradingSymbol','stock_code'])||'').trim().toUpperCase()}
+ function pct(r){let p=num(pick(r,['percentageChange','percentChange','changePercent','changePct','pChange','perChange','changePercentage','percent_change','percentage','pct','change_percent']));if(p!==null)return p;const c=num(pick(r,['change','pointChange','priceChange','changeValue','difference']));const prev=num(pick(r,['previousClose','previousClosingPrice','prevClose','previousPrice','previousDayClose']));const price=num(pick(r,['lastTradedPrice','lastPrice','ltp','price','close','closingPrice']));if(c!==null&&prev) return c/prev*100;if(price!==null&&prev) return (price-prev)/prev*100;return null}
+ function change(r){const c=num(pick(r,['change','pointChange','priceChange','changeValue','difference','netChange']));if(c!==null)return c;const price=num(pick(r,['lastTradedPrice','lastPrice','ltp','price','close','closingPrice']));const prev=num(pick(r,['previousClose','previousClosingPrice','prevClose','previousPrice','previousDayClose']));return price!==null&&prev!==null?price-prev:null}
+ function price(r){return num(pick(r,['lastTradedPrice','lastPrice','ltp','price','close','closingPrice','currentPrice']))}
+ function count(r){
+   const direct=num(pick(r,['transactions','transaction','totalTransactions','totalTransaction','numberOfTransactions','noOfTransactions','noOfTransaction','totalNoOfTransactions','totalTransactionCount','transactionCount','tradeCount','totalTrades','totalTrade','numberOfTrades','noOfTrades','tradesCount','totalTradesCount','totalTradeCount','totalNumberOfTransactions','transactionsCount','transaction_count','total_transactions','total_trade_count','no_of_transactions','totalNoOfTrades','totalNoOfTransaction','totalTransactionNumber','transactionNumber','totalTradeNumber','noOfTrade','trade_count','totalCount','count','totalTransactionScrips','totalTransactionCountScrip','totalTransactionsCount']));
+   if(direct!==null)return direct;
+   // Some feeds expose a list of individual trades instead of a per-symbol count.
+   // This fallback is populated only from actual floorsheet records below.
+   return num(r&&r.__npVerifiedFloorCount);
+ }
+ function vol(r){return num(pick(r,['volume','totalTradedQuantity','totalTradeQuantity','quantity','sharesTraded','tradedShares','shareVolume','totalVolume','tradeQuantity']))}
+ function turn(r){return num(pick(r,['turnover','totalTurnover','totalTradedValue','totalTradeValue','amount','totalAmount','value','tradedValue']))}
+ function mergeRows(lists){const map=new Map();for(const list of lists)for(const raw of list||[]){if(!raw||typeof raw!=='object')continue;const sym=symbol(raw);if(!sym)continue;const old=map.get(sym)||{};const merged={...old};for(const [k,v] of Object.entries(raw)){if(v!==null&&v!==undefined&&v!=='')merged[k]=v;}merged.symbol=sym;map.set(sym,merged)}return [...map.values()]}
+ function roots(){const d=state||window.PULSE_FEED_ENGINE?.state?.()||window.PULSE_FEED?.state||window.marketData||{};return d&&typeof d==='object'?d:{}}
+ function datasets(){const r=roots();const allLists=arrays(r,['live','liveMarket','securities','companies','rows','stocks','results','items','data']);const all=mergeRows(allLists);const gainLists=arrays(r,['gainers','topGainers','top_gainers']);const loseLists=arrays(r,['losers','topLosers','top_losers']);let gain=mergeRows(gainLists),lose=mergeRows(loseLists);if(all.length){const by=new Map(all.map(x=>[symbol(x),x]));gain=gain.map(x=>({...by.get(symbol(x)),...x}));lose=lose.map(x=>({...by.get(symbol(x)),...x}));}
+ const base=all.length?all:mergeRows([...gainLists,...loseLists]);const derivedG=base.filter(x=>pct(x)!==null&&pct(x)>0).sort((a,b)=>pct(b)-pct(a));const derivedL=base.filter(x=>pct(x)!==null&&pct(x)<0).sort((a,b)=>pct(a)-pct(b));gain=(derivedG.length>gain.length?derivedG:(gain.filter(x=>pct(x)===null||pct(x)>0).length?gain.filter(x=>pct(x)===null||pct(x)>0):derivedG)).sort((a,b)=>(pct(b)??-Infinity)-(pct(a)??-Infinity));lose=(derivedL.length>lose.length?derivedL:(lose.filter(x=>pct(x)===null||pct(x)<0).length?lose.filter(x=>pct(x)===null||pct(x)<0):derivedL)).sort((a,b)=>(pct(a)??Infinity)-(pct(b)??Infinity));
+ const txLists=arrays(r,['transactions','topTransactions','top_transactions','transactionLeaderboard','topTransactionScrips','topTenTransactionScrips','trades','topTrades']);const tx=mergeRows(txLists);let liq=base;
+ if(liqMode==='transactions'){const txMerged=tx.map(t=>({...base.find(x=>symbol(x)===symbol(t)),...t})).filter(x=>symbol(x)&&count(x)!==null).sort((a,b)=>count(b)-count(a));liq=txMerged.length?txMerged:base.filter(x=>count(x)!==null).sort((a,b)=>count(b)-count(a));}
+ else if(liqMode==='volume')liq=[...base].filter(x=>vol(x)!==null).sort((a,b)=>vol(b)-vol(a));
+ else liq=[...base].filter(x=>turn(x)!==null).sort((a,b)=>turn(b)-turn(a));
+ return {gain,lose,liq,base,tx};}
+ const fmt=(v,d=2)=>v===null||v===undefined?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:d});
+ const money=v=>{if(v===null||v===undefined)return '—';const a=Math.abs(v);if(a>=1e9)return (a/1e9).toFixed(2)+' Arab';if(a>=1e7)return (a/1e7).toFixed(2)+' Cr';if(a>=1e5)return (a/1e5).toFixed(2)+' L';return fmt(v)};
+ const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+ function rowHTML(r,kind){const s=symbol(r);const c=pct(r), ch=change(r), p=price(r);let a,b,cls=c!==null&&c<0?'down':'up';if(kind==='movers'){a=ch===null?'—':(ch>0?'+':'')+fmt(ch);b=c===null?'—':(c>0?'+':'')+fmt(c)+'%';return `<div class="pulse-row" data-symbol="${esc(s)}" tabindex="0"><b>${esc(s)}</b><span class="${cls}">${a}</span><span class="${cls}">${b}</span><span>${fmt(p)}</span></div>`}let value=kind==='transactions'?count(r):kind==='volume'?vol(r):turn(r);let display=kind==='turnover'?money(value):fmt(value,0);return `<div class="pulse-row" data-symbol="${esc(s)}" tabindex="0"><b>${esc(s)}</b><span>${display}</span><span class="${cls}">${p===null?'—':fmt(p)+(c===null?'':` (${c>0?'+':''}${fmt(c)}%)`)}</span></div>`}
+ function paint(){const d=datasets();const m=$('#pulseMoversRows'),l=$('#pulseLiquidityRows');if(m){const list=moverMode==='losers'?d.lose:d.gain;const shown=expandedMovers?list:list.slice(0,10);m.innerHTML=shown.map(r=>rowHTML(r,'movers')).join('')||'<div class="pulse-row"><span>No verified rows for this list.</span></div>';const b=$('#npMoversMore');if(b){b.hidden=list.length<=10;b.style.display=list.length>10?'block':'none';b.textContent=expandedMovers?'View Less ↑':'View More >';b.setAttribute('aria-expanded',String(expandedMovers));b.disabled=list.length<=10;}}
+ if(l){const list=d.liq;const shown=expandedLiq?list:list.slice(0,10);l.innerHTML=shown.map(r=>rowHTML(r,liqMode)).join('')||'<div class="pulse-row"><span>'+(liqMode==='transactions'?'Transaction counts are not present in the loaded backend data.':'No verified rows for this list.')+'</span></div>';const b=$('#npLiquidityMore');if(b){b.hidden=list.length<=10;b.style.display=list.length>10?'block':'none';b.textContent=expandedLiq?'View Less ↑':'View More >';b.setAttribute('aria-expanded',String(expandedLiq));b.disabled=list.length<=10;}}
+ $$('[data-mover-tab]').forEach(b=>b.classList.toggle('active',b.dataset.moverTab===moverMode));$$('[data-liq-tab]').forEach(b=>b.classList.toggle('active',b.dataset.liqTab===liqMode));}
+ // Capture-phase handling intentionally supersedes the conflicting older dashboard scripts.
+ document.addEventListener('click',function(e){const b=e.target?.closest?.('#npMoversMore,#npLiquidityMore,[data-mover-tab],[data-liq-tab]');if(!b)return;e.preventDefault();e.stopImmediatePropagation();if(b.id==='npMoversMore')expandedMovers=!expandedMovers;else if(b.id==='npLiquidityMore')expandedLiq=!expandedLiq;else if(b.hasAttribute('data-mover-tab')){moverMode=b.dataset.moverTab==='losers'?'losers':'gainers';expandedMovers=false;}else{liqMode=['turnover','volume','transactions'].includes(b.dataset.liqTab)?b.dataset.liqTab:'turnover';expandedLiq=false;}paint();},true);
+ function transactionRowsFrom(obj){return mergeRows(arrays(obj,['transactions','topTransactions','top_transactions','transactionLeaderboard','topTransactionScrips','topTenTransactionScrips','trades','topTrades']));}
+ function mergeSnapshot(next){
+   const incoming=next&&typeof next==='object'?next:{};
+   const previous=state&&typeof state==='object'?state:{};
+   const oldTx=transactionRowsFrom(previous);
+   const newTx=transactionRowsFrom(incoming);
+   // Live snapshots sometimes omit the transaction dataset. Keep the last valid rows
+   // rather than clearing the Transactions tab during an unrelated market refresh.
+   const keepTx=newTx.length?newTx:oldTx;
+   state={...previous,...incoming};
+   if(keepTx.length)state.transactions=keepTx;
+   return state;
+ }
+ window.addEventListener('pulse-central-snapshot',e=>{mergeSnapshot(e.detail||{});paint();});
+ // Initial state and direct API refresh make the view work even if the legacy render event fires early.
+ function initial(){state=window.PULSE_FEED_ENGINE?.state?.()||window.PULSE_FEED?.state||window.marketData||state;paint();}
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initial,{once:true});else initial();
+ setTimeout(initial,900);setTimeout(initial,2400);
+ const apiBase=String(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
+ try{fetch(apiBase+'/api/market?_np_final_dashboard='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>r.ok?r.json():null).then(d=>{if(d){mergeSnapshot(d);paint();}}).catch(()=>{});}catch(e){}
+ // Transaction-only fallback: when /api/market lacks per-symbol transaction totals,
+ // count real rows returned by the existing floorsheet endpoint. Never synthesize values.
+ async function loadVerifiedTransactionCounts(){
+   try{
+     const r=await fetch(apiBase+'/api/floorsheet?limit=500&_np_tx='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});
+     if(!r.ok)return;
+     const payload=await r.json();
+     function findTradeArray(v,depth=0){
+       if(depth>5||!v||typeof v!=='object')return [];
+       if(Array.isArray(v)){
+         if(v.some(x=>x&&typeof x==='object'&&symbol(x)&&pick(x,['buyer','buyerBroker','seller','sellerBroker','quantity','qty','rate','price','amount','tradeDate','contractNo','transactionId'] )!==null))return v;
+         for(const x of v){const a=findTradeArray(x,depth+1);if(a.length)return a;}return [];
+       }
+       for(const k of ['data','results','result','rows','records','items','floorsheet','trades','transactions']){const a=findTradeArray(v[k],depth+1);if(a.length)return a;}
+       return [];
+     }
+     const trades=findTradeArray(payload);
+     if(!trades.length)return;
+     const counts=new Map();
+     for(const trade of trades){const sym=symbol(trade);if(sym)counts.set(sym,(counts.get(sym)||0)+1);}
+     if(!counts.size)return;
+     const r0=roots();
+     const existing=arrays(r0,['transactions','topTransactions','top_transactions','transactionLeaderboard','topTransactionScrips','topTenTransactionScrips','trades','topTrades']);
+     const tx=mergeRows(existing);
+     const baseRows=mergeRows(arrays(r0,['live','liveMarket','securities','companies','rows','stocks','results','items','data']));
+     const merged=new Map();
+     for(const raw of [...baseRows,...tx]){const sym=symbol(raw);if(!sym)continue;merged.set(sym,{...(merged.get(sym)||{}),...raw});}
+     for(const [sym,n] of counts){const raw=merged.get(sym)||{symbol:sym};if(count(raw)===null)raw.__npVerifiedFloorCount=n;merged.set(sym,raw);}
+     state={...r0,...state,transactions:[...merged.values()].filter(x=>count(x)!==null).sort((a,b)=>count(b)-count(a)),__npTransactionSource:'verified floorsheet rows'};
+     paint();
+   }catch(e){/* Keep the existing market data and never invent transaction counts. */}
+ }
+ loadVerifiedTransactionCounts();
+ // Guest mode is anonymous local browsing only; it does not create an authenticated Supabase user.
+ const guest=$('#np-login-guest');if(guest){guest.style.setProperty('display','block','important');guest.addEventListener('click',function(e){e.preventDefault();e.stopImmediatePropagation();window.__NP_GUEST_MODE=true;window.__NP_LOGIN_SESSION=null;window.npHideLoginGate?.();const st=$('#np-login-status');if(st)st.textContent='Guest mode: browsing is available. Sign in to sync your personal data.';const profile=document.querySelector('.v22-profile-sub');if(profile)profile.textContent='Guest mode · Sign in to sync Watchlist and Portfolio.';},true);}
+})();
+</script>
+
