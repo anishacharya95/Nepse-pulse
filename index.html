@@ -23,10 +23,23 @@
         document.head.appendChild(meta);
       }
       if (meta.getAttribute('content') !== content) meta.setAttribute('content', content);
-      // Ask the browser to recalculate responsive CSS after an OAuth return.
-      document.documentElement.style.maxWidth = '100%';
-      document.body && (document.body.style.maxWidth = '100%');
+      // Remove accidental fixed/minimum widths that can preserve desktop layout
+      // after the browser returns from an external OAuth page.
+      document.documentElement.style.setProperty('width', '100%', 'important');
+      document.documentElement.style.setProperty('max-width', '100%', 'important');
+      document.documentElement.style.setProperty('min-width', '0', 'important');
+      if (document.body) {
+        document.body.style.setProperty('width', '100%', 'important');
+        document.body.style.setProperty('max-width', '100%', 'important');
+        document.body.style.setProperty('min-width', '0', 'important');
+      }
+      // Force responsive layout recalculation on mobile browsers after OAuth.
       window.dispatchEvent(new Event('resize'));
+      if (window.matchMedia && window.matchMedia('(max-width: 768px)').matches) {
+        document.documentElement.classList.add('np-mobile-layout');
+      } else {
+        document.documentElement.classList.remove('np-mobile-layout');
+      }
     } catch (_) {}
   }
   repairViewport();
@@ -37,6 +50,26 @@
     if (!document.hidden) repairViewport();
   }, {passive:true});
   window.addEventListener('popstate', repairViewport, {passive:true});
+  // Some Android Chrome OAuth returns briefly retain a desktop-sized layout
+  // viewport until a full navigation. If the physical screen is mobile-sized
+  // but the layout viewport is desktop-sized, perform one guarded recovery reload.
+  function recoverStaleMobileViewport() {
+    try {
+      var mobileScreen = Math.min(window.screen && window.screen.width || 9999,
+                                  window.screen && window.screen.height || 9999) <= 768;
+      var desktopViewport = window.innerWidth > 768;
+      var oauthReturn = /[?&](code|access_token|refresh_token)=/.test(location.search + location.hash);
+      var key = 'np_mobile_oauth_viewport_recovered';
+      if (mobileScreen && desktopViewport && oauthReturn && !sessionStorage.getItem(key)) {
+        sessionStorage.setItem(key, '1');
+        window.location.reload();
+      } else if (!oauthReturn && !desktopViewport) {
+        sessionStorage.removeItem(key);
+      }
+    } catch (_) {}
+  }
+  window.addEventListener('pageshow', recoverStaleMobileViewport, {passive:true});
+  window.addEventListener('load', recoverStaleMobileViewport, {passive:true});
   window.addEventListener('hashchange', repairViewport, {passive:true});
   // OAuth providers return with a code/token in the URL. Re-check after auth
   // libraries finish exchanging it, without forcing a page reload.
