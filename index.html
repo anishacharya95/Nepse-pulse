@@ -7,44 +7,77 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <script id="np-mobile-viewport-auth-fix">
-/* Keep the layout mobile-sized even if Android Chrome returns from Google sign-in
-   with Desktop site enabled / a wide CSS layout viewport. */
+/*
+ * Keep the mobile viewport stable when returning from OAuth/account switching.
+ * Some mobile browsers restore the page with a stale desktop-sized layout
+ * viewport after an external sign-in flow; refreshing then recalculates it.
+ */
 (function () {
   var content = 'width=device-width,initial-scale=1,viewport-fit=cover';
-  function isPhoneScreen() {
-    var sw = Number(window.screen && window.screen.width) || 9999;
-    var sh = Number(window.screen && window.screen.height) || 9999;
-    var dpr = Number(window.devicePixelRatio) || 1;
-    // screen.width is normally CSS pixels; DPR fallback handles devices reporting physical pixels.
-    return Math.min(sw, sh, Math.min(sw, sh) / dpr) <= 768;
-  }
   function repairViewport() {
     try {
       var meta = document.querySelector('meta[name="viewport"]');
-      if (!meta) { meta = document.createElement('meta'); meta.name = 'viewport'; document.head.appendChild(meta); }
+      if (!meta) {
+        meta = document.createElement('meta');
+        meta.name = 'viewport';
+        document.head.appendChild(meta);
+      }
       if (meta.getAttribute('content') !== content) meta.setAttribute('content', content);
-      var mobile = isPhoneScreen();
-      document.documentElement.classList.toggle('np-force-mobile', mobile);
+      // Remove accidental fixed/minimum widths that can preserve desktop layout
+      // after the browser returns from an external OAuth page.
       document.documentElement.style.setProperty('width', '100%', 'important');
       document.documentElement.style.setProperty('max-width', '100%', 'important');
       document.documentElement.style.setProperty('min-width', '0', 'important');
       if (document.body) {
-        document.body.classList.toggle('np-force-mobile', mobile);
         document.body.style.setProperty('width', '100%', 'important');
         document.body.style.setProperty('max-width', '100%', 'important');
         document.body.style.setProperty('min-width', '0', 'important');
       }
+      // Force responsive layout recalculation on mobile browsers after OAuth.
       window.dispatchEvent(new Event('resize'));
+      if (window.matchMedia && window.matchMedia('(max-width: 768px)').matches) {
+        document.documentElement.classList.add('np-mobile-layout');
+      } else {
+        document.documentElement.classList.remove('np-mobile-layout');
+      }
     } catch (_) {}
   }
   repairViewport();
-  document.addEventListener('DOMContentLoaded', repairViewport, {once:true, passive:true});
   window.addEventListener('pageshow', repairViewport, {passive:true});
   window.addEventListener('load', repairViewport, {passive:true});
   window.addEventListener('focus', repairViewport, {passive:true});
-  window.addEventListener('resize', repairViewport, {passive:true});
-  document.addEventListener('visibilitychange', function () { if (!document.hidden) repairViewport(); }, {passive:true});
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) repairViewport();
+  }, {passive:true});
+  window.addEventListener('popstate', repairViewport, {passive:true});
+  // Some Android Chrome OAuth returns briefly retain a desktop-sized layout
+  // viewport until a full navigation. If the physical screen is mobile-sized
+  // but the layout viewport is desktop-sized, perform one guarded recovery reload.
+  function recoverStaleMobileViewport() {
+    try {
+      var mobileScreen = Math.min(window.screen && window.screen.width || 9999,
+                                  window.screen && window.screen.height || 9999) <= 768;
+      var desktopViewport = window.innerWidth > 768;
+      var oauthReturn = /[?&](code|access_token|refresh_token)=/.test(location.search + location.hash);
+      var key = 'np_mobile_oauth_viewport_recovered';
+      if (mobileScreen && desktopViewport && oauthReturn && !sessionStorage.getItem(key)) {
+        sessionStorage.setItem(key, '1');
+        window.location.reload();
+      } else if (!oauthReturn && !desktopViewport) {
+        sessionStorage.removeItem(key);
+      }
+    } catch (_) {}
+  }
+  window.addEventListener('pageshow', recoverStaleMobileViewport, {passive:true});
+  window.addEventListener('load', recoverStaleMobileViewport, {passive:true});
   window.addEventListener('hashchange', repairViewport, {passive:true});
+  // OAuth providers return with a code/token in the URL. Re-check after auth
+  // libraries finish exchanging it, without forcing a page reload.
+  if (/[?&](code|access_token|refresh_token)=/.test(location.search + location.hash)) {
+    setTimeout(repairViewport, 150);
+    setTimeout(repairViewport, 700);
+    setTimeout(repairViewport, 1500);
+  }
 })();
 </script>
 <link rel="preconnect" href="https://nepse-pulse-1.onrender.com" crossorigin>
@@ -1153,10 +1186,10 @@ main>.hero, main>.search, main>.section-head, main>.market, main>.feed-debug{
 .np-splash-loader{position:absolute;left:50%;bottom:10.45%;transform:translateX(-50%);width:min(50%,430px);height:8px;border-radius:99px;overflow:hidden;background:rgba(8,40,95,.96);box-shadow:0 0 0 2px rgba(42,151,255,.42),0 0 18px rgba(0,210,255,.28);}
 .np-splash-progress{position:absolute;inset:0 auto 0 0;width:0;border-radius:inherit;background:linear-gradient(90deg,#168cff,#00d9ff,#19e879);box-shadow:0 0 14px rgba(0,217,255,.85);animation:npSplashProgress 3.2s cubic-bezier(.2,.8,.2,1) forwards;}
 .np-splash-shine{position:absolute;top:0;bottom:0;width:26%;left:-30%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.9),transparent);filter:blur(.4px);animation:npSplashShine 1.15s ease-in-out infinite;}
-
+.np-splash-loading{position:absolute;left:50%;bottom:7.7%;transform:translateX(-50%);color:#fff;font-size:14px;line-height:1;letter-spacing:5px;font-weight:600;text-shadow:0 1px 8px rgba(0,0,0,.45);white-space:nowrap;}
 @keyframes npSplashProgress{0%{width:0}35%{width:34%}68%{width:67%}90%{width:88%}100%{width:100%}}
 @keyframes npSplashShine{0%{left:-30%;opacity:0}15%{opacity:1}70%{opacity:1}100%{left:105%;opacity:0}}
-@media(max-width:480px){.np-splash-loader{width:50%;height:7px;bottom:10.45%}}
+@media(max-width:480px){.np-splash-loader{width:50%;height:7px;bottom:10.45%}.np-splash-loading{bottom:7.55%;font-size:12px;letter-spacing:4px}}
 @media(prefers-reduced-motion:reduce){.np-splash-progress{animation-duration:1.2s}.np-splash-shine{animation:none;display:none}.np-splash-loader{transition:none}}
 /* Keep every app navigation bar behind the splash until startup is complete. */
 body.np-splash-active .nav,
@@ -1962,52 +1995,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--np-blue)!important;bo
 }
 </style>
 
-<style id="np-force-mobile-layout">
-/* Extra narrow-screen override: when mobile class is detected, always stack home dashboard cards. */
-html.np-force-mobile .pulse-home-grid,
-html.np-force-mobile #pulse-home-market-dashboard .pulse-home-grid,
-html.np-force-mobile .pulse-home-dashboard .pulse-home-grid {
-  display:grid!important; grid-template-columns:minmax(0,1fr)!important;
-}
-
-/* Phone-screen fallback for Android Chrome returning from account/OAuth flows.
-   This overrides desktop breakpoints when Chrome's Desktop site mode makes innerWidth wide. */
-html.np-force-mobile, html.np-force-mobile body { width:100%!important; max-width:100%!important; min-width:0!important; }
-html.np-force-mobile body { overflow-x:hidden!important; }
-html.np-force-mobile #pulse-home-market-dashboard,
-html.np-force-mobile .pulse-home-dashboard { width:100%!important; max-width:none!important; min-width:0!important; margin-left:0!important; margin-right:0!important; }
-html.np-force-mobile #pulse-home-market-dashboard .pulse-home-grid,
-html.np-force-mobile .pulse-home-dashboard .pulse-home-grid,
-html.np-force-mobile #pulse-home-market-dashboard .pulse-home-cards,
-html.np-force-mobile .pulse-home-dashboard .pulse-home-cards,
-html.np-force-mobile #pulse-home-market-dashboard .pulse-dashboard-grid,
-html.np-force-mobile .pulse-home-dashboard .pulse-dashboard-grid {
-  display:grid!important;
-  grid-template-columns:minmax(0,1fr)!important;
-  grid-auto-flow:row!important;
-  width:100%!important;
-  min-width:0!important;
-}
-html.np-force-mobile #pulse-home-market-dashboard .pulse-home-card,
-html.np-force-mobile .pulse-home-dashboard .pulse-home-card,
-html.np-force-mobile #pulse-home-market-dashboard .pulse-liquidity-card,
-html.np-force-mobile #pulse-home-market-dashboard .pulse-movers-card {
-  grid-column:1 / -1!important;
-  width:100%!important;
-  min-width:0!important;
-}
-html.np-force-mobile #pulse-home-market-dashboard .pulse-home-grid > *,
-html.np-force-mobile .pulse-home-dashboard .pulse-home-grid > *,
-html.np-force-mobile #pulse-home-market-dashboard .pulse-home-cards > *,
-html.np-force-mobile .pulse-home-dashboard .pulse-home-cards > * {
-  grid-column:1 / -1!important;
-  min-width:0!important;
-  max-width:100%!important;
-}
-html.np-force-mobile .pulse-summary-card { grid-column:1 / -1!important; }
-html.np-force-mobile main, html.np-force-mobile #app, html.np-force-mobile .app, html.np-force-mobile .main-content { min-width:0!important; max-width:100%!important; }
-html.np-force-mobile img, html.np-force-mobile canvas, html.np-force-mobile svg, html.np-force-mobile iframe { max-width:100%; }
-</style>
 </head>
 <body>
 
@@ -2032,7 +2019,22 @@ html.np-force-mobile img, html.np-force-mobile canvas, html.np-force-mobile svg,
 <div id="nepse-pulse-splash" aria-label="NEPSE Pulse loading">
   <img src="splash.png" alt="NEPSE Pulse — Real Time Nepal Share Market" onerror="this.style.display='none'">
   <div class="np-splash-loader" aria-hidden="true"><div class="np-splash-progress"></div><div class="np-splash-shine"></div></div>
+  <div class="np-splash-loading" aria-live="polite">LOADING...</div>
 </div>
+<script id="np-splash-independent-failsafe">
+/* Independent failsafe: reveal the app even if the market-ready event never fires. */
+(function(){
+  function releaseSplash(){
+    var splash=document.getElementById('nepse-pulse-splash');
+    if(!splash)return;
+    splash.classList.add('is-hidden');
+    document.body.classList.remove('np-splash-active');
+    window.setTimeout(function(){if(splash.parentNode)splash.parentNode.removeChild(splash);},800);
+  }
+  window.setTimeout(releaseSplash,6500);
+  window.addEventListener('error',function(){window.setTimeout(releaseSplash,1000);},{once:true});
+})();
+</script>
 
 <div class="app">
 <header class="topbar mobile-exact-topbar">
@@ -9667,6 +9669,16 @@ html body .app > header.topbar.mobile-exact-topbar .mobile-exact-search {
 }
 </style>
 
+
+<style id="np-mobile-layout-final-override">
+@media screen and (max-width: 759px) {
+  html, body { width:100% !important; max-width:100% !important; min-width:0 !important; }
+  .pulse-home-grid, #pulse-home-market-dashboard .pulse-home-grid { grid-template-columns:minmax(0,1fr) !important; }
+  .pulse-summary-card { grid-column:1 / -1 !important; }
+  .market, .market-grid, .dashboard-grid, .market-dashboard-grid { grid-template-columns:minmax(0,1fr) !important; }
+  .app, main, .pulse-home-dashboard { max-width:100% !important; min-width:0 !important; }
+}
+</style>
 </body>
 </html>
 
