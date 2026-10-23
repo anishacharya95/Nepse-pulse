@@ -334,43 +334,81 @@ jobs:
           gradle = Path("android/app/build.gradle")
           s = gradle.read_text()
 
-          if "signingConfigs {" not in s:
-              marker = re.search(r"(?m)^\s*buildTypes\s*\{", s)
-              if not marker:
-                  raise SystemExit("Could not find buildTypes block in android/app/build.gradle")
-              signing = """    signingConfigs {
-                  release {
-                      storeFile file(System.getenv("ANDROID_KEYSTORE_PATH"))
-                      storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
-                      keyAlias System.getenv("ANDROID_KEY_ALIAS")
-                      keyPassword System.getenv("ANDROID_KEY_PASSWORD")
-                  }
-              }
+          def matching_close(text, open_pos):
+              depth = 0
+              quote = None
+              escaped = False
+              for i in range(open_pos, len(text)):
+                  ch = text[i]
+                  if quote:
+                      if escaped:
+                          escaped = False
+                      elif ch == "\\":
+                          escaped = True
+                      elif ch == quote:
+                          quote = None
+                      continue
+                  if ch in ("'", '"'):
+                      quote = ch
+                  elif ch == "{":
+                      depth += 1
+                  elif ch == "}":
+                      depth -= 1
+                      if depth == 0:
+                          return i
+              raise SystemExit("Could not parse Gradle braces")
 
-          """
-              s = s[:marker.start()] + signing + s[marker.start():]
+          def locate_block(text, name, start=0):
+              m = re.search(r"(?m)^\s*" + re.escape(name) + r"\s*\{", text[start:])
+              if not m:
+                  return None
+              line_start = start + m.start()
+              brace = text.find("{", line_start, start + m.end())
+              return line_start, brace, matching_close(text, brace)
 
-          release_match = re.search(r"(?m)^(\s*)release\s*\{", s)
-          if not release_match:
-              raise SystemExit("Could not find release buildType in android/app/build.gradle")
-          start = release_match.end()
-          # Locate the matching closing brace for the release block.
-          depth = 1
-          i = start
-          while i < len(s) and depth:
-              if s[i] == "{":
-                  depth += 1
-              elif s[i] == "}":
-                  depth -= 1
-              i += 1
-          if depth:
-              raise SystemExit("Could not parse release buildType block")
-          block = s[start:i-1]
-          if "signingConfig signingConfigs.release" not in block:
-              block = "\n        signingConfig signingConfigs.release" + block
-              s = s[:start] + block + s[i-1:]
+          build = locate_block(s, "buildTypes")
+          if not build:
+              raise SystemExit("Could not find buildTypes block in android/app/build.gradle")
+          signing = locate_block(s, "signingConfigs")
+          if not signing:
+              insertion = build[0]
+              config = ("    signingConfigs {\n"
+                        "        release {\n"
+                        "            storeFile file(System.getenv('ANDROID_KEYSTORE_PATH'))\n"
+                        "            storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')\n"
+                        "            keyAlias System.getenv('ANDROID_KEY_ALIAS')\n"
+                        "            keyPassword System.getenv('ANDROID_KEY_PASSWORD')\n"
+                        "        }\n"
+                        "    }\n\n")
+              s = s[:insertion] + config + s[insertion:]
 
+          # Remove any misplaced signingConfig line from signingConfigs.release.
+          signing = locate_block(s, "signingConfigs")
+          sign_body = s[signing[1] + 1:signing[2]]
+          rel = re.search(r"(?m)^\s*release\s*\{", sign_body)
+          if rel:
+              rel_line = signing[1] + 1 + rel.start()
+              rel_brace = s.find("{", rel_line, signing[2] + 1)
+              rel_close = matching_close(s, rel_brace)
+              body = s[rel_brace + 1:rel_close]
+              body = re.sub(r"(?m)^\s*signingConfig\s+signingConfigs\.release\s*;?\s*\n?", "", body)
+              s = s[:rel_brace + 1] + body + s[rel_close:]
+
+          # Add signingConfig only inside buildTypes.release.
+          build = locate_block(s, "buildTypes")
+          body = s[build[1] + 1:build[2]]
+          rel = re.search(r"(?m)^\s*release\s*\{", body)
+          if not rel:
+              raise SystemExit("Could not find release buildType inside buildTypes")
+          rel_line = build[1] + 1 + rel.start()
+          rel_brace = s.find("{", rel_line, build[2] + 1)
+          rel_close = matching_close(s, rel_brace)
+          release_body = s[rel_brace + 1:rel_close]
+          release_body = re.sub(r"(?m)^\s*signingConfig\s+signingConfigs\.release\s*;?\s*\n?", "", release_body)
+          release_body = "\n            signingConfig signingConfigs.release\n" + release_body
+          s = s[:rel_brace + 1] + release_body + s[rel_close:]
           gradle.write_text(s)
+          print("Release signing configured in buildTypes.release.")
           PY
 
       - name: Build release Android App Bundle
