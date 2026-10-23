@@ -3078,7 +3078,7 @@ async function initPulseAuth(){
 async function pulseOAuth(provider){
   if(!authReady()){toast('Connect the authentication provider first. No sign-in was faked.');return}
   try{
-    await window.supabase.auth.signInWithOAuth({provider,options:{redirectTo:window.location.href}});
+    await window.supabase.auth.signInWithOAuth({provider,options:{redirectTo:window.npOAuthRedirectTo ? window.npOAuthRedirectTo() : window.location.href}});
   }catch(e){toast('Could not start '+provider+' sign-in.')}
 }
 async function pulsePhoneOtp(){
@@ -3813,17 +3813,57 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
     render();
   }
   async function initPortfolioAuth(){
+    // Subscribe before reading the initial session so a sign-in/account switch
+    // cannot occur in the gap between getSession() and onAuthStateChange().
     try{
-      let client=null;
-      if(typeof window.__NP_GET_LOGIN_CLIENT==='function') client=await window.__NP_GET_LOGIN_CLIENT();
-      if(!client?.auth){loadAccount(null);return;}
-      const result=await client.auth.getSession();
-      loadAccount(result?.data?.session?.user||null);
-      client.auth.onAuthStateChange((event,session)=>{
-        // Clear the previous account's in-memory data before rendering the new account.
-        loadAccount(session?.user||null);
+      const client = typeof window.__NP_GET_LOGIN_CLIENT==='function'
+        ? await window.__NP_GET_LOGIN_CLIENT()
+        : null;
+      if(!client?.auth) throw new Error('Supabase authentication client is unavailable.');
+
+      let lastUserId = undefined;
+      let switchSerial = 0;
+      const applySession = (session) => {
+        const user = session?.user || null;
+        const nextId = user?.id || null;
+        if(nextId === lastUserId) return;
+        lastUserId = nextId;
+        const serial = ++switchSerial;
+
+        // Fail closed during account changes: never render the previous
+        // account's transactions while the next account is being selected.
+        authReady = false;
+        tx = [];
+        div = [];
+        activeUserId = nextId;
+        render();
+
+        // Portfolio is deliberately stored under a per-user key. A signed-in
+        // user never falls back to the shared/guest ledger.
+        tx = read(accountKey(TX), []);
+        div = read(accountKey(DV), []);
+        if(serial !== switchSerial) return;
+        authReady = true;
+        render();
+      };
+
+      client.auth.onAuthStateChange((_event, session) => {
+        applySession(session);
       });
-    }catch(e){loadAccount(null)}
+
+      const {data, error} = await client.auth.getSession();
+      if(error) throw error;
+      applySession(data?.session || null);
+    }catch(e){
+      console.error('Portfolio authentication could not be verified; hiding local portfolio data.', e);
+      activeUserId = null;
+      tx = [];
+      div = [];
+      authReady = true;
+      render();
+      const status = $('pFeedState');
+      if(status) status.textContent = 'PORTFOLIO HIDDEN — AUTHENTICATION CHECK FAILED';
+    }
   }
 
   function num(v){const n=Number(v);return Number.isFinite(n)?n:null}
@@ -6666,8 +6706,8 @@ header.topbar .feature-btn{
   window.v22OpenAuth=function(){const m=document.getElementById('v22-auth-modal');m?.classList.add('show');m?.setAttribute('aria-hidden','false')};
   window.v22CloseAuth=function(){const m=document.getElementById('v22-auth-modal');m?.classList.remove('show');m?.setAttribute('aria-hidden','true')};
   function status(t,bad){const x=document.getElementById('v22-auth-status');if(x){x.textContent=t;x.style.color=bad?'#c63f48':'#667085'}}
-  window.v22Google=async function(){const c=await loadSb();if(!c)return;const {error}=await c.auth.signInWithOAuth({provider:'google',options:{redirectTo:window.location.origin+window.location.pathname}});if(error)status(error.message,true)};
-  window.v22Facebook=async function(){const c=await loadSb();if(!c)return;const {error}=await c.auth.signInWithOAuth({provider:'facebook',options:{redirectTo:location.href}});if(error)status(error.message,true)};
+  window.v22Google=async function(){const c=await loadSb();if(!c)return;const {error}=await c.auth.signInWithOAuth({provider:'google',options:{redirectTo:window.npOAuthRedirectTo ? window.npOAuthRedirectTo() : (window.location.origin+window.location.pathname)}});if(error)status(error.message,true)};
+  window.v22Facebook=async function(){const c=await loadSb();if(!c)return;const {error}=await c.auth.signInWithOAuth({provider:'facebook',options:{redirectTo:window.npOAuthRedirectTo ? window.npOAuthRedirectTo() : location.href}});if(error)status(error.message,true)};
   window.v22SendOtp=async function(){const phone=(document.getElementById('v22-phone')?.value||'').trim();if(!/^\+\d{8,15}$/.test(phone)){status('Enter your mobile number with country code, e.g. +97798XXXXXXXX.',true);return}const c=await loadSb();if(!c)return;const {error}=await c.auth.signInWithOtp({phone});if(error){status(error.message,true);return}otpPhone=phone;document.getElementById('v22-otp-row').style.display='grid';status('OTP sent. Enter the 6-digit code.')};
   window.v22VerifyOtp=async function(){const token=(document.getElementById('v22-otp')?.value||'').trim();if(!/^\d{6}$/.test(token)){status('Enter the 6-digit OTP.',true);return}const c=await loadSb();if(!c)return;const {data,error}=await c.auth.verifyOtp({phone:otpPhone,token,type:'sms'});if(error){status(error.message,true);return}if(data?.session){updateProfile(data.session.user);await pullCloud();status('Signed in successfully.');setTimeout(v22CloseAuth,500)}};
   function updateProfile(u){currentUser=u||null;const body=document.getElementById('v22-profile-body');if(!body)return;if(!u){body.innerHTML='<div class="v22-avatar">G</div><div><div class="v22-profile-name">Guest</div><div class="v22-profile-sub">Sign in to sync Watchlist and future Portfolio/Alerts.</div></div><button class="v22-auth-btn" type="button" onclick="v22OpenAuth()">Sign in</button>';render();return}const label=u.user_metadata?.full_name||u.user_metadata?.name||u.email||u.phone||'Pulse user';const avatar=(label[0]||'P').toUpperCase();body.innerHTML='<div class="v22-avatar">'+esc(avatar)+'</div><div><div class="v22-profile-name">'+esc(label)+'</div><div class="v22-profile-sub">'+esc(u.email||u.phone||'Signed in')+'</div></div><button class="v22-auth-btn" type="button" onclick="v22SignOut()">Sign out</button>';render()}
@@ -8002,7 +8042,7 @@ body.v22-profile-tab-active .bottom.mobile-exact-bottom{z-index:10000}
      status('Connecting to Google…');
      const {data,error}=await c.auth.signInWithOAuth({
        provider:'google',
-       options:{redirectTo:window.location.origin+window.location.pathname}
+       options:{redirectTo:window.npOAuthRedirectTo ? window.npOAuthRedirectTo() : (window.location.origin+window.location.pathname)}
      });
      if(error)throw error;
      if(data&&data.url)status('Opening Google sign-in…');
@@ -8207,6 +8247,48 @@ window.runAiTrendlines=async function(){const symbol=(document.getElementById('n
 })();
 </script>
 
+<script id="np-capacitor-oauth-return-fix">
+/* Send native Capacitor OAuth back to Android, then let Supabase exchange its PKCE code. */
+(function(){
+  function isNative(){
+    try { return !!(window.Capacitor && typeof window.Capacitor.isNativePlatform === 'function' && window.Capacitor.isNativePlatform()); }
+    catch (_) { return false; }
+  }
+  window.npOAuthRedirectTo = function(){
+    return isNative() ? 'com.nepsepulse.app://login-callback' : (window.location.origin + window.location.pathname);
+  };
+  if (!isNative() || window.__NP_OAUTH_RETURN_LISTENER) return;
+  window.__NP_OAUTH_RETURN_LISTENER = true;
+  const appPlugin = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App;
+  if (!appPlugin || typeof appPlugin.addListener !== 'function') {
+    console.warn('Capacitor App plugin is unavailable; OAuth deep-link callback cannot be handled.');
+    return;
+  }
+  appPlugin.addListener('appUrlOpen', async function(event){
+    try {
+      const incoming = new URL(event && event.url ? event.url : '');
+      if (incoming.protocol !== 'com.nepsepulse.app:' || incoming.hostname !== 'login-callback') return;
+      const code = incoming.searchParams.get('code');
+      const error = incoming.searchParams.get('error_description') || incoming.searchParams.get('error');
+      if (error) { console.error('Google sign-in callback error:', error); return; }
+      if (!code) return;
+      const target = new URL(window.location.origin + window.location.pathname);
+      target.searchParams.set('code', code);
+      // Keep the callback in the app's web origin so supabase-js can complete PKCE exchange.
+      window.history.replaceState({}, document.title, target.pathname + target.search + target.hash);
+      const clientFactory = window.__NP_GET_LOGIN_CLIENT;
+      const client = clientFactory ? await clientFactory() : window.__NP_LOGIN_SUPABASE;
+      if (client && client.auth) {
+        const result = await client.auth.exchangeCodeForSession(code);
+        if (result.error) throw result.error;
+        window.__NP_LOGIN_SESSION = result.data && result.data.session || null;
+        if (window.npHideLoginGate) window.npHideLoginGate();
+        window.dispatchEvent(new CustomEvent('np-oauth-returned', {detail:{provider:'google'}}));
+      }
+    } catch (err) { console.error('Could not finish OAuth return to NEPSE Pulse:', err); }
+  });
+})();
+</script>
 </body>
 </html><script>
 // NEPSE Pulse Professional Charting V1 extension
