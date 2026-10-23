@@ -10087,3 +10087,39 @@ const priorLoad=window.loadPriceVolumeActions;window.loadPriceVolumeActions=asyn
 })();
 </script>
 
+
+
+<style id="np-auth-return-layout-repair-v1">
+/* Fix header and bottom navigation shrinking after an auth return/re-render. */
+.app{width:100%!important;max-width:none!important;margin:0 auto!important}
+.topbar.mobile-exact-topbar,
+header.mobile-exact-topbar{
+  display:block!important;width:100%!important;max-width:none!important;
+  min-width:0!important;margin:0!important;left:0!important;right:0!important;
+  transform:none!important;box-sizing:border-box!important;
+}
+.mobile-exact-topbar .mobile-exact-head,
+.mobile-exact-topbar .mobile-exact-search{
+  width:100%!important;max-width:none!important;box-sizing:border-box!important;
+}
+.mobile-exact-topbar .mobile-exact-head{
+  display:flex!important;align-items:center!important;
+}
+.mobile-exact-bottom{
+  width:calc(100% - 16px)!important;max-width:620px!important;
+  left:50%!important;right:auto!important;transform:translateX(-50%)!important;
+  box-sizing:border-box!important;
+}
+#v21-bottom-nav{
+  width:calc(100% - 16px)!important;max-width:620px!important;
+  left:50%!important;right:auto!important;transform:translateX(-50%)!important;
+  box-sizing:border-box!important;
+}
+@media(min-width:760px){
+  .topbar.mobile-exact-topbar,header.mobile-exact-topbar{
+    width:100%!important;max-width:none!important;margin:0!important;
+  }
+  .mobile-exact-bottom{width:calc(100% - 24px)!important;max-width:620px!important}
+}
+</style>
+
