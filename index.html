@@ -3829,9 +3829,9 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
   <div class="p-head">
     <div>
       <h2>Portfolio & Dividends</h2>
-      <div class="p-muted">Local ledger • market valuation from Central Feed Engine</div>
+      <div class="p-muted">Private portfolio • cloud sync when signed in</div>
     </div>
-    <span class="p-pill" id="pFeedState">FEED: CHECKING</span>
+    <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;max-width:58%"><span class="p-pill" id="pFeedState">FEED: CHECKING</span><span class="p-pill" id="pPortfolioState" role="status" aria-live="polite" style="white-space:normal;text-align:right;overflow-wrap:anywhere">PORTFOLIO: CHECKING AUTH</span></div>
   </div>
 
   <div class="p-grid">
@@ -3893,7 +3893,7 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
   let portfolioClient=null, cloudLoading=false, cloudSaveTimer=null, sessionSerial=0;
   const accountKey=(base)=>base+':'+(activeUserId?'user:'+activeUserId:'guest');
   function setPortfolioStatus(message){
-    const el=$('pFeedState');
+    const el=$('pPortfolioState');
     if(el) el.textContent=message;
   }
   function write(base,v){
@@ -3915,7 +3915,7 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
       if(uid===activeUserId) setPortfolioStatus('PORTFOLIO: SYNCED TO CLOUD');
     }catch(e){
       console.error('Portfolio cloud save failed:',e);
-      if(uid===activeUserId) setPortfolioStatus('PORTFOLIO: CLOUD SAVE FAILED — CHECK SUPABASE TABLE/RLS');
+      if(uid===activeUserId) setPortfolioStatus('PORTFOLIO: CLOUD SAVE FAILED — '+(e?.message||e?.details||'CHECK SUPABASE TABLE/RLS'));
     }
   }
   async function loadAccount(user, serial){
@@ -3953,7 +3953,7 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
       }
     }catch(e){
       console.error('Portfolio cloud load failed:',e);
-      if(serial===sessionSerial) setPortfolioStatus('PORTFOLIO: CLOUD UNAVAILABLE — SHOWING LOCAL CACHE');
+      if(serial===sessionSerial) setPortfolioStatus('PORTFOLIO: CLOUD LOAD FAILED — '+(e?.message||'CHECK NETWORK / TABLE / RLS'));
     }finally{
       cloudLoading=false;
       if(serial===sessionSerial){authReady=true;render();}
@@ -3996,7 +3996,7 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
       div = [];
       authReady = true;
       render();
-      setPortfolioStatus('SIGN IN TO VIEW YOUR PRIVATE PORTFOLIO — AUTH CHECK FAILED');
+      setPortfolioStatus('PORTFOLIO: AUTH CHECK FAILED — '+(e?.message||'CHECK auth-config.js AND GOOGLE SIGN-IN'));
     }
   }
 
