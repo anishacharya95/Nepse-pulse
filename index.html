@@ -1313,7 +1313,7 @@ main>.hero,main>.search,main>.section-head,main>.market,main>.feed-debug{display
 .mobile-exact-bottom .nav{max-width:100%!important;grid-template-columns:repeat(5,1fr)!important;gap:2px!important}.mobile-exact-bottom .nav button{color:#849197!important;background:transparent!important;font-size:9px!important;border-radius:10px!important}.mobile-exact-bottom .nav button.active{background:transparent!important;color:#00856e!important}.mobile-exact-bottom .nav .ni{font-size:20px!important;margin-bottom:2px!important}
 /* Make feature drawer match the selected dark teal menu. */
 #featureDrawer .sheet{background:#004f4f!important;color:#fff!important;border:0!important;border-radius:24px 24px 0 0!important}.feature-item{background:#075d5b!important;border-color:#16716d!important}.feature-item b{color:#fff!important}.feature-item small{color:#c8e0df!important}.sheet-head{background:#004f4f!important;border-color:#16716d!important}.sheet-head h2{color:#fff!important}.close{background:#0a6967!important;color:#fff!important;border-color:#1b817c!important}
-@media(min-width:700px){#pulse-home-market-dashboard{max-width:520px!important;margin:0 auto!important}.mobile-exact-topbar{max-width:520px!important;margin:0 auto!important}.mobile-exact-bottom{max-width:520px!important;left:50%!important;right:auto!important;transform:translateX(-50%)!important;width:520px!important}}
+@media(min-width:700px){.mobile-exact-bottom{max-width:520px!important;left:50%!important;right:auto!important;transform:translateX(-50%)!important;width:min(520px,calc(100% - 24px))!important}}
 </style>
 
 
@@ -9549,6 +9549,38 @@ window.runAiTrendlines=async function(){const symbol=(document.getElementById('n
 })();
 </script>
 
+
+<style id="np-header-full-width-auth-return-fix">
+/* Header must span the viewport after sign-out/sign-in; do not constrain it
+   to the 520px dashboard-card width on wide browser/WebView viewports. */
+html body .app > header.topbar.mobile-exact-topbar {
+  display:block!important;
+  box-sizing:border-box!important;
+  width:100%!important;
+  max-width:none!important;
+  min-width:0!important;
+  margin-left:0!important;
+  margin-right:0!important;
+  left:0!important;
+  right:0!important;
+  transform:none!important;
+}
+html body .app > header.topbar.mobile-exact-topbar .mobile-exact-head,
+html body .app > header.topbar.mobile-exact-topbar .mobile-exact-search {
+  box-sizing:border-box!important;
+  width:100%!important;
+  max-width:none!important;
+}
+@media(min-width:700px){
+  html body .app > header.topbar.mobile-exact-topbar {
+    width:100%!important;
+    max-width:none!important;
+    margin-left:0!important;
+    margin-right:0!important;
+  }
+}
+</style>
+
 </body>
 </html>
 
@@ -10086,40 +10118,4 @@ const priorLoad=window.loadPriceVolumeActions;window.loadPriceVolumeActions=asyn
  loadVerifiedTransactionCounts();
 })();
 </script>
-
-
-
-<style id="np-auth-return-layout-repair-v1">
-/* Fix header and bottom navigation shrinking after an auth return/re-render. */
-.app{width:100%!important;max-width:none!important;margin:0 auto!important}
-.topbar.mobile-exact-topbar,
-header.mobile-exact-topbar{
-  display:block!important;width:100%!important;max-width:none!important;
-  min-width:0!important;margin:0!important;left:0!important;right:0!important;
-  transform:none!important;box-sizing:border-box!important;
-}
-.mobile-exact-topbar .mobile-exact-head,
-.mobile-exact-topbar .mobile-exact-search{
-  width:100%!important;max-width:none!important;box-sizing:border-box!important;
-}
-.mobile-exact-topbar .mobile-exact-head{
-  display:flex!important;align-items:center!important;
-}
-.mobile-exact-bottom{
-  width:calc(100% - 16px)!important;max-width:620px!important;
-  left:50%!important;right:auto!important;transform:translateX(-50%)!important;
-  box-sizing:border-box!important;
-}
-#v21-bottom-nav{
-  width:calc(100% - 16px)!important;max-width:620px!important;
-  left:50%!important;right:auto!important;transform:translateX(-50%)!important;
-  box-sizing:border-box!important;
-}
-@media(min-width:760px){
-  .topbar.mobile-exact-topbar,header.mobile-exact-topbar{
-    width:100%!important;max-width:none!important;margin:0!important;
-  }
-  .mobile-exact-bottom{width:calc(100% - 24px)!important;max-width:620px!important}
-}
-</style>
 
