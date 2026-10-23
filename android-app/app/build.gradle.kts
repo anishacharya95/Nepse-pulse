@@ -9,7 +9,7 @@ android {
 
     defaultConfig {
         applicationId = "com.nepsepulse.app"
-        minSdk = 23
+        minSdk = 24
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
