@@ -1153,10 +1153,10 @@ main>.hero, main>.search, main>.section-head, main>.market, main>.feed-debug{
 .np-splash-loader{position:absolute;left:50%;bottom:10.45%;transform:translateX(-50%);width:min(50%,430px);height:8px;border-radius:99px;overflow:hidden;background:rgba(8,40,95,.96);box-shadow:0 0 0 2px rgba(42,151,255,.42),0 0 18px rgba(0,210,255,.28);}
 .np-splash-progress{position:absolute;inset:0 auto 0 0;width:0;border-radius:inherit;background:linear-gradient(90deg,#168cff,#00d9ff,#19e879);box-shadow:0 0 14px rgba(0,217,255,.85);animation:npSplashProgress 3.2s cubic-bezier(.2,.8,.2,1) forwards;}
 .np-splash-shine{position:absolute;top:0;bottom:0;width:26%;left:-30%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.9),transparent);filter:blur(.4px);animation:npSplashShine 1.15s ease-in-out infinite;}
-.np-splash-loading{position:absolute;left:50%;bottom:7.7%;transform:translateX(-50%);color:#fff;font-size:14px;line-height:1;letter-spacing:5px;font-weight:600;text-shadow:0 1px 8px rgba(0,0,0,.45);white-space:nowrap;}
+
 @keyframes npSplashProgress{0%{width:0}35%{width:34%}68%{width:67%}90%{width:88%}100%{width:100%}}
 @keyframes npSplashShine{0%{left:-30%;opacity:0}15%{opacity:1}70%{opacity:1}100%{left:105%;opacity:0}}
-@media(max-width:480px){.np-splash-loader{width:50%;height:7px;bottom:10.45%}.np-splash-loading{bottom:7.55%;font-size:12px;letter-spacing:4px}}
+@media(max-width:480px){.np-splash-loader{width:50%;height:7px;bottom:10.45%}}
 @media(prefers-reduced-motion:reduce){.np-splash-progress{animation-duration:1.2s}.np-splash-shine{animation:none;display:none}.np-splash-loader{transition:none}}
 /* Keep every app navigation bar behind the splash until startup is complete. */
 body.np-splash-active .nav,
@@ -1963,6 +1963,13 @@ input:focus,select:focus,textarea:focus{border-color:var(--np-blue)!important;bo
 </style>
 
 <style id="np-force-mobile-layout">
+/* Extra narrow-screen override: when mobile class is detected, always stack home dashboard cards. */
+html.np-force-mobile .pulse-home-grid,
+html.np-force-mobile #pulse-home-market-dashboard .pulse-home-grid,
+html.np-force-mobile .pulse-home-dashboard .pulse-home-grid {
+  display:grid!important; grid-template-columns:minmax(0,1fr)!important;
+}
+
 /* Phone-screen fallback for Android Chrome returning from account/OAuth flows.
    This overrides desktop breakpoints when Chrome's Desktop site mode makes innerWidth wide. */
 html.np-force-mobile, html.np-force-mobile body { width:100%!important; max-width:100%!important; min-width:0!important; }
