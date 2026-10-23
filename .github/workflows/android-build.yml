@@ -223,42 +223,50 @@ jobs:
           from pathlib import Path
           import re
 
-          # Capacitor Android commonly defines minSdkVersion in variables.gradle.
+          changed = False
+
+          # Capacitor versions use either "minSdkVersion = 23" or "minSdkVersion: 23".
           variables = Path("android/variables.gradle")
           if variables.exists():
               s = variables.read_text()
               updated, count = re.subn(
-                  r'(?m)^(\s*minSdkVersion\s*:\s*)\d+(\s*)$',
-                  r'\g<1>24\g<2>', s, count=1
+                  r'(?m)^(\s*minSdkVersion\s*(?:=|:)\s*)\d+(\s*(?://.*)?)$',
+                  r'\g<1>24\g<2>', s
               )
               if count:
                   variables.write_text(updated)
+                  changed = True
                   print("Updated android/variables.gradle minSdkVersion to 24")
               else:
-                  raise SystemExit("Could not find minSdkVersion in android/variables.gradle")
+                  print("No minSdkVersion declaration found in android/variables.gradle; checking app Gradle files.")
 
-          # Also update direct declarations if the generated project uses them.
+          # Some Capacitor templates declare minSdk directly in app/build.gradle(.kts).
           for p in (Path("android/app/build.gradle"), Path("android/app/build.gradle.kts")):
               if not p.exists():
                   continue
               s = p.read_text()
               patterns = [
-                  (r'(?m)^(\s*minSdk(?:Version)?\s*=\s*)\d+(\s*)$', r'\g<1>24\g<2>'),
-                  (r'(?m)^(\s*minSdkVersion\s+)\d+(\s*)$', r'\g<1>24\g<2>'),
-                  (r'(?m)^(\s*minSdk\s+)\d+(\s*)$', r'\g<1>24\g<2>'),
+                  r'(?m)^(\s*minSdk(?:Version)?\s*=\s*)\d+(\s*(?://.*)?)$',
+                  r'(?m)^(\s*minSdkVersion\s+)\d+(\s*(?://.*)?)$',
+                  r'(?m)^(\s*minSdk\s+)\d+(\s*(?://.*)?)$',
               ]
-              for pattern, replacement in patterns:
-                  s, count = re.subn(pattern, replacement, s)
+              for pattern in patterns:
+                  updated, count = re.subn(pattern, r'\g<1>24\g<2>', s)
                   if count:
+                      s = updated
                       p.write_text(s)
+                      changed = True
                       print(f"Updated {p} minimum SDK to 24")
                       break
 
-          if variables.exists():
-              print("--- android/variables.gradle SDK setting ---")
-              for line in variables.read_text().splitlines():
-                  if "minSdkVersion" in line:
-                      print(line.strip())
+          if not changed:
+              raise SystemExit("Could not locate a supported minSdkVersion/minSdk declaration in the generated Android project.")
+
+          for p in (variables, Path("android/app/build.gradle"), Path("android/app/build.gradle.kts")):
+              if p.exists():
+                  for line in p.read_text().splitlines():
+                      if "minSdk" in line:
+                          print(f"{p}: {line.strip()}")
           PY
 
       - name: Configure AdMob App ID
