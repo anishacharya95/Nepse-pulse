@@ -247,7 +247,7 @@ jobs:
 
           PY
 
-          grep -R -n -E 'minSdk(Version)?[[:space:]]*(=)?[[:space:]]*23' android/app || true
+          grep -R -n -E 'minSdk(Version)?[[:space:]]*(=)?[[:space:]]*24' android/app || true
 
       - name: Configure AdMob App ID
         run: |
