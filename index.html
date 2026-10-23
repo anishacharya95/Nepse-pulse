@@ -38,6 +38,7 @@
     } catch (_) {}
   }
   repairViewport();
+  document.addEventListener('DOMContentLoaded', repairViewport, {once:true, passive:true});
   window.addEventListener('pageshow', repairViewport, {passive:true});
   window.addEventListener('load', repairViewport, {passive:true});
   window.addEventListener('focus', repairViewport, {passive:true});
@@ -1969,9 +1970,33 @@ html.np-force-mobile body { overflow-x:hidden!important; }
 html.np-force-mobile #pulse-home-market-dashboard,
 html.np-force-mobile .pulse-home-dashboard { width:100%!important; max-width:none!important; min-width:0!important; margin-left:0!important; margin-right:0!important; }
 html.np-force-mobile #pulse-home-market-dashboard .pulse-home-grid,
-html.np-force-mobile .pulse-home-dashboard .pulse-home-grid { display:grid!important; grid-template-columns:minmax(0,1fr)!important; width:100%!important; min-width:0!important; }
+html.np-force-mobile .pulse-home-dashboard .pulse-home-grid,
+html.np-force-mobile #pulse-home-market-dashboard .pulse-home-cards,
+html.np-force-mobile .pulse-home-dashboard .pulse-home-cards,
+html.np-force-mobile #pulse-home-market-dashboard .pulse-dashboard-grid,
+html.np-force-mobile .pulse-home-dashboard .pulse-dashboard-grid {
+  display:grid!important;
+  grid-template-columns:minmax(0,1fr)!important;
+  grid-auto-flow:row!important;
+  width:100%!important;
+  min-width:0!important;
+}
 html.np-force-mobile #pulse-home-market-dashboard .pulse-home-card,
-html.np-force-mobile .pulse-home-dashboard .pulse-home-card { grid-column:1 / -1!important; width:100%!important; min-width:0!important; }
+html.np-force-mobile .pulse-home-dashboard .pulse-home-card,
+html.np-force-mobile #pulse-home-market-dashboard .pulse-liquidity-card,
+html.np-force-mobile #pulse-home-market-dashboard .pulse-movers-card {
+  grid-column:1 / -1!important;
+  width:100%!important;
+  min-width:0!important;
+}
+html.np-force-mobile #pulse-home-market-dashboard .pulse-home-grid > *,
+html.np-force-mobile .pulse-home-dashboard .pulse-home-grid > *,
+html.np-force-mobile #pulse-home-market-dashboard .pulse-home-cards > *,
+html.np-force-mobile .pulse-home-dashboard .pulse-home-cards > * {
+  grid-column:1 / -1!important;
+  min-width:0!important;
+  max-width:100%!important;
+}
 html.np-force-mobile .pulse-summary-card { grid-column:1 / -1!important; }
 html.np-force-mobile main, html.np-force-mobile #app, html.np-force-mobile .app, html.np-force-mobile .main-content { min-width:0!important; max-width:100%!important; }
 html.np-force-mobile img, html.np-force-mobile canvas, html.np-force-mobile svg, html.np-force-mobile iframe { max-width:100%; }
@@ -2000,7 +2025,6 @@ html.np-force-mobile img, html.np-force-mobile canvas, html.np-force-mobile svg,
 <div id="nepse-pulse-splash" aria-label="NEPSE Pulse loading">
   <img src="splash.png" alt="NEPSE Pulse — Real Time Nepal Share Market" onerror="this.style.display='none'">
   <div class="np-splash-loader" aria-hidden="true"><div class="np-splash-progress"></div><div class="np-splash-shine"></div></div>
-  <div class="np-splash-loading" aria-live="polite">LOADING...</div>
 </div>
 
 <div class="app">
