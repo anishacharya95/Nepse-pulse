@@ -3886,19 +3886,74 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
 <script id="pulse-portfolio-v1-js">
 (function(){
   const TX='nepsePulsePortfolioTxV1', DV='nepsePulseDividendsV1';
+  const CLOUD_TABLE='user_portfolio_data';
   const $=id=>document.getElementById(id);
   const read=(k,d)=>{try{return JSON.parse(localStorage.getItem(k)||JSON.stringify(d))}catch(e){return d}};
-  const write=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
-  // Portfolio ledgers are namespaced by the authenticated Supabase user ID.
-  // Never use one shared localStorage key for every signed-in account.
   let activeUserId=null, authReady=false, tx=[], div=[], rows=[];
+  let portfolioClient=null, cloudLoading=false, cloudSaveTimer=null, sessionSerial=0;
   const accountKey=(base)=>base+':'+(activeUserId?'user:'+activeUserId:'guest');
-  function loadAccount(user){
+  function setPortfolioStatus(message){
+    const el=$('pFeedState');
+    if(el) el.textContent=message;
+  }
+  function write(base,v){
+    try{localStorage.setItem(accountKey(base),JSON.stringify(v))}catch(e){}
+    // Local storage is a fast cache; signed-in data is also saved to Supabase.
+    if(!cloudLoading && activeUserId && portfolioClient) scheduleCloudSave();
+  }
+  function scheduleCloudSave(){
+    if(cloudSaveTimer) clearTimeout(cloudSaveTimer);
+    cloudSaveTimer=setTimeout(()=>{cloudSaveTimer=null; savePortfolioToCloud();},450);
+  }
+  async function savePortfolioToCloud(){
+    if(!activeUserId || !portfolioClient || cloudLoading) return;
+    const uid=activeUserId;
+    const payload={user_id:uid,transactions:tx,dividends:div,updated_at:new Date().toISOString()};
+    try{
+      const {error}=await portfolioClient.from(CLOUD_TABLE).upsert(payload,{onConflict:'user_id'});
+      if(error) throw error;
+      if(uid===activeUserId) setPortfolioStatus('PORTFOLIO: SYNCED TO CLOUD');
+    }catch(e){
+      console.error('Portfolio cloud save failed:',e);
+      if(uid===activeUserId) setPortfolioStatus('PORTFOLIO: CLOUD SAVE FAILED — CHECK SUPABASE TABLE/RLS');
+    }
+  }
+  async function loadAccount(user, serial){
     activeUserId=user?.id||null;
-    tx=read(accountKey(TX),[]);
-    div=read(accountKey(DV),[]);
-    authReady=true;
-    render();
+    tx=[]; div=[]; authReady=false; render();
+    if(!activeUserId){
+      cloudLoading=true;
+      tx=read(accountKey(TX),[]); div=read(accountKey(DV),[]);
+      cloudLoading=false; authReady=true; render(); return;
+    }
+    // Start with this user's local cache, then replace it with the cloud copy.
+    tx=read(accountKey(TX),[]); div=read(accountKey(DV),[]);
+    authReady=true; render();
+    if(!portfolioClient) return;
+    cloudLoading=true;
+    try{
+      const {data,error}=await portfolioClient.from(CLOUD_TABLE)
+        .select('transactions,dividends').eq('user_id',activeUserId).maybeSingle();
+      if(error) throw error;
+      if(serial!==sessionSerial || !activeUserId) return;
+      if(data){
+        tx=Array.isArray(data.transactions)?data.transactions:[];
+        div=Array.isArray(data.dividends)?data.dividends:[];
+        try{localStorage.setItem(accountKey(TX),JSON.stringify(tx));localStorage.setItem(accountKey(DV),JSON.stringify(div));}catch(e){}
+        setPortfolioStatus('PORTFOLIO: LOADED FROM CLOUD');
+      }else{
+        // First cloud login: preserve existing local entries and create the cloud row.
+        cloudLoading=false;
+        await savePortfolioToCloud();
+        cloudLoading=true;
+      }
+    }catch(e){
+      console.error('Portfolio cloud load failed:',e);
+      if(serial===sessionSerial) setPortfolioStatus('PORTFOLIO: CLOUD UNAVAILABLE — SHOWING LOCAL CACHE');
+    }finally{
+      cloudLoading=false;
+      if(serial===sessionSerial){authReady=true;render();}
+    }
   }
   async function initPortfolioAuth(){
     // Subscribe before reading the initial session so a sign-in/account switch
@@ -3909,30 +3964,17 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
         : null;
       if(!client?.auth) throw new Error('Supabase authentication client is unavailable.');
 
+      portfolioClient=client;
       let lastUserId = undefined;
-      let switchSerial = 0;
       const applySession = (session) => {
         const user = session?.user || null;
         const nextId = user?.id || null;
         if(nextId === lastUserId) return;
         lastUserId = nextId;
-        const serial = ++switchSerial;
-
-        // Fail closed during account changes: never render the previous
-        // account's transactions while the next account is being selected.
-        authReady = false;
-        tx = [];
-        div = [];
-        activeUserId = nextId;
-        render();
-
-        // Portfolio is deliberately stored under a per-user key. A signed-in
-        // user never falls back to the shared/guest ledger.
-        tx = read(accountKey(TX), []);
-        div = read(accountKey(DV), []);
-        if(serial !== switchSerial) return;
-        authReady = true;
-        render();
+        const serial = ++sessionSerial;
+        // Do not show the previous account while switching users.
+        authReady=false; tx=[]; div=[]; activeUserId=nextId; render();
+        loadAccount(user,serial);
       };
 
       client.auth.onAuthStateChange((_event, session) => {
@@ -3945,12 +3987,11 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
     }catch(e){
       console.error('Portfolio authentication could not be verified; hiding local portfolio data.', e);
       activeUserId = null;
-      tx = [];
-      div = [];
+      tx = read(accountKey(TX), []);
+      div = read(accountKey(DV), []);
       authReady = true;
       render();
-      const status = $('pFeedState');
-      if(status) status.textContent = 'PORTFOLIO HIDDEN — AUTHENTICATION CHECK FAILED';
+      setPortfolioStatus('PORTFOLIO: AUTH CHECK FAILED — LOCAL CACHE ONLY');
     }
   }
 
@@ -4034,21 +4075,21 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
     const total=div.reduce((a,d)=>a+(d.rate*d.shares),0);
     if(dr)dr.innerHTML=(div.length?div.map((d,i)=>`<div class="p-item"><span><b>${d.symbol}</b><small>${d.shares.toLocaleString()} eligible shares • ${d.rate} / share</small></span><span>${money(d.rate*d.shares)}<button data-dv="${i}" style="margin-left:7px">Delete</button></span></div>`).join(''):'<div class="p-empty">No dividends recorded.</div>')+
       (div.length?`<div class="p-item"><span><b>Total recorded dividends</b></span><span>${money(total)}</span></div>`:'');
-    dr?.querySelectorAll('[data-dv]').forEach(b=>b.onclick=()=>{div.splice(Number(b.dataset.dv),1);write(accountKey(DV),div);render()});
+    dr?.querySelectorAll('[data-dv]').forEach(b=>b.onclick=()=>{div.splice(Number(b.dataset.dv),1);write(DV,div);render()});
   }
 
   $('pAddTx')?.addEventListener('click',()=>{
     const s=($('pSymbol').value||'').trim().toUpperCase(), side=$('pSide').value, q=num($('pQty').value), p=num($('pPrice').value);
     if(!s||q===null||q<=0||p===null||p<0)return;
     tx.push({symbol:s,side,qty:q,price:p,date:$('pDate').value||new Date().toISOString().slice(0,10),createdAt:Date.now()});
-    write(accountKey(TX),tx); $('pSymbol').value='';$('pQty').value='';$('pPrice').value='';render();
+    write(TX,tx); $('pSymbol').value='';$('pQty').value='';$('pPrice').value='';render();
   });
 
   $('pAddDiv')?.addEventListener('click',()=>{
     const s=($('pDivSymbol').value||'').trim().toUpperCase(), rate=num($('pDivRate').value), shares=num($('pDivShares').value);
     if(!s||rate===null||shares===null||shares<0)return;
     div.push({symbol:s,rate,shares,date:new Date().toISOString().slice(0,10)});
-    write(accountKey(DV),div);$('pDivSymbol').value='';$('pDivRate').value='';$('pDivShares').value='';render();
+    write(DV,div);$('pDivSymbol').value='';$('pDivRate').value='';$('pDivShares').value='';render();
   });
 
   document.addEventListener('pulse-feed-update',render);
