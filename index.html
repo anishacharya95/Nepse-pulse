@@ -3,7 +3,14 @@
 <head>
 <script>window.NEPSE_PULSE_BACKEND_URL = 'https://nepse-pulse-1.onrender.com';</script>
 <script src="config.js?v=4"></script>
-<script src="auth-config.js?v=1"></script>
+<script src="auth-config.js?v=2"></script>
+<script id="np-auth-config-fallback">
+/* Safe public browser configuration fallback. Publishable/anon keys are designed for client use. */
+window.NEPSE_PULSE_AUTH = window.NEPSE_PULSE_AUTH || {
+  supabaseUrl: "https://kymqmcgzjvbbgngfxnig.supabase.co",
+  supabaseAnonKey: "sb_publishable_-b-1p648j1ULm1tc15UtZA_COawFIPK"
+};
+</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <script id="np-mobile-viewport-auth-fix">
@@ -6896,13 +6903,13 @@ header.topbar .feature-btn{
 <script id="np-single-supabase-client">
 /* One shared Supabase client: prevents OAuth callback/session restoration races. */
 (function(){
-  window.__NP_GET_LOGIN_CLIENT = window.__NP_GET_LOGIN_CLIENT || async function(){
+  window.__NP_GET_LOGIN_CLIENT = async function(){
     if(window.__NP_LOGIN_SUPABASE) return window.__NP_LOGIN_SUPABASE;
     if(window.__NP_LOGIN_CLIENT_PROMISE) return window.__NP_LOGIN_CLIENT_PROMISE;
     window.__NP_LOGIN_CLIENT_PROMISE = (async function(){
-      const cfg=window.NEPSE_PULSE_AUTH||window.AUTH_CFG||{};
-      const url=cfg.supabaseUrl||cfg.url||'';
-      const key=cfg.supabaseAnonKey||cfg.anonKey||cfg.publishableKey||'';
+      const cfg=window.NEPSE_PULSE_AUTH||window.AUTH_CFG||window.PULSE_AUTH_CONFIG||{};
+      const url=cfg.supabaseUrl||cfg.url||cfg.projectUrl||'';
+      const key=cfg.supabaseAnonKey||cfg.anonKey||cfg.publishableKey||cfg.anonKeyPublic||'';
       if(!url||!key) throw new Error('Supabase URL or publishable key is missing in auth-config.js.');
       if(!window.supabase || !window.supabase.createClient){
         await new Promise((resolve,reject)=>{
