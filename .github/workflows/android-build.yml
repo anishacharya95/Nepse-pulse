@@ -217,57 +217,69 @@ jobs:
           npx cap add android
           npx cap sync android
 
-      - name: Set minimum Android SDK to 24
+      - name: Configure Android SDK levels and version code
         run: |
-          python3 - <<'PY'
+          python3 - <<'PYCODE'
           from pathlib import Path
           import re
 
-          changed = False
-
-          # Capacitor versions use either "minSdkVersion = 23" or "minSdkVersion: 23".
+          # Capacitor normally keeps these values in android/variables.gradle.
           variables = Path("android/variables.gradle")
+          changed_sdk = False
           if variables.exists():
-              s = variables.read_text()
-              updated, count = re.subn(
-                  r'(?m)^(\s*minSdkVersion\s*(?:=|:)\s*)\d+(\s*(?://.*)?)$',
-                  r'\g<1>24\g<2>', s
-              )
-              if count:
-                  variables.write_text(updated)
-                  changed = True
-                  print("Updated android/variables.gradle minSdkVersion to 24")
-              else:
-                  print("No minSdkVersion declaration found in android/variables.gradle; checking app Gradle files.")
-
-          # Some Capacitor templates declare minSdk directly in app/build.gradle(.kts).
-          for p in (Path("android/app/build.gradle"), Path("android/app/build.gradle.kts")):
-              if not p.exists():
-                  continue
-              s = p.read_text()
-              patterns = [
-                  r'(?m)^(\s*minSdk(?:Version)?\s*=\s*)\d+(\s*(?://.*)?)$',
-                  r'(?m)^(\s*minSdkVersion\s+)\d+(\s*(?://.*)?)$',
-                  r'(?m)^(\s*minSdk\s+)\d+(\s*(?://.*)?)$',
-              ]
-              for pattern in patterns:
-                  updated, count = re.subn(pattern, r'\g<1>24\g<2>', s)
+              text = variables.read_text()
+              for key, value in (("minSdkVersion", 24), ("targetSdkVersion", 36)):
+                  pattern = rf"(?m)^(\s*{key}\s*(?:=|:)\s*)\d+(\s*(?://.*)?)$"
+                  updated, count = re.subn(pattern, rf"\g<1>{value}\g<2>", text)
                   if count:
-                      s = updated
-                      p.write_text(s)
-                      changed = True
-                      print(f"Updated {p} minimum SDK to 24")
-                      break
+                      text = updated
+                      changed_sdk = True
+                      print(f"Set {key} to {value} in android/variables.gradle")
+              variables.write_text(text)
 
-          if not changed:
-              raise SystemExit("Could not locate a supported minSdkVersion/minSdk declaration in the generated Android project.")
+          # Also support templates that declare numeric SDK levels directly in app Gradle.
+          app_gradle_files = [Path("android/app/build.gradle"), Path("android/app/build.gradle.kts")]
+          for gradle in app_gradle_files:
+              if not gradle.exists():
+                  continue
+              text = gradle.read_text()
+              for key, value in (("minSdk", 24), ("minSdkVersion", 24), ("targetSdk", 36), ("targetSdkVersion", 36)):
+                  pattern = rf"(?m)^(\s*{key}\s*(?:=|\s)\s*)\d+(\s*(?://.*)?)$"
+                  updated, count = re.subn(pattern, rf"\g<1>{value}\g<2>", text)
+                  if count:
+                      text = updated
+                      changed_sdk = True
+                      print(f"Set {key} to {value} in {gradle}")
+              gradle.write_text(text)
 
-          for p in (variables, Path("android/app/build.gradle"), Path("android/app/build.gradle.kts")):
-              if p.exists():
-                  for line in p.read_text().splitlines():
-                      if "minSdk" in line:
-                          print(f"{p}: {line.strip()}")
-          PY
+          # Increment versionCode so this bundle can replace version code 1 in Play Console.
+          app_gradle = Path("android/app/build.gradle")
+          if not app_gradle.exists():
+              app_gradle = Path("android/app/build.gradle.kts")
+          if not app_gradle.exists():
+              raise SystemExit("Could not find app/build.gradle or app/build.gradle.kts")
+          text = app_gradle.read_text()
+          updated, count = re.subn(r"(?m)^(\s*versionCode\s*(?:=|\s)\s*)\d+(\s*(?://.*)?)$", r"\g<1>2\g<2>", text, count=1)
+          if count:
+              app_gradle.write_text(updated)
+              print("Set versionCode to 2")
+          else:
+              print("No numeric versionCode found; leaving version code unchanged")
+
+          if not changed_sdk:
+              # Fail only if neither variables.gradle nor app Gradle had numeric SDK declarations.
+              vars_text = variables.read_text() if variables.exists() else ""
+              app_text = app_gradle.read_text()
+              if not re.search(r"(?m)^\s*(?:minSdk|targetSdk|minSdkVersion|targetSdkVersion)\s*(?:=|\s|:)", vars_text + "\n" + app_text):
+                  raise SystemExit("Could not find Android SDK declarations to update")
+
+          print("--- SDK declarations after update ---")
+          for gradle in [variables, *app_gradle_files]:
+              if gradle.exists():
+                  for line in gradle.read_text().splitlines():
+                      if any(key in line for key in ("minSdk", "targetSdk", "versionCode")):
+                          print(f"{gradle}: {line.strip()}")
+          PYCODE
 
       - name: Configure AdMob App ID
         run: |
