@@ -6,6 +6,47 @@
 <script src="auth-config.js?v=1"></script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<script id="np-mobile-viewport-auth-fix">
+/*
+ * Keep the mobile viewport stable when returning from OAuth/account switching.
+ * Some mobile browsers restore the page with a stale desktop-sized layout
+ * viewport after an external sign-in flow; refreshing then recalculates it.
+ */
+(function () {
+  var content = 'width=device-width,initial-scale=1,viewport-fit=cover';
+  function repairViewport() {
+    try {
+      var meta = document.querySelector('meta[name="viewport"]');
+      if (!meta) {
+        meta = document.createElement('meta');
+        meta.name = 'viewport';
+        document.head.appendChild(meta);
+      }
+      if (meta.getAttribute('content') !== content) meta.setAttribute('content', content);
+      // Ask the browser to recalculate responsive CSS after an OAuth return.
+      document.documentElement.style.maxWidth = '100%';
+      document.body && (document.body.style.maxWidth = '100%');
+      window.dispatchEvent(new Event('resize'));
+    } catch (_) {}
+  }
+  repairViewport();
+  window.addEventListener('pageshow', repairViewport, {passive:true});
+  window.addEventListener('load', repairViewport, {passive:true});
+  window.addEventListener('focus', repairViewport, {passive:true});
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) repairViewport();
+  }, {passive:true});
+  window.addEventListener('popstate', repairViewport, {passive:true});
+  window.addEventListener('hashchange', repairViewport, {passive:true});
+  // OAuth providers return with a code/token in the URL. Re-check after auth
+  // libraries finish exchanging it, without forcing a page reload.
+  if (/[?&](code|access_token|refresh_token)=/.test(location.search + location.hash)) {
+    setTimeout(repairViewport, 150);
+    setTimeout(repairViewport, 700);
+    setTimeout(repairViewport, 1500);
+  }
+})();
+</script>
 <link rel="preconnect" href="https://nepse-pulse-1.onrender.com" crossorigin>
 <link rel="dns-prefetch" href="//nepse-pulse-1.onrender.com">
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
