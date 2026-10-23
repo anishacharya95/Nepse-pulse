@@ -3922,9 +3922,13 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
     activeUserId=user?.id||null;
     tx=[]; div=[]; authReady=false; render();
     if(!activeUserId){
+      // Privacy: never load a guest/local portfolio while signed out.
+      // Keep the user's saved cloud data untouched; show an empty signed-out view.
       cloudLoading=true;
-      tx=read(accountKey(TX),[]); div=read(accountKey(DV),[]);
-      cloudLoading=false; authReady=true; render(); return;
+      tx=[]; div=[];
+      cloudLoading=false; authReady=true; render();
+      setPortfolioStatus('SIGN IN TO VIEW YOUR PRIVATE PORTFOLIO');
+      return;
     }
     // Start with this user's local cache, then replace it with the cloud copy.
     tx=read(accountKey(TX),[]); div=read(accountKey(DV),[]);
@@ -3987,11 +3991,12 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
     }catch(e){
       console.error('Portfolio authentication could not be verified; hiding local portfolio data.', e);
       activeUserId = null;
-      tx = read(accountKey(TX), []);
-      div = read(accountKey(DV), []);
+      // Fail closed: if auth cannot be verified, do not expose cached holdings.
+      tx = [];
+      div = [];
       authReady = true;
       render();
-      setPortfolioStatus('PORTFOLIO: AUTH CHECK FAILED — LOCAL CACHE ONLY');
+      setPortfolioStatus('SIGN IN TO VIEW YOUR PRIVATE PORTFOLIO — AUTH CHECK FAILED');
     }
   }
 
