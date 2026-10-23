@@ -1,0 +1,392 @@
+name: NEPSE Pulse Android Build - Banner and Interstitial Ads
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Prepare web assets
+        run: |
+          mkdir -p android-web
+          rsync -a ./ android-web/ \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='android/' \
+            --exclude='android-web/' \
+            --exclude='node_modules/' \
+            --exclude='venv/' \
+            --exclude='.venv/' \
+            --exclude='__pycache__/' \
+            --exclude='app.py' \
+            --exclude='requirements.txt'
+          test -f android-web/index.html
+
+      - name: Install Capacitor and browser plugins
+        run: |
+          npm init -y
+          npm install @capacitor/core@7 @capacitor/android@7 @capacitor/app@7 @capacitor/browser@7 @capacitor-community/admob@7
+          npm install --save-dev @capacitor/cli@7 esbuild
+
+      - name: Bundle Capacitor native plugins and configure banner
+        run: |
+          cat > capacitor-plugins-entry.js <<'EOF'
+          import { Capacitor } from '@capacitor/core';
+          import { App } from '@capacitor/app';
+          import { Browser } from '@capacitor/browser';
+          import { AdMob } from '@capacitor-community/admob';
+
+          window.Capacitor = Capacitor;
+          window.NP_CAP_APP = App;
+          window.NP_CAP_BROWSER = Browser;
+          window.NP_CAP_ADMOB = AdMob;
+          EOF
+
+          npx esbuild capacitor-plugins-entry.js \
+            --bundle --format=iife --platform=browser --target=es2020 \
+            --outfile=android-web/np-capacitor-plugins.bundle.js
+
+          cat > android-web/np-admob-banner.js <<'EOF'
+          (function () {
+            'use strict';
+
+            let started = false;
+            let interstitialReady = false;
+            let navActions = 0;
+            let lastInterstitialAt = 0;
+            let interstitialShowing = false;
+            const INTERSTITIAL_ID = 'ca-app-pub-1565800134063497/1639379056';
+            const NAV_LABELS = /^(home|market|screener|quant|alerts|watchlist|market structure|professional charting|charting|ipo center|profile|more|traders zone)$/i;
+            const COOLDOWN_MS = 5 * 60 * 1000;
+            const ACTIONS_BETWEEN_ADS = 8;
+
+            function nativeAndroid() {
+              return !!(window.Capacitor &&
+                typeof window.Capacitor.isNativePlatform === 'function' &&
+                window.Capacitor.isNativePlatform());
+            }
+
+            function report(message) {
+              console.log('[NEPSE AdMob]', message);
+            }
+
+            async function prepareInterstitial(admob) {
+              try {
+                await admob.prepareInterstitial({ adId: INTERSTITIAL_ID });
+                interstitialReady = true;
+                report('banner configured; interstitial ready');
+              } catch (error) {
+                interstitialReady = false;
+                console.warn('[NEPSE AdMob] Interstitial load failed:', error);
+                report('banner requested; interstitial not available yet');
+              }
+            }
+
+            async function showInterstitialAtTransition(admob) {
+              const now = Date.now();
+              if (!interstitialReady || interstitialShowing ||
+                  now - lastInterstitialAt < COOLDOWN_MS) return;
+              interstitialShowing = true;
+              interstitialReady = false;
+              lastInterstitialAt = now;
+              try {
+                // Only called after several explicit top-level navigation actions;
+                // never show on app launch, app exit, or every tap.
+                await admob.showInterstitial({ adId: INTERSTITIAL_ID });
+              } catch (error) {
+                console.warn('[NEPSE AdMob] Interstitial display failed:', error);
+              } finally {
+                interstitialShowing = false;
+                // Prepare the next ad after the current presentation attempt.
+                await prepareInterstitial(admob);
+              }
+            }
+
+            function installNavigationPlacement(admob) {
+              document.addEventListener('click', function (event) {
+                if (!nativeAndroid()) return;
+                const target = event.target && event.target.closest
+                  ? event.target.closest('button, a, [role="tab"], [role="button"]')
+                  : null;
+                if (!target) return;
+                const label = String(target.innerText || target.getAttribute('aria-label') || target.title || '')
+                  .replace(/\s+/g, ' ').trim();
+                if (!NAV_LABELS.test(label)) return;
+                navActions += 1;
+                if (navActions >= ACTIONS_BETWEEN_ADS) {
+                  navActions = 0;
+                  // A brief delay lets the navigation click finish before the ad opens.
+                  Promise.resolve().then(() => showInterstitialAtTransition(admob));
+                }
+              }, true);
+            }
+
+            async function startAdMob() {
+              if (started || !nativeAndroid()) return;
+              started = true;
+              const admob = window.NP_CAP_ADMOB;
+              if (!admob) {
+                report('FAILED — native AdMob plugin unavailable');
+                return;
+              }
+
+              try {
+                report('checking consent…');
+                let consent = await admob.requestConsentInfo();
+                if (consent && consent.isConsentFormAvailable &&
+                    String(consent.status).toLowerCase().includes('required')) {
+                  consent = await admob.showConsentForm();
+                }
+                if (consent && consent.canRequestAds === false) {
+                  report('ads paused until consent permits requests');
+                  return;
+                }
+
+                await admob.initialize();
+                if (typeof admob.addListener === 'function') {
+                  try {
+                    await admob.addListener('bannerAdLoaded', () => report('banner loaded'));
+                    await admob.addListener('bannerAdFailedToLoad', error => {
+                      report('banner failed to load — ' + JSON.stringify(error));
+                    });
+                  } catch (_) {}
+                }
+
+                await admob.showBanner({
+                  adId: 'ca-app-pub-1565800134063497/8028868444',
+                  adSize: 'ADAPTIVE_BANNER',
+                  position: 'BOTTOM_CENTER',
+                  margin: 0
+                });
+                report('real banner requested; preparing interstitial…');
+                installNavigationPlacement(admob);
+                await prepareInterstitial(admob);
+              } catch (error) {
+                report('ERROR — ' + (error && error.message ? error.message : JSON.stringify(error)));
+                started = false;
+              }
+            }
+
+            if (document.readyState === 'loading') {
+              document.addEventListener('DOMContentLoaded', startAdMob, { once: true });
+            } else {
+              startAdMob();
+            }
+          })();
+          EOF
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('android-web/index.html')
+          s = p.read_text()
+          tags = [
+              '<script src="./np-capacitor-plugins.bundle.js"></script>',
+              '<script src="./np-admob-banner.js"></script>'
+          ]
+          for tag in tags:
+              if tag not in s:
+                  pos = s.lower().rfind('</head>')
+                  if pos < 0:
+                      raise SystemExit('Could not find </head> in android-web/index.html')
+                  s = s[:pos] + tag + '\n' + s[pos:]
+          p.write_text(s)
+          PY
+
+      - name: Initialize Capacitor Android project
+        run: |
+          npx cap init "NEPSE Pulse" "com.nepsepulse.app" --web-dir android-web
+          npx cap add android
+          npx cap sync android
+
+      - name: Configure AdMob App ID
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          manifest = Path('android/app/src/main/AndroidManifest.xml')
+          s = manifest.read_text()
+          app_id = 'ca-app-pub-1565800134063497~9972330494'
+          meta_name = 'com.google.android.gms.ads.APPLICATION_ID'
+
+          if meta_name not in s:
+              match = re.search(r'<application\b[^>]*>', s)
+              if not match:
+                  raise SystemExit('Could not find <application> in AndroidManifest.xml')
+              metadata = (
+                  '\n        <meta-data\n'
+                  '            android:name="' + meta_name + '"\n'
+                  '            android:value="' + app_id + '"/>\n'
+              )
+              s = s[:match.end()] + metadata + s[match.end():]
+              manifest.write_text(s)
+          else:
+              # Ensure an existing entry uses the correct App ID.
+              pattern = re.compile(
+                  r'(<meta-data\s+android:name="' + re.escape(meta_name) +
+                  r'"\s+android:value=")[^"]*("\s*/?>)'
+              )
+              s2, count = pattern.subn(r'\g<1>' + app_id + r'\g<2>', s, count=1)
+              if count:
+                  manifest.write_text(s2)
+
+          values = Path('android/app/src/main/res/values')
+          values.mkdir(parents=True, exist_ok=True)
+          strings = values / 'strings.xml'
+          content = strings.read_text() if strings.exists() else '<resources>\n</resources>\n'
+          line = '<string name="admob_app_id">' + app_id + '</string>'
+          if 'name="admob_app_id"' not in content:
+              content = content.replace('</resources>', '    ' + line + '\n</resources>')
+              strings.write_text(content)
+          PY
+
+      - name: Register Android login callback
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path('android/app/src/main/AndroidManifest.xml')
+          s = p.read_text()
+          callback = '''
+                  <intent-filter>
+                      <action android:name="android.intent.action.VIEW" />
+                      <category android:name="android.intent.category.DEFAULT" />
+                      <category android:name="android.intent.category.BROWSABLE" />
+                      <data android:scheme="com.nepsepulse.app" android:host="login-callback" />
+                  </intent-filter>
+          '''
+          if 'android:host="login-callback"' not in s:
+              pattern = re.compile(
+                  r'(<activity\b[^>]*>.*?'
+                  r'<action android:name="android.intent.action.MAIN"\s*/>.*?'
+                  r'<category android:name="android.intent.category.LAUNCHER"\s*/>.*?</activity>)',
+                  re.S
+              )
+              match = pattern.search(s)
+              if not match:
+                  raise SystemExit('Could not find launcher activity in AndroidManifest.xml')
+              activity = match.group(1).replace('</activity>', callback + '\n    </activity>')
+              s = s[:match.start()] + activity + s[match.end():]
+              p.write_text(s)
+          PY
+
+      - name: Fix Kotlin dependency versions
+        run: |
+          cat >> android/app/build.gradle <<'EOF'
+
+          configurations.all {
+              resolutionStrategy {
+                  force 'org.jetbrains.kotlin:kotlin-stdlib:1.8.22'
+                  force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22'
+                  force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22'
+              }
+          }
+          EOF
+          
+      - name: Pin compatible AndroidX Browser
+        run: |
+          printf '\nconfigurations.configureEach { resolutionStrategy.force "androidx.browser:browser:1.8.0" }\n' >> android/app/build.gradle
+
+
+      - name: Configure release signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ] || [ -z "$ANDROID_KEYSTORE_PASSWORD" ] || [ -z "$ANDROID_KEY_ALIAS" ] || [ -z "$ANDROID_KEY_PASSWORD" ]; then
+            echo "::error::Release signing secrets are missing. Add ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, and ANDROID_KEY_PASSWORD in GitHub Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
+          mkdir -p "$RUNNER_TEMP/nepse-signing"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/nepse-signing/upload-keystore.jks"
+          test -s "$RUNNER_TEMP/nepse-signing/upload-keystore.jks"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/nepse-signing/upload-keystore.jks" >> "$GITHUB_ENV"
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          gradle = Path("android/app/build.gradle")
+          s = gradle.read_text()
+
+          if "signingConfigs {" not in s:
+              marker = re.search(r"(?m)^\s*buildTypes\s*\{", s)
+              if not marker:
+                  raise SystemExit("Could not find buildTypes block in android/app/build.gradle")
+              signing = """    signingConfigs {
+                  release {
+                      storeFile file(System.getenv("ANDROID_KEYSTORE_PATH"))
+                      storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                      keyAlias System.getenv("ANDROID_KEY_ALIAS")
+                      keyPassword System.getenv("ANDROID_KEY_PASSWORD")
+                  }
+              }
+
+          """
+              s = s[:marker.start()] + signing + s[marker.start():]
+
+          release_match = re.search(r"(?m)^(\s*)release\s*\{", s)
+          if not release_match:
+              raise SystemExit("Could not find release buildType in android/app/build.gradle")
+          start = release_match.end()
+          # Locate the matching closing brace for the release block.
+          depth = 1
+          i = start
+          while i < len(s) and depth:
+              if s[i] == "{":
+                  depth += 1
+              elif s[i] == "}":
+                  depth -= 1
+              i += 1
+          if depth:
+              raise SystemExit("Could not parse release buildType block")
+          block = s[start:i-1]
+          if "signingConfig signingConfigs.release" not in block:
+              block = "\n        signingConfig signingConfigs.release" + block
+              s = s[:start] + block + s[i-1:]
+
+          gradle.write_text(s)
+          PY
+
+      - name: Build release Android App Bundle
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/nepse-signing/upload-keystore.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew bundleRelease
+
+      - name: Upload Android App Bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: nepse-pulse-release-aab
+          path: android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
