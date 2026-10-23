@@ -308,7 +308,77 @@ jobs:
           printf '\nconfigurations.configureEach { resolutionStrategy.force "androidx.browser:browser:1.8.0" }\n' >> android/app/build.gradle
 
 
+      - name: Configure release signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ] || [ -z "$ANDROID_KEYSTORE_PASSWORD" ] || [ -z "$ANDROID_KEY_ALIAS" ] || [ -z "$ANDROID_KEY_PASSWORD" ]; then
+            echo "::error::Release signing secrets are missing. Add ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, and ANDROID_KEY_PASSWORD in GitHub Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
+          mkdir -p "$RUNNER_TEMP/nepse-signing"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/nepse-signing/upload-keystore.jks"
+          test -s "$RUNNER_TEMP/nepse-signing/upload-keystore.jks"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/nepse-signing/upload-keystore.jks" >> "$GITHUB_ENV"
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          gradle = Path("android/app/build.gradle")
+          s = gradle.read_text()
+
+          if "signingConfigs {" not in s:
+              marker = re.search(r"(?m)^\s*buildTypes\s*\{", s)
+              if not marker:
+                  raise SystemExit("Could not find buildTypes block in android/app/build.gradle")
+              signing = """    signingConfigs {
+                  release {
+                      storeFile file(System.getenv("ANDROID_KEYSTORE_PATH"))
+                      storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                      keyAlias System.getenv("ANDROID_KEY_ALIAS")
+                      keyPassword System.getenv("ANDROID_KEY_PASSWORD")
+                  }
+              }
+
+          """
+              s = s[:marker.start()] + signing + s[marker.start():]
+
+          release_match = re.search(r"(?m)^(\s*)release\s*\{", s)
+          if not release_match:
+              raise SystemExit("Could not find release buildType in android/app/build.gradle")
+          start = release_match.end()
+          # Locate the matching closing brace for the release block.
+          depth = 1
+          i = start
+          while i < len(s) and depth:
+              if s[i] == "{":
+                  depth += 1
+              elif s[i] == "}":
+                  depth -= 1
+              i += 1
+          if depth:
+              raise SystemExit("Could not parse release buildType block")
+          block = s[start:i-1]
+          if "signingConfig signingConfigs.release" not in block:
+              block = "\n        signingConfig signingConfigs.release" + block
+              s = s[:start] + block + s[i-1:]
+
+          gradle.write_text(s)
+          PY
+
       - name: Build release Android App Bundle
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/nepse-signing/upload-keystore.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           cd android
           chmod +x gradlew
