@@ -3963,10 +3963,38 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
     // Subscribe before reading the initial session so a sign-in/account switch
     // cannot occur in the gap between getSession() and onAuthStateChange().
     try{
-      const client = typeof window.__NP_GET_LOGIN_CLIENT==='function'
-        ? await window.__NP_GET_LOGIN_CLIENT()
-        : null;
-      if(!client?.auth) throw new Error('Supabase authentication client is unavailable.');
+      let client = null;
+      // Prefer the shared login client, but recover if its helper script did not initialize.
+      if(typeof window.__NP_GET_LOGIN_CLIENT === 'function') {
+        client = await window.__NP_GET_LOGIN_CLIENT();
+      }
+      if(!client?.auth) {
+        const cfg = window.NEPSE_PULSE_AUTH || window.AUTH_CFG || window.PULSE_AUTH_CONFIG || window.PULSE_AUTH || {};
+        const url = cfg.supabaseUrl || cfg.url || cfg.projectUrl || cfg.SUPABASE_URL || '';
+        const key = cfg.supabaseAnonKey || cfg.anonKey || cfg.publishableKey || cfg.anonKeyPublic || cfg.SUPABASE_ANON_KEY || '';
+        if(!url || !key) throw new Error('Supabase URL/public key not found. Check auth-config.js and ensure it defines window.NEPSE_PULSE_AUTH.');
+        if(!window.supabase?.createClient) {
+          await new Promise((resolve, reject) => {
+            let sc = document.querySelector('script[data-np-portfolio-supabase-sdk="1"]');
+            if(sc) {
+              if(window.supabase?.createClient) return resolve();
+              sc.addEventListener('load', resolve, {once:true});
+              sc.addEventListener('error', () => reject(new Error('Supabase JavaScript library failed to load.')), {once:true});
+              return;
+            }
+            sc = document.createElement('script');
+            sc.dataset.npPortfolioSupabaseSdk = '1';
+            sc.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
+            sc.onload = resolve;
+            sc.onerror = () => reject(new Error('Supabase JavaScript library failed to load.'));
+            document.head.appendChild(sc);
+          });
+        }
+        if(!window.supabase?.createClient) throw new Error('Supabase JavaScript library loaded without createClient.');
+        client = window.supabase.createClient(url, key, {auth:{persistSession:true, autoRefreshToken:true, detectSessionInUrl:true}});
+        window.__NP_LOGIN_SUPABASE = client;
+      }
+      if(!client?.auth) throw new Error('Supabase client initialized without an auth API.');
 
       portfolioClient=client;
       let lastUserId = undefined;
