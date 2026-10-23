@@ -1938,7 +1938,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--np-blue)!important;bo
   <button class="np-login-google" type="button" id="np-login-google"><span class="np-google-g">G</span> Sign in with Google</button>
   <div class="np-login-status" id="np-login-status" role="status" aria-live="polite"></div>
   <p class="np-login-bottom"><span id="np-login-switch-text">Don’t have an account?</span> <button type="button" class="np-login-link" id="np-login-switch">Sign Up</button></p>
-  <button type="button" class="np-login-guest" id="np-login-guest">Continue as guest</button>
   <p class="np-login-small" id="np-login-config-note"></p>
  </div>
 </div>
@@ -3801,8 +3800,31 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
   const TX='nepsePulsePortfolioTxV1', DV='nepsePulseDividendsV1';
   const $=id=>document.getElementById(id);
   const read=(k,d)=>{try{return JSON.parse(localStorage.getItem(k)||JSON.stringify(d))}catch(e){return d}};
-  const write=(k,v)=>localStorage.setItem(k,JSON.stringify(v));
-  let tx=read(TX,[]), div=read(DV,[]), rows=[];
+  const write=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
+  // Portfolio ledgers are namespaced by the authenticated Supabase user ID.
+  // Never use one shared localStorage key for every signed-in account.
+  let activeUserId=null, authReady=false, tx=[], div=[], rows=[];
+  const accountKey=(base)=>base+':'+(activeUserId?'user:'+activeUserId:'guest');
+  function loadAccount(user){
+    activeUserId=user?.id||null;
+    tx=read(accountKey(TX),[]);
+    div=read(accountKey(DV),[]);
+    authReady=true;
+    render();
+  }
+  async function initPortfolioAuth(){
+    try{
+      let client=null;
+      if(typeof window.__NP_GET_LOGIN_CLIENT==='function') client=await window.__NP_GET_LOGIN_CLIENT();
+      if(!client?.auth){loadAccount(null);return;}
+      const result=await client.auth.getSession();
+      loadAccount(result?.data?.session?.user||null);
+      client.auth.onAuthStateChange((event,session)=>{
+        // Clear the previous account's in-memory data before rendering the new account.
+        loadAccount(session?.user||null);
+      });
+    }catch(e){loadAccount(null)}
+  }
 
   function num(v){const n=Number(v);return Number.isFinite(n)?n:null}
   function pick(o,keys){for(const k of keys){const n=num(o?.[k]);if(n!==null)return n}return null}
@@ -3841,6 +3863,7 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
   }
 
   function render(){
+    if(!authReady)return;
     const engine=window.PULSE_FEED_ENGINE||window.PULSE_FEED;
     let feedState={};try{feedState=typeof engine?.state==='function'?engine.state():(engine?.state||{});}catch(e){}
     const status=feedState.status||window.PULSE_FEED_STATUS||window.PULSE_FEED?.status||'CONNECTING';
@@ -3883,26 +3906,27 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
     const total=div.reduce((a,d)=>a+(d.rate*d.shares),0);
     if(dr)dr.innerHTML=(div.length?div.map((d,i)=>`<div class="p-item"><span><b>${d.symbol}</b><small>${d.shares.toLocaleString()} eligible shares • ${d.rate} / share</small></span><span>${money(d.rate*d.shares)}<button data-dv="${i}" style="margin-left:7px">Delete</button></span></div>`).join(''):'<div class="p-empty">No dividends recorded.</div>')+
       (div.length?`<div class="p-item"><span><b>Total recorded dividends</b></span><span>${money(total)}</span></div>`:'');
-    dr?.querySelectorAll('[data-dv]').forEach(b=>b.onclick=()=>{div.splice(Number(b.dataset.dv),1);write(DV,div);render()});
+    dr?.querySelectorAll('[data-dv]').forEach(b=>b.onclick=()=>{div.splice(Number(b.dataset.dv),1);write(accountKey(DV),div);render()});
   }
 
   $('pAddTx')?.addEventListener('click',()=>{
     const s=($('pSymbol').value||'').trim().toUpperCase(), side=$('pSide').value, q=num($('pQty').value), p=num($('pPrice').value);
     if(!s||q===null||q<=0||p===null||p<0)return;
     tx.push({symbol:s,side,qty:q,price:p,date:$('pDate').value||new Date().toISOString().slice(0,10),createdAt:Date.now()});
-    write(TX,tx); $('pSymbol').value='';$('pQty').value='';$('pPrice').value='';render();
+    write(accountKey(TX),tx); $('pSymbol').value='';$('pQty').value='';$('pPrice').value='';render();
   });
 
   $('pAddDiv')?.addEventListener('click',()=>{
     const s=($('pDivSymbol').value||'').trim().toUpperCase(), rate=num($('pDivRate').value), shares=num($('pDivShares').value);
     if(!s||rate===null||shares===null||shares<0)return;
     div.push({symbol:s,rate,shares,date:new Date().toISOString().slice(0,10)});
-    write(DV,div);$('pDivSymbol').value='';$('pDivRate').value='';$('pDivShares').value='';render();
+    write(accountKey(DV),div);$('pDivSymbol').value='';$('pDivRate').value='';$('pDivShares').value='';render();
   });
 
   document.addEventListener('pulse-feed-update',render);
   document.addEventListener('pulse-central-snapshot',render);
   window.addEventListener('pulse-central-snapshot',render);
+  initPortfolioAuth();
   setInterval(render,5000);
   setTimeout(render,900);
 })();
@@ -7989,8 +8013,7 @@ body.v22-profile-tab-active .bottom.mobile-exact-bottom{z-index:10000}
    }
  });
  $('np-login-forgot').addEventListener('click',async()=>{const email=$('np-login-email').value.trim();if(!email){status('Enter your email address first, then tap Forgot Password.',true);$('np-login-email').focus();return}const c=await client();if(!c)return;try{const {error}=await c.auth.resetPasswordForEmail(email,{redirectTo:window.location.origin+window.location.pathname});if(error)throw error;status('If this email is registered, a password reset link has been sent.')}catch(err){status(err.message||'Could not send the reset email.',true)}});
- $('np-login-guest').addEventListener('click',()=>{window.npHideLoginGate?.();status('Continuing as guest. Sign in later from Profile to sync your account.')});
- const cfg=config();if(!cfg.supabaseUrl||!cfg.supabaseAnonKey)$('np-login-config-note').textContent='Google and email login require Supabase Auth setup. Guest access remains available.';
+ const cfg=config();if(!cfg.supabaseUrl||!cfg.supabaseAnonKey)$('np-login-config-note').textContent='Google and email login require Supabase Auth setup.';
  // Restore the Supabase session on every page load, including the return from Google OAuth.
  // This prevents a valid Google login from being covered again by the login gate.
  (async function restoreAuthSession(){
@@ -9884,7 +9907,6 @@ const priorLoad=window.loadPriceVolumeActions;window.loadPriceVolumeActions=asyn
 
 
 <style id="np-guest-viewmore-final-css">
-#np-login-gate .np-login-guest{display:block!important;visibility:visible!important;opacity:1!important;position:relative!important;z-index:5!important;pointer-events:auto!important;min-height:44px!important;margin:14px auto 0!important;padding:10px 16px!important;border:1px solid #45618b!important;border-radius:12px!important;color:#d8e7ff!important;background:rgba(20,42,78,.8)!important;font-size:14px!important;font-weight:700!important;touch-action:manipulation!important}
 #npMoversMore,#npLiquidityMore{position:relative!important;z-index:2147483000!important;pointer-events:auto!important;touch-action:manipulation!important;min-height:48px!important;display:block;cursor:pointer}
 </style>
 <script id="np-guest-viewmore-transactions-final-controller">
@@ -9980,8 +10002,6 @@ const priorLoad=window.loadPriceVolumeActions;window.loadPriceVolumeActions=asyn
    }catch(e){/* Keep the existing market data and never invent transaction counts. */}
  }
  loadVerifiedTransactionCounts();
- // Guest mode is anonymous local browsing only; it does not create an authenticated Supabase user.
- const guest=$('#np-login-guest');if(guest){guest.style.setProperty('display','block','important');guest.addEventListener('click',function(e){e.preventDefault();e.stopImmediatePropagation();window.__NP_GUEST_MODE=true;window.__NP_LOGIN_SESSION=null;window.npHideLoginGate?.();const st=$('#np-login-status');if(st)st.textContent='Guest mode: browsing is available. Sign in to sync your personal data.';const profile=document.querySelector('.v22-profile-sub');if(profile)profile.textContent='Guest mode · Sign in to sync Watchlist and Portfolio.';},true);}
 })();
 </script>
 
