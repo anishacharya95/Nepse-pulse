@@ -4408,7 +4408,7 @@ document.addEventListener('DOMContentLoaded', ()=>{initPulseAuth(); initPulseFee
     q('sqTotalTurnover').textContent=turnovers.length?fmt(turnovers.reduce((a,b)=>a+b,0),0):'—';
     const avg=changes.length?changes.reduce((a,b)=>a+b,0)/changes.length:null;
     q('sqSignal').textContent=avg===null?'Waiting for data':avg>=1.5?'Positive breadth':avg<=-1.5?'Negative breadth':'Mixed market';
-    q('sqRows').innerHTML=rows.length?rows.slice(0,200).map(r=>{
+    q('sqRows').innerHTML=rows.length?rows.map(r=>{
       const ch=r.change===null?'—':fmt(r.change)+'%';
       const cc=r.change>0?'sq-up':r.change<0?'sq-down':'';
       return `<tr><td class="sq-symbol">${esc(r.symbol||r.name||'—')}</td><td>${fmt(r.price)}</td><td class="${cc}">${ch}</td><td>${fmt(r.volume,0)}</td><td>${fmt(r.turnover,0)}</td><td>${fmt(r.rsi)}</td><td><span class="sq-tag">${r.trend}</span></td><td><span class="sq-tag">${r.signal}</span></td></tr>`;
@@ -9509,16 +9509,39 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
  }
  async function fetchRows(){
    let lastErr;
-   // Technical endpoint must be first: /api/market and /api/screener-feed may
-   // contain price-only rows and overwrite the RSI/Trend/Signal columns.
-   for(const path of ['/api/technical-screener?limit=200&offset=0&technical=true&timeframe=D','/api/screener-feed','/api/market']){
+   // Load the full available universe from the paginated technical endpoint.
+   // A page-size limit is not a total-stock limit: keep requesting offsets until
+   // the API says the universe is covered, a short page arrives, or no new rows
+   // are returned (protects against backends that ignore offset).
+   try{
+     const pageSize=200, all=[], seen=new Set(); let firstPayload=null, universeCount=null;
+     for(let offset=0;offset<10000;offset+=pageSize){
+       const url=base()+'/api/technical-screener?limit='+pageSize+'&offset='+offset+'&technical=true&timeframe=D&_sq='+Date.now();
+       const r=await fetch(url,{cache:'no-store',headers:{Accept:'application/json'}});
+       if(!r.ok)throw new Error('/api/technical-screener returned HTTP '+r.status);
+       const data=await r.json(); if(!firstPayload)firstPayload=data;
+       const total=num(first(data,['universeCount','totalCount','total','count','totalStocks','total_stocks']));
+       if(total!==null)universeCount=total;
+       const page=getRows(data); if(!page.length)break;
+       let added=0;
+       for(const row of page){
+         const key=(row.symbol||row.name||'').trim().toUpperCase();
+         if(key&&!seen.has(key)){seen.add(key);all.push(row);added++;}
+       }
+       if(universeCount!==null&&offset+page.length>=universeCount)break;
+       if(page.length<pageSize||added===0)break;
+     }
+     if(all.length)return {rows:all,data:firstPayload,path:'/api/technical-screener'};
+     lastErr=new Error('/api/technical-screener returned no recognizable stock rows');
+   }catch(e){lastErr=e;}
+   // Fall back to endpoints that may return a complete market snapshot.
+   for(const path of ['/api/screener-feed','/api/market']){
      try{
-       const r=await fetch(base()+path+(path.includes('?')?'&':'?')+'_sq='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});
-       if(!r.ok)throw new Error(path.split('?')[0]+' returned HTTP '+r.status);
-       const data=await r.json();
-       const rows=getRows(data);
+       const r=await fetch(base()+path+'?_sq='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});
+       if(!r.ok)throw new Error(path+' returned HTTP '+r.status);
+       const data=await r.json(), rows=getRows(data);
        if(rows.length)return {rows,data,path};
-       lastErr=new Error(path.split('?')[0]+' returned JSON but no recognizable stock rows');
+       lastErr=new Error(path+' returned JSON but no recognizable stock rows');
      }catch(e){lastErr=e;}
    }
    throw lastErr||new Error('Market feed unavailable');
@@ -9529,7 +9552,7 @@ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',
    const search=(byId('sqSearch')?.value||'').trim().toLowerCase();const min=num(byId('sqMinChange')?.value),max=num(byId('sqMaxChange')?.value),minVol=num(byId('sqMinVolume')?.value),minTurn=num(byId('sqMinTurnover')?.value);
    let filtered=rows.filter(r=>{const hay=((r.symbol||'')+' '+(r.name||'')).toLowerCase();return (!search||hay.includes(search))&&(min===null||(r.change!==null&&r.change>=min))&&(max===null||(r.change!==null&&r.change<=max))&&(minVol===null||(r.volume!==null&&r.volume>=minVol))&&(minTurn===null||(r.turnover!==null&&r.turnover>=minTurn));});
    const sort=byId('sqSort')?.value||'change';const key=sort==='volume'?'volume':sort==='turnover'?'turnover':sort==='price'?'price':'change';filtered.sort((a,b)=>(b[key]??-Infinity)-(a[key]??-Infinity));
-   body.innerHTML=filtered.length?filtered.slice(0,200).map(r=>'<tr><td class="sq-symbol">'+esc(r.symbol||r.name||'—')+'</td><td>'+fmt(r.price)+'</td><td>'+(r.change===null?'—':fmt(r.change)+'%')+'</td><td>'+fmt(r.volume)+'</td><td>'+fmt(r.turnover)+'</td><td>'+fmt(r.rsi)+'</td><td><span class="sq-tag">'+esc(r.trend)+'</span></td><td><span class="sq-tag">'+esc(r.signal)+'</span></td></tr>').join(''):'<tr><td colspan="8" class="sq-empty">No stocks match these filters.</td></tr>';
+   body.innerHTML=filtered.length?filtered.map(r=>'<tr><td class="sq-symbol">'+esc(r.symbol||r.name||'—')+'</td><td>'+fmt(r.price)+'</td><td>'+(r.change===null?'—':fmt(r.change)+'%')+'</td><td>'+fmt(r.volume)+'</td><td>'+fmt(r.turnover)+'</td><td>'+fmt(r.rsi)+'</td><td><span class="sq-tag">'+esc(r.trend)+'</span></td><td><span class="sq-tag">'+esc(r.signal)+'</span></td></tr>').join(''):'<tr><td colspan="8" class="sq-empty">No stocks match these filters.</td></tr>';
    if(byId('sqCount'))byId('sqCount').textContent=filtered.length;if(byId('sqResultMeta'))byId('sqResultMeta').textContent=filtered.length+' matches · '+rows.length+' feed rows';
    const changes=filtered.map(x=>x.change).filter(x=>x!==null),rsis=filtered.map(x=>x.rsi).filter(x=>x!==null),turns=filtered.map(x=>x.turnover).filter(x=>x!==null);
    if(byId('sqAvgChange'))byId('sqAvgChange').textContent=changes.length?fmt(changes.reduce((a,b)=>a+b,0)/changes.length)+'%':'—';
