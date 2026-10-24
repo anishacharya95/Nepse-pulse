@@ -8226,12 +8226,32 @@ body.v22-profile-tab-active .bottom.mobile-exact-bottom{z-index:10000}
      const c=await client();
      if(!c)return;
      status('Connecting to Google…');
+     const nativeAndroid = !!(
+       window.Capacitor &&
+       typeof window.Capacitor.isNativePlatform === 'function' &&
+       window.Capacitor.isNativePlatform()
+     );
      const {data,error}=await c.auth.signInWithOAuth({
        provider:'google',
-       options:{redirectTo:window.npOAuthRedirectTo ? window.npOAuthRedirectTo() : (window.location.origin+window.location.pathname)}
+       options:{
+         redirectTo:window.npOAuthRedirectTo ? window.npOAuthRedirectTo() : (window.location.origin+window.location.pathname),
+         // On Android, open OAuth in the system browser so the registered
+         // app deep link can return to Capacitor. On web, keep Supabase's
+         // normal redirect behavior.
+         ...(nativeAndroid ? {skipBrowserRedirect:true} : {})
+       }
      });
      if(error)throw error;
-     if(data&&data.url)status('Opening Google sign-in…');
+     if(nativeAndroid && data && data.url){
+       const browser = window.NP_CAP_BROWSER;
+       if(!browser || typeof browser.open !== 'function'){
+         throw new Error('Android browser plugin is unavailable. Please rebuild the app.');
+       }
+       await browser.open({url:data.url});
+       status('Complete Google sign-in in your browser…');
+     } else if(data&&data.url){
+       status('Opening Google sign-in…');
+     }
    }catch(err){
      status(err.message||'Could not start Google sign-in.',true);
    }finally{
@@ -8456,8 +8476,16 @@ window.runAiTrendlines=async function(){const symbol=(document.getElementById('n
       if (incoming.protocol !== 'com.nepsepulse.app:' || incoming.hostname !== 'login-callback') return;
       const code = incoming.searchParams.get('code');
       const error = incoming.searchParams.get('error_description') || incoming.searchParams.get('error');
-      if (error) { console.error('Google sign-in callback error:', error); return; }
+      const statusEl = document.getElementById('np-login-status');
+      if (error) {
+        console.error('Google sign-in callback error:', error);
+        if (statusEl) { statusEl.textContent = decodeURIComponent(error.replace(/\+/g, ' ')); statusEl.style.color = '#ffb8b8'; }
+        try { if (window.NP_CAP_BROWSER) await window.NP_CAP_BROWSER.close(); } catch (_) {}
+        return;
+      }
       if (!code) return;
+      try { if (window.NP_CAP_BROWSER) await window.NP_CAP_BROWSER.close(); } catch (_) {}
+      if (statusEl) { statusEl.textContent = 'Finishing Google sign-in…'; statusEl.style.color = '#8de6bd'; }
       const target = new URL(window.location.origin + window.location.pathname);
       target.searchParams.set('code', code);
       // Keep the callback in the app's web origin so supabase-js can complete PKCE exchange.
@@ -8468,10 +8496,18 @@ window.runAiTrendlines=async function(){const symbol=(document.getElementById('n
         const result = await client.auth.exchangeCodeForSession(code);
         if (result.error) throw result.error;
         window.__NP_LOGIN_SESSION = result.data && result.data.session || null;
+        if (!window.__NP_LOGIN_SESSION) throw new Error('Google sign-in returned no active session. Please try again.');
         if (window.npHideLoginGate) window.npHideLoginGate();
+        if (statusEl) { statusEl.textContent = 'Signed in successfully.'; statusEl.style.color = '#8de6bd'; }
         window.dispatchEvent(new CustomEvent('np-oauth-returned', {detail:{provider:'google'}}));
+      } else {
+        throw new Error('Could not initialize the sign-in service after Google returned.');
       }
-    } catch (err) { console.error('Could not finish OAuth return to NEPSE Pulse:', err); }
+    } catch (err) {
+      console.error('Could not finish OAuth return to NEPSE Pulse:', err);
+      const statusEl = document.getElementById('np-login-status');
+      if (statusEl) { statusEl.textContent = (err && err.message) || 'Could not finish Google sign-in. Please try again.'; statusEl.style.color = '#ffb8b8'; }
+    }
   }
   appPlugin.addListener('appUrlOpen', handleOAuthCallback);
   // Also handle OAuth links that launch/recreate the app instead of arriving
