@@ -8445,12 +8445,12 @@ window.runAiTrendlines=async function(){const symbol=(document.getElementById('n
   };
   if (!isNative() || window.__NP_OAUTH_RETURN_LISTENER) return;
   window.__NP_OAUTH_RETURN_LISTENER = true;
-  const appPlugin = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App;
+  const appPlugin = window.NP_CAP_APP || (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App);
   if (!appPlugin || typeof appPlugin.addListener !== 'function') {
     console.warn('Capacitor App plugin is unavailable; OAuth deep-link callback cannot be handled.');
     return;
   }
-  appPlugin.addListener('appUrlOpen', async function(event){
+  async function handleOAuthCallback(event){
     try {
       const incoming = new URL(event && event.url ? event.url : '');
       if (incoming.protocol !== 'com.nepsepulse.app:' || incoming.hostname !== 'login-callback') return;
@@ -8472,7 +8472,15 @@ window.runAiTrendlines=async function(){const symbol=(document.getElementById('n
         window.dispatchEvent(new CustomEvent('np-oauth-returned', {detail:{provider:'google'}}));
       }
     } catch (err) { console.error('Could not finish OAuth return to NEPSE Pulse:', err); }
-  });
+  }
+  appPlugin.addListener('appUrlOpen', handleOAuthCallback);
+  // Also handle OAuth links that launch/recreate the app instead of arriving
+  // through an already-running appUrlOpen listener.
+  if (typeof appPlugin.getLaunchUrl === 'function') {
+    appPlugin.getLaunchUrl().then(function(launch){
+      if (launch && launch.url) return handleOAuthCallback(launch);
+    }).catch(function(err){ console.warn('Could not read OAuth launch URL:', err); });
+  }
 })();
 </script>
 </body>
