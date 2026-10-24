@@ -349,9 +349,24 @@ jobs:
               match = pattern.search(s)
               if not match:
                   raise SystemExit('Could not find launcher activity in AndroidManifest.xml')
-              activity = match.group(1).replace('</activity>', callback + '\n    </activity>')
+              activity = match.group(1)
+              # Ensure OAuth deep links are delivered to the existing Capacitor activity.
+              opening = re.search(r'<activity\b[^>]*>', activity)
+              if opening and 'android:launchMode=' not in opening.group(0):
+                  tag = opening.group(0)
+                  activity = activity.replace(tag, tag[:-1] + ' android:launchMode="singleTask">', 1)
+              elif opening and 'android:launchMode=' in opening.group(0):
+                  activity = re.sub(r'android:launchMode="[^"]+"', 'android:launchMode="singleTask"', activity, count=1)
+              activity = activity.replace('</activity>', callback + '\n    </activity>')
               s = s[:match.start()] + activity + s[match.end():]
               p.write_text(s)
+          # Fail the build if the callback filter or launch mode is absent.
+          manifest = p.read_text()
+          if 'android:host="login-callback"' not in manifest:
+              raise SystemExit('OAuth callback intent-filter was not registered')
+          if 'android:launchMode="singleTask"' not in manifest:
+              raise SystemExit('Launcher activity must use launchMode=singleTask for OAuth callbacks')
+          print('Verified Android OAuth callback intent-filter and singleTask launch mode.')
           PY
 
       - name: Fix Kotlin dependency versions
