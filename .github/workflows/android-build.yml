@@ -1,4 +1,3 @@
-
 name: NEPSE Pulse Android Build - Banner and Interstitial Ads
 
 on:
@@ -10,12 +9,6 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-
-    env:
-      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
     steps:
       - name: Checkout repository
@@ -54,7 +47,7 @@ jobs:
           npm install @capacitor/core@7 @capacitor/android@7 @capacitor/app@7 @capacitor/browser@7 @capacitor-community/admob@7
           npm install --save-dev @capacitor/cli@7 esbuild
 
-      - name: Bundle Capacitor native plugins and configure ads
+      - name: Bundle Capacitor native plugins and configure banner
         run: |
           cat > capacitor-plugins-entry.js <<'EOF'
           import { Capacitor } from '@capacitor/core';
@@ -81,22 +74,15 @@ jobs:
             let navActions = 0;
             let lastInterstitialAt = 0;
             let interstitialShowing = false;
-
-            const INTERSTITIAL_ID =
-              'ca-app-pub-1565800134063497/1639379056';
-
-            const NAV_LABELS =
-              /^(home|market|screener|quant|alerts|watchlist|market structure|professional charting|charting|ipo center|profile|more|traders zone)$/i;
-
+            const INTERSTITIAL_ID = 'ca-app-pub-1565800134063497/1639379056';
+            const NAV_LABELS = /^(home|market|screener|quant|alerts|watchlist|market structure|professional charting|charting|ipo center|profile|more|traders zone)$/i;
             const COOLDOWN_MS = 5 * 60 * 1000;
             const ACTIONS_BETWEEN_ADS = 8;
 
             function nativeAndroid() {
-              return !!(
-                window.Capacitor &&
+              return !!(window.Capacitor &&
                 typeof window.Capacitor.isNativePlatform === 'function' &&
-                window.Capacitor.isNativePlatform()
-              );
+                window.Capacitor.isNativePlatform());
             }
 
             function report(message) {
@@ -105,47 +91,32 @@ jobs:
 
             async function prepareInterstitial(admob) {
               try {
-                await admob.prepareInterstitial({
-                  adId: INTERSTITIAL_ID
-                });
-
+                await admob.prepareInterstitial({ adId: INTERSTITIAL_ID });
                 interstitialReady = true;
-                report('Interstitial ready');
+                report('banner configured; interstitial ready');
               } catch (error) {
                 interstitialReady = false;
-                console.warn(
-                  '[NEPSE AdMob] Interstitial load failed:',
-                  error
-                );
+                console.warn('[NEPSE AdMob] Interstitial load failed:', error);
+                report('banner requested; interstitial not available yet');
               }
             }
 
             async function showInterstitialAtTransition(admob) {
               const now = Date.now();
-
-              if (
-                !interstitialReady ||
-                interstitialShowing ||
-                now - lastInterstitialAt < COOLDOWN_MS
-              ) {
-                return;
-              }
-
+              if (!interstitialReady || interstitialShowing ||
+                  now - lastInterstitialAt < COOLDOWN_MS) return;
               interstitialShowing = true;
               interstitialReady = false;
               lastInterstitialAt = now;
-
               try {
-                await admob.showInterstitial({
-                  adId: INTERSTITIAL_ID
-                });
+                // Only called after several explicit top-level navigation actions;
+                // never show on app launch, app exit, or every tap.
+                await admob.showInterstitial({ adId: INTERSTITIAL_ID });
               } catch (error) {
-                console.warn(
-                  '[NEPSE AdMob] Interstitial display failed:',
-                  error
-                );
+                console.warn('[NEPSE AdMob] Interstitial display failed:', error);
               } finally {
                 interstitialShowing = false;
+                // Prepare the next ad after the current presentation attempt.
                 await prepareInterstitial(admob);
               }
             }
@@ -153,88 +124,50 @@ jobs:
             function installNavigationPlacement(admob) {
               document.addEventListener('click', function (event) {
                 if (!nativeAndroid()) return;
-
-                const target =
-                  event.target && event.target.closest
-                    ? event.target.closest(
-                        'button, a, [role="tab"], [role="button"]'
-                      )
-                    : null;
-
+                const target = event.target && event.target.closest
+                  ? event.target.closest('button, a, [role="tab"], [role="button"]')
+                  : null;
                 if (!target) return;
-
-                const label = String(
-                  target.innerText ||
-                  target.getAttribute('aria-label') ||
-                  target.title ||
-                  ''
-                ).replace(/\s+/g, ' ').trim();
-
+                const label = String(target.innerText || target.getAttribute('aria-label') || target.title || '')
+                  .replace(/\s+/g, ' ').trim();
                 if (!NAV_LABELS.test(label)) return;
-
                 navActions += 1;
-
                 if (navActions >= ACTIONS_BETWEEN_ADS) {
                   navActions = 0;
-
-                  Promise.resolve().then(function () {
-                    showInterstitialAtTransition(admob);
-                  });
+                  // A brief delay lets the navigation click finish before the ad opens.
+                  Promise.resolve().then(() => showInterstitialAtTransition(admob));
                 }
               }, true);
             }
 
             async function startAdMob() {
               if (started || !nativeAndroid()) return;
-
               started = true;
-
               const admob = window.NP_CAP_ADMOB;
-
               if (!admob) {
-                report('Native AdMob plugin unavailable');
+                report('FAILED — native AdMob plugin unavailable');
                 return;
               }
 
               try {
-                report('Checking consent');
-
+                report('checking consent…');
                 let consent = await admob.requestConsentInfo();
-
-                if (
-                  consent &&
-                  consent.isConsentFormAvailable &&
-                  String(consent.status)
-                    .toLowerCase()
-                    .includes('required')
-                ) {
+                if (consent && consent.isConsentFormAvailable &&
+                    String(consent.status).toLowerCase().includes('required')) {
                   consent = await admob.showConsentForm();
                 }
-
                 if (consent && consent.canRequestAds === false) {
-                  report('Ads paused pending consent');
+                  report('ads paused until consent permits requests');
                   return;
                 }
 
                 await admob.initialize();
-
                 if (typeof admob.addListener === 'function') {
                   try {
-                    await admob.addListener(
-                      'bannerAdLoaded',
-                      function () {
-                        report('Banner loaded');
-                      }
-                    );
-
-                    await admob.addListener(
-                      'bannerAdFailedToLoad',
-                      function (error) {
-                        report(
-                          'Banner failed: ' + JSON.stringify(error)
-                        );
-                      }
-                    );
+                    await admob.addListener('bannerAdLoaded', () => report('banner loaded'));
+                    await admob.addListener('bannerAdFailedToLoad', error => {
+                      report('banner failed to load — ' + JSON.stringify(error));
+                    });
                   } catch (_) {}
                 }
 
@@ -244,30 +177,17 @@ jobs:
                   position: 'BOTTOM_CENTER',
                   margin: 0
                 });
-
-                report('Banner requested');
-
+                report('real banner requested; preparing interstitial…');
                 installNavigationPlacement(admob);
                 await prepareInterstitial(admob);
-
               } catch (error) {
-                report(
-                  'ERROR — ' +
-                  (error && error.message
-                    ? error.message
-                    : JSON.stringify(error))
-                );
-
+                report('ERROR — ' + (error && error.message ? error.message : JSON.stringify(error)));
                 started = false;
               }
             }
 
             if (document.readyState === 'loading') {
-              document.addEventListener(
-                'DOMContentLoaded',
-                startAdMob,
-                { once: true }
-              );
+              document.addEventListener('DOMContentLoaded', startAdMob, { once: true });
             } else {
               startAdMob();
             }
@@ -276,24 +196,18 @@ jobs:
 
           python3 - <<'PY'
           from pathlib import Path
-
           p = Path('android-web/index.html')
           s = p.read_text()
-
           tags = [
               '<script src="./np-capacitor-plugins.bundle.js"></script>',
               '<script src="./np-admob-banner.js"></script>'
           ]
-
           for tag in tags:
               if tag not in s:
                   pos = s.lower().rfind('</head>')
                   if pos < 0:
-                      raise SystemExit(
-                          'Could not find </head> in android-web/index.html'
-                      )
+                      raise SystemExit('Could not find </head> in android-web/index.html')
                   s = s[:pos] + tag + '\n' + s[pos:]
-
           p.write_text(s)
           PY
 
@@ -309,121 +223,61 @@ jobs:
           from pathlib import Path
           import re
 
+          # Capacitor normally keeps these values in android/variables.gradle.
           variables = Path("android/variables.gradle")
           changed_sdk = False
-
           if variables.exists():
               text = variables.read_text()
-
-              for key, value in (
-                  ("minSdkVersion", 24),
-                  ("targetSdkVersion", 36)
-              ):
-                  pattern = (
-                      rf"(?m)^(\s*{key}\s*(?:=|:)\s*)"
-                      rf"\d+(\s*(?://.*)?)$"
-                  )
-
-                  updated, count = re.subn(
-                      pattern,
-                      rf"\g<1>{value}\g<2>",
-                      text
-                  )
-
+              for key, value in (("minSdkVersion", 24), ("targetSdkVersion", 36)):
+                  pattern = rf"(?m)^(\s*{key}\s*(?:=|:)\s*)\d+(\s*(?://.*)?)$"
+                  updated, count = re.subn(pattern, rf"\g<1>{value}\g<2>", text)
                   if count:
                       text = updated
                       changed_sdk = True
-                      print(f"Set {key} to {value}")
-
+                      print(f"Set {key} to {value} in android/variables.gradle")
               variables.write_text(text)
 
-          app_gradle_files = [
-              Path("android/app/build.gradle"),
-              Path("android/app/build.gradle.kts")
-          ]
-
+          # Also support templates that declare numeric SDK levels directly in app Gradle.
+          app_gradle_files = [Path("android/app/build.gradle"), Path("android/app/build.gradle.kts")]
           for gradle in app_gradle_files:
               if not gradle.exists():
                   continue
-
               text = gradle.read_text()
-
-              for key, value in (
-                  ("minSdk", 24),
-                  ("minSdkVersion", 24),
-                  ("targetSdk", 36),
-                  ("targetSdkVersion", 36)
-              ):
-                  pattern = (
-                      rf"(?m)^(\s*{key}\s*(?:=|\s)\s*)"
-                      rf"\d+(\s*(?://.*)?)$"
-                  )
-
-                  updated, count = re.subn(
-                      pattern,
-                      rf"\g<1>{value}\g<2>",
-                      text
-                  )
-
+              for key, value in (("minSdk", 24), ("minSdkVersion", 24), ("targetSdk", 36), ("targetSdkVersion", 36)):
+                  pattern = rf"(?m)^(\s*{key}\s*(?:=|\s)\s*)\d+(\s*(?://.*)?)$"
+                  updated, count = re.subn(pattern, rf"\g<1>{value}\g<2>", text)
                   if count:
                       text = updated
                       changed_sdk = True
                       print(f"Set {key} to {value} in {gradle}")
-
               gradle.write_text(text)
 
+          # Increment versionCode so this bundle can replace version code 1 in Play Console.
           app_gradle = Path("android/app/build.gradle")
-
           if not app_gradle.exists():
               app_gradle = Path("android/app/build.gradle.kts")
-
           if not app_gradle.exists():
-              raise SystemExit(
-                  "Could not find app/build.gradle or build.gradle.kts"
-              )
-
+              raise SystemExit("Could not find app/build.gradle or app/build.gradle.kts")
           text = app_gradle.read_text()
-
-          updated, count = re.subn(
-              r"(?m)^(\s*versionCode\s*(?:=|\s)\s*)\d+(\s*(?://.*)?)$",
-              r"\g<1>2\g<2>",
-              text,
-              count=1
-          )
-
+          updated, count = re.subn(r"(?m)^(\s*versionCode\s*(?:=|\s)\s*)\d+(\s*(?://.*)?)$", r"\g<1>2\g<2>", text, count=1)
           if count:
               app_gradle.write_text(updated)
               print("Set versionCode to 2")
           else:
-              print("No numeric versionCode found")
+              print("No numeric versionCode found; leaving version code unchanged")
 
           if not changed_sdk:
-              vars_text = (
-                  variables.read_text() if variables.exists() else ""
-              )
+              # Fail only if neither variables.gradle nor app Gradle had numeric SDK declarations.
+              vars_text = variables.read_text() if variables.exists() else ""
               app_text = app_gradle.read_text()
+              if not re.search(r"(?m)^\s*(?:minSdk|targetSdk|minSdkVersion|targetSdkVersion)\s*(?:=|\s|:)", vars_text + "\n" + app_text):
+                  raise SystemExit("Could not find Android SDK declarations to update")
 
-              if not re.search(
-                  r"(?m)^\s*(?:minSdk|targetSdk|minSdkVersion|targetSdkVersion)\s*(?:=|\s|:)",
-                  vars_text + "\n" + app_text
-              ):
-                  raise SystemExit(
-                      "Could not find Android SDK declarations"
-                  )
-
-          print("--- SDK declarations ---")
-
+          print("--- SDK declarations after update ---")
           for gradle in [variables, *app_gradle_files]:
               if gradle.exists():
                   for line in gradle.read_text().splitlines():
-                      if any(
-                          key in line
-                          for key in (
-                              "minSdk",
-                              "targetSdk",
-                              "versionCode"
-                          )
-                      ):
+                      if any(key in line for key in ("minSdk", "targetSdk", "versionCode")):
                           print(f"{gradle}: {line.strip()}")
           PYCODE
 
@@ -433,68 +287,39 @@ jobs:
           from pathlib import Path
           import re
 
-          manifest = Path(
-              'android/app/src/main/AndroidManifest.xml'
-          )
-
+          manifest = Path('android/app/src/main/AndroidManifest.xml')
           s = manifest.read_text()
           app_id = 'ca-app-pub-1565800134063497~9972330494'
           meta_name = 'com.google.android.gms.ads.APPLICATION_ID'
 
           if meta_name not in s:
               match = re.search(r'<application\b[^>]*>', s)
-
               if not match:
-                  raise SystemExit(
-                      'Could not find <application> in AndroidManifest.xml'
-                  )
-
+                  raise SystemExit('Could not find <application> in AndroidManifest.xml')
               metadata = (
                   '\n        <meta-data\n'
                   '            android:name="' + meta_name + '"\n'
                   '            android:value="' + app_id + '"/>\n'
               )
-
               s = s[:match.end()] + metadata + s[match.end():]
               manifest.write_text(s)
           else:
+              # Ensure an existing entry uses the correct App ID.
               pattern = re.compile(
-                  r'(<meta-data\s+android:name="' +
-                  re.escape(meta_name) +
+                  r'(<meta-data\s+android:name="' + re.escape(meta_name) +
                   r'"\s+android:value=")[^"]*("\s*/?>)'
               )
-
-              s2, count = pattern.subn(
-                  r'\g<1>' + app_id + r'\g<2>',
-                  s,
-                  count=1
-              )
-
+              s2, count = pattern.subn(r'\g<1>' + app_id + r'\g<2>', s, count=1)
               if count:
                   manifest.write_text(s2)
 
           values = Path('android/app/src/main/res/values')
           values.mkdir(parents=True, exist_ok=True)
-
           strings = values / 'strings.xml'
-
-          content = (
-              strings.read_text()
-              if strings.exists()
-              else '<resources>\n</resources>\n'
-          )
-
-          line = (
-              '<string name="admob_app_id">' +
-              app_id +
-              '</string>'
-          )
-
+          content = strings.read_text() if strings.exists() else '<resources>\n</resources>\n'
+          line = '<string name="admob_app_id">' + app_id + '</string>'
           if 'name="admob_app_id"' not in content:
-              content = content.replace(
-                  '</resources>',
-                  '    ' + line + '\n</resources>'
-              )
+              content = content.replace('</resources>', '    ' + line + '\n</resources>')
               strings.write_text(content)
           PY
 
@@ -506,7 +331,6 @@ jobs:
 
           p = Path('android/app/src/main/AndroidManifest.xml')
           s = p.read_text()
-
           callback = '''
                   <intent-filter>
                       <action android:name="android.intent.action.VIEW" />
@@ -515,7 +339,6 @@ jobs:
                       <data android:scheme="com.nepsepulse.app" android:host="login-callback" />
                   </intent-filter>
           '''
-
           if 'android:host="login-callback"' not in s:
               pattern = re.compile(
                   r'(<activity\b[^>]*>.*?'
@@ -523,19 +346,10 @@ jobs:
                   r'<category android:name="android.intent.category.LAUNCHER"\s*/>.*?</activity>)',
                   re.S
               )
-
               match = pattern.search(s)
-
               if not match:
-                  raise SystemExit(
-                      'Could not find launcher activity in AndroidManifest.xml'
-                  )
-
-              activity = match.group(1).replace(
-                  '</activity>',
-                  callback + '\n    </activity>'
-              )
-
+                  raise SystemExit('Could not find launcher activity in AndroidManifest.xml')
+              activity = match.group(1).replace('</activity>', callback + '\n    </activity>')
               s = s[:match.start()] + activity + s[match.end():]
               p.write_text(s)
           PY
@@ -552,12 +366,14 @@ jobs:
               }
           }
           EOF
-
+          
       - name: Pin compatible AndroidX Browser
         run: |
           printf '\nconfigurations.configureEach { resolutionStrategy.force "androidx.browser:browser:1.8.0" }\n' >> android/app/build.gradle
 
-      # Build a debug APK without requiring release signing secrets.
+
+      # Always produce a debug APK for device testing. This uses the Android debug key,
+      # and does not modify or replace the Play Store upload keystore.
       - name: Build Debug APK
         run: |
           cd android
@@ -571,10 +387,7 @@ jobs:
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
-      # Release signing is optional. The debug APK can still be built
-      # if release signing secrets have not been configured.
       - name: Configure release signing
-        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' && env.ANDROID_KEYSTORE_PASSWORD != '' && env.ANDROID_KEY_ALIAS != '' && env.ANDROID_KEY_PASSWORD != '' }}
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -583,13 +396,19 @@ jobs:
         run: |
           set -euo pipefail
 
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ] || [ -z "$ANDROID_KEYSTORE_PASSWORD" ] || [ -z "$ANDROID_KEY_ALIAS" ] || [ -z "$ANDROID_KEY_PASSWORD" ]; then
+            echo "::error::Release signing secrets are missing. Add ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, and ANDROID_KEY_PASSWORD in GitHub Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
           mkdir -p "$RUNNER_TEMP/nepse-signing"
-
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" |
-            base64 --decode \
-            > "$RUNNER_TEMP/nepse-signing/upload-keystore.jks"
-
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/nepse-signing/upload-keystore.jks"
           test -s "$RUNNER_TEMP/nepse-signing/upload-keystore.jks"
+
+          # Validate that the uploaded keystore opens and contains the configured alias.
+          keytool -list -keystore "$RUNNER_TEMP/nepse-signing/upload-keystore.jks" \
+            -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" >/dev/null
+          echo "Release keystore and key alias validated."
 
           echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/nepse-signing/upload-keystore.jks" >> "$GITHUB_ENV"
 
@@ -604,10 +423,8 @@ jobs:
               depth = 0
               quote = None
               escaped = False
-
               for i in range(open_pos, len(text)):
                   ch = text[i]
-
                   if quote:
                       if escaped:
                           escaped = False
@@ -616,116 +433,70 @@ jobs:
                       elif ch == quote:
                           quote = None
                       continue
-
                   if ch in ("'", '"'):
                       quote = ch
                   elif ch == "{":
                       depth += 1
                   elif ch == "}":
                       depth -= 1
-
                       if depth == 0:
                           return i
-
               raise SystemExit("Could not parse Gradle braces")
 
           def locate_block(text, name, start=0):
-              m = re.search(
-                  r"(?m)^\s*" + re.escape(name) + r"\s*\{",
-                  text[start:]
-              )
-
+              m = re.search(r"(?m)^\s*" + re.escape(name) + r"\s*\{", text[start:])
               if not m:
                   return None
-
               line_start = start + m.start()
               brace = text.find("{", line_start, start + m.end())
-
-              return (
-                  line_start,
-                  brace,
-                  matching_close(text, brace)
-              )
+              return line_start, brace, matching_close(text, brace)
 
           build = locate_block(s, "buildTypes")
-
           if not build:
-              raise SystemExit("Could not find buildTypes block")
-
+              raise SystemExit("Could not find buildTypes block in android/app/build.gradle")
           signing = locate_block(s, "signingConfigs")
-
           if not signing:
               insertion = build[0]
-
-              config = (
-                  "    signingConfigs {\n"
-                  "        release {\n"
-                  "            storeFile file(System.getenv('ANDROID_KEYSTORE_PATH'))\n"
-                  "            storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')\n"
-                  "            keyAlias System.getenv('ANDROID_KEY_ALIAS')\n"
-                  "            keyPassword System.getenv('ANDROID_KEY_PASSWORD')\n"
-                  "        }\n"
-                  "    }\n\n"
-              )
-
+              config = ("    signingConfigs {\n"
+                        "        release {\n"
+                        "            storeFile file(System.getenv('ANDROID_KEYSTORE_PATH'))\n"
+                        "            storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')\n"
+                        "            keyAlias System.getenv('ANDROID_KEY_ALIAS')\n"
+                        "            keyPassword System.getenv('ANDROID_KEY_PASSWORD')\n"
+                        "        }\n"
+                        "    }\n\n")
               s = s[:insertion] + config + s[insertion:]
 
+          # Remove any misplaced signingConfig line from signingConfigs.release.
           signing = locate_block(s, "signingConfigs")
           sign_body = s[signing[1] + 1:signing[2]]
-
           rel = re.search(r"(?m)^\s*release\s*\{", sign_body)
-
           if rel:
               rel_line = signing[1] + 1 + rel.start()
               rel_brace = s.find("{", rel_line, signing[2] + 1)
               rel_close = matching_close(s, rel_brace)
-
               body = s[rel_brace + 1:rel_close]
-
-              body = re.sub(
-                  r"(?m)^\s*signingConfig\s+signingConfigs\.release\s*;?\s*\n?",
-                  "",
-                  body
-              )
-
+              body = re.sub(r"(?m)^\s*signingConfig\s+signingConfigs\.release\s*;?\s*\n?", "", body)
               s = s[:rel_brace + 1] + body + s[rel_close:]
 
+          # Add signingConfig only inside buildTypes.release.
           build = locate_block(s, "buildTypes")
           body = s[build[1] + 1:build[2]]
-
           rel = re.search(r"(?m)^\s*release\s*\{", body)
-
           if not rel:
-              raise SystemExit(
-                  "Could not find release buildType inside buildTypes"
-              )
-
+              raise SystemExit("Could not find release buildType inside buildTypes")
           rel_line = build[1] + 1 + rel.start()
           rel_brace = s.find("{", rel_line, build[2] + 1)
           rel_close = matching_close(s, rel_brace)
-
           release_body = s[rel_brace + 1:rel_close]
-
-          release_body = re.sub(
-              r"(?m)^\s*signingConfig\s+signingConfigs\.release\s*;?\s*\n?",
-              "",
-              release_body
-          )
-
-          release_body = (
-              "\n            signingConfig signingConfigs.release\n"
-              + release_body
-          )
-
+          release_body = re.sub(r"(?m)^\s*signingConfig\s+signingConfigs\.release\s*;?\s*\n?", "", release_body)
+          release_body = "\n            signingConfig signingConfigs.release\n" + release_body
           s = s[:rel_brace + 1] + release_body + s[rel_close:]
-
           gradle.write_text(s)
-
           print("Release signing configured in buildTypes.release.")
           PY
 
       - name: Build release Android App Bundle
-        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' && env.ANDROID_KEYSTORE_PASSWORD != '' && env.ANDROID_KEY_ALIAS != '' && env.ANDROID_KEY_PASSWORD != '' }}
         env:
           ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/nepse-signing/upload-keystore.jks
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -737,9 +508,8 @@ jobs:
           ./gradlew bundleRelease
 
       - name: Upload Android App Bundle
-        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' && env.ANDROID_KEYSTORE_PASSWORD != '' && env.ANDROID_KEY_ALIAS != '' && env.ANDROID_KEY_PASSWORD != '' }}
         uses: actions/upload-artifact@v4
         with:
-          name: nepse-pulse-release-aab
+          name: NEPSE-Pulse-Play-Store-AAB
           path: android/app/build/outputs/bundle/release/app-release.aab
           if-no-files-found: error
