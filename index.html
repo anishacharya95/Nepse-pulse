@@ -8488,17 +8488,14 @@ window.runAiTrendlines=async function(){const symbol=(document.getElementById('n
         (incoming.hostname === 'login-callback' || incoming.pathname === '/login-callback' || incoming.pathname === 'login-callback');
       if (!isOurCallback) return;
       console.info('[NEPSE OAuth] Android callback received:', incoming.protocol + '//' + (incoming.host || incoming.pathname));
-      const code = incoming.searchParams.get('code');
-      const error = incoming.searchParams.get('error_description') || incoming.searchParams.get('error');
+      // OAuth providers/Supabase versions may return parameters in either the
+      // query string (PKCE authorization code) or URL fragment (token response).
+      const hashParams = new URLSearchParams((incoming.hash || '').replace(/^#/, '').replace(/^\?/, ''));
+      const code = incoming.searchParams.get('code') || hashParams.get('code');
+      const error = incoming.searchParams.get('error_description') || incoming.searchParams.get('error') || hashParams.get('error_description') || hashParams.get('error');
       if (error) {
         console.error('[NEPSE OAuth] Provider returned an error:', error);
         if (statusEl) { statusEl.textContent = 'Google sign-in failed: ' + error.replace(/\+/g, ' '); statusEl.style.color = '#ffb8b8'; }
-        try { if (window.NP_CAP_BROWSER) await window.NP_CAP_BROWSER.close(); } catch (_) {}
-        return;
-      }
-      if (!code) {
-        console.error('[NEPSE OAuth] Callback URL did not contain an authorization code.');
-        if (statusEl) { statusEl.textContent = 'Google returned to the app, but no authorization code was received. Check Supabase redirect settings and try again.'; statusEl.style.color = '#ffb8b8'; }
         try { if (window.NP_CAP_BROWSER) await window.NP_CAP_BROWSER.close(); } catch (_) {}
         return;
       }
@@ -8507,7 +8504,23 @@ window.runAiTrendlines=async function(){const symbol=(document.getElementById('n
       const clientFactory = window.__NP_GET_LOGIN_CLIENT;
       const client = clientFactory ? await clientFactory() : window.__NP_LOGIN_SUPABASE;
       if (!client || !client.auth) throw new Error('Could not initialize the sign-in service after Google returned.');
-      const result = await client.auth.exchangeCodeForSession(code);
+      let result;
+      if (code) {
+        result = await client.auth.exchangeCodeForSession(code);
+      } else {
+        // Support implicit/token-style callbacks as well as the preferred PKCE code flow.
+        const accessToken = incoming.searchParams.get('access_token') || hashParams.get('access_token');
+        const refreshToken = incoming.searchParams.get('refresh_token') || hashParams.get('refresh_token');
+        if (accessToken && refreshToken) {
+          result = await client.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+        } else {
+          const present = ['code','access_token','refresh_token','error','error_description'].filter(function(k) {
+            return incoming.searchParams.has(k) || hashParams.has(k);
+          });
+          console.error('[NEPSE OAuth] Callback missing code/tokens; parameter names received:', present);
+          throw new Error('Google returned to the app, but the callback contained neither an authorization code nor a session token. Check that Supabase allows com.nepsepulse.app://login-callback and that Google uses the Supabase callback URL.');
+        }
+      }
       if (result.error) throw result.error;
       window.__NP_LOGIN_SESSION = result.data && result.data.session || null;
       if (!window.__NP_LOGIN_SESSION) throw new Error('Google sign-in returned no active session. Please try again.');
