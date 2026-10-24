@@ -259,7 +259,7 @@ jobs:
           if not app_gradle.exists():
               raise SystemExit("Could not find app/build.gradle or app/build.gradle.kts")
           text = app_gradle.read_text()
-          updated, count = re.subn(r"(?m)^(\s*versionCode\s*(?:=|\s)\s*)\d+(\s*(?://.*)?)$", r"\g<1>2\g<2>", text, count=1)
+          updated, count = re.subn(r"(?m)^(\s*versionCode\s*(?:=|\s)\s*)\d+(\s*(?://.*)?)$", r"\g<1>3\g<2>", text, count=1)
           if count:
               app_gradle.write_text(updated)
               print("Set versionCode to 2")
