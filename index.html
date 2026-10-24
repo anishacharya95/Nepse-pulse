@@ -8467,49 +8467,59 @@ window.runAiTrendlines=async function(){const symbol=(document.getElementById('n
   window.__NP_OAUTH_RETURN_LISTENER = true;
   const appPlugin = window.NP_CAP_APP || (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App);
   if (!appPlugin || typeof appPlugin.addListener !== 'function') {
-    console.warn('Capacitor App plugin is unavailable; OAuth deep-link callback cannot be handled.');
+    console.error('[NEPSE OAuth] Capacitor App plugin is unavailable; OAuth deep-link callback cannot be handled.');
+    const el = document.getElementById('np-login-status');
+    if (el) { el.textContent = 'Android callback listener is unavailable. Rebuild the APK with the updated workflow.'; el.style.color = '#ffb8b8'; }
     return;
   }
   async function handleOAuthCallback(event){
+    const statusEl = document.getElementById('np-login-status');
     try {
-      const incoming = new URL(event && event.url ? event.url : '');
-      if (incoming.protocol !== 'com.nepsepulse.app:' || incoming.hostname !== 'login-callback') return;
+      const rawUrl = event && event.url ? String(event.url) : '';
+      if (!rawUrl) return;
+      let incoming;
+      try { incoming = new URL(rawUrl); }
+      catch (_) {
+        throw new Error('Android returned an invalid sign-in callback URL. Please try again.');
+      }
+      // Android may normalize custom-scheme URLs differently across versions.
+      // Accept the expected host or path, but never process unrelated links.
+      const isOurCallback = incoming.protocol === 'com.nepsepulse.app:' &&
+        (incoming.hostname === 'login-callback' || incoming.pathname === '/login-callback' || incoming.pathname === 'login-callback');
+      if (!isOurCallback) return;
+      console.info('[NEPSE OAuth] Android callback received:', incoming.protocol + '//' + (incoming.host || incoming.pathname));
       const code = incoming.searchParams.get('code');
       const error = incoming.searchParams.get('error_description') || incoming.searchParams.get('error');
-      const statusEl = document.getElementById('np-login-status');
       if (error) {
-        console.error('Google sign-in callback error:', error);
-        if (statusEl) { statusEl.textContent = decodeURIComponent(error.replace(/\+/g, ' ')); statusEl.style.color = '#ffb8b8'; }
+        console.error('[NEPSE OAuth] Provider returned an error:', error);
+        if (statusEl) { statusEl.textContent = 'Google sign-in failed: ' + error.replace(/\+/g, ' '); statusEl.style.color = '#ffb8b8'; }
         try { if (window.NP_CAP_BROWSER) await window.NP_CAP_BROWSER.close(); } catch (_) {}
         return;
       }
-      if (!code) return;
+      if (!code) {
+        console.error('[NEPSE OAuth] Callback URL did not contain an authorization code.');
+        if (statusEl) { statusEl.textContent = 'Google returned to the app, but no authorization code was received. Check Supabase redirect settings and try again.'; statusEl.style.color = '#ffb8b8'; }
+        try { if (window.NP_CAP_BROWSER) await window.NP_CAP_BROWSER.close(); } catch (_) {}
+        return;
+      }
       try { if (window.NP_CAP_BROWSER) await window.NP_CAP_BROWSER.close(); } catch (_) {}
       if (statusEl) { statusEl.textContent = 'Finishing Google sign-in…'; statusEl.style.color = '#8de6bd'; }
-      const target = new URL(window.location.origin + window.location.pathname);
-      target.searchParams.set('code', code);
-      // Keep the callback in the app's web origin so supabase-js can complete PKCE exchange.
-      window.history.replaceState({}, document.title, target.pathname + target.search + target.hash);
       const clientFactory = window.__NP_GET_LOGIN_CLIENT;
       const client = clientFactory ? await clientFactory() : window.__NP_LOGIN_SUPABASE;
-      if (client && client.auth) {
-        const result = await client.auth.exchangeCodeForSession(code);
-        if (result.error) throw result.error;
-        window.__NP_LOGIN_SESSION = result.data && result.data.session || null;
-        if (!window.__NP_LOGIN_SESSION) throw new Error('Google sign-in returned no active session. Please try again.');
-        if (window.npHideLoginGate) window.npHideLoginGate();
-        if (statusEl) { statusEl.textContent = 'Signed in successfully.'; statusEl.style.color = '#8de6bd'; }
-        window.dispatchEvent(new CustomEvent('np-oauth-returned', {detail:{provider:'google'}}));
-      } else {
-        throw new Error('Could not initialize the sign-in service after Google returned.');
-      }
+      if (!client || !client.auth) throw new Error('Could not initialize the sign-in service after Google returned.');
+      const result = await client.auth.exchangeCodeForSession(code);
+      if (result.error) throw result.error;
+      window.__NP_LOGIN_SESSION = result.data && result.data.session || null;
+      if (!window.__NP_LOGIN_SESSION) throw new Error('Google sign-in returned no active session. Please try again.');
+      if (window.npHideLoginGate) window.npHideLoginGate();
+      if (statusEl) { statusEl.textContent = 'Signed in successfully.'; statusEl.style.color = '#8de6bd'; }
+      window.dispatchEvent(new CustomEvent('np-oauth-returned', {detail:{provider:'google'}}));
     } catch (err) {
-      console.error('Could not finish OAuth return to NEPSE Pulse:', err);
-      const statusEl = document.getElementById('np-login-status');
-      if (statusEl) { statusEl.textContent = (err && err.message) || 'Could not finish Google sign-in. Please try again.'; statusEl.style.color = '#ffb8b8'; }
+      console.error('[NEPSE OAuth] Could not finish callback:', err);
+      if (statusEl) { statusEl.textContent = 'Google sign-in could not finish: ' + ((err && err.message) || 'Unknown callback error.'); statusEl.style.color = '#ffb8b8'; }
     }
   }
-  appPlugin.addListener('appUrlOpen', handleOAuthCallback);
+  appPlugin.addListener('appUrlOpen', handleOAuthCallback).then(function(){ console.info('[NEPSE OAuth] appUrlOpen listener registered.'); }).catch(function(err){ console.error('[NEPSE OAuth] Could not register appUrlOpen listener:', err); const el=document.getElementById('np-login-status'); if(el){el.textContent='Android sign-in callback listener failed. Please rebuild the app.';el.style.color='#ffb8b8';} });
   // Also handle OAuth links that launch/recreate the app instead of arriving
   // through an already-running appUrlOpen listener.
   if (typeof appPlugin.getLaunchUrl === 'function') {
