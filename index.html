@@ -6727,8 +6727,16 @@ window.openTechnicalScreener=open;window.PULSE_TECHNICAL_SCREENER={load,open,ren
       intradayPoints.forEach(x=>{const d=new Date(x.date);if(!Number.isFinite(d.getTime()))return;const key=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');if(!byDay.has(key))byDay.set(key,[]);byDay.get(key).push(x);});
       const days=Array.from(byDay.keys()).sort();
       let session=[];for(let i=days.length-1;i>=0;i--){const pts=byDay.get(days[i]).sort((a,b)=>new Date(a.date)-new Date(b.date));if(pts.length>=2){session=pts;break;}}
-      history=session;
-      if(subtitle)subtitle.textContent=history.length>=2?'Saved intraday session · '+new Date(history[0].date).toLocaleDateString():'Waiting for timestamped intraday points';
+      // Central-feed snapshots may repeat a cached index while the market is closed.
+      // Never let those repeated values overwrite verified API history or create a flat 1D chart.
+      const values=session.map(x=>x.close).filter(Number.isFinite);
+      const hasMovement=values.length>=2&&values.some(v=>Math.abs(v-values[0])>0.000001);
+      if(hasMovement){
+        history=session;
+        if(subtitle)subtitle.textContent='Saved intraday session · '+new Date(history[0].date).toLocaleDateString();
+      }else if(!history.length){
+        if(subtitle)subtitle.textContent='Waiting for real intraday index movements';
+      }
       draw();
     }
   });
