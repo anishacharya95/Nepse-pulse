@@ -6516,7 +6516,7 @@ window.openTechnicalScreener=open;window.PULSE_TECHNICAL_SCREENER={load,open,ren
     const data=visibleData();
     renderSummary();
     if(!data.length || (range==='1D' && data.length<2)){
-      empty.textContent=range==='1D'?'Collecting live intraday points… Keep NEPSE Pulse open while the market feed updates.':'Waiting for verified NEPSE history…';
+      empty.textContent=range==='1D'?'Verified intraday values are not available yet. The chart will appear when the backend supplies real session movements.':'Waiting for verified NEPSE history…';
       empty.style.display='flex';
       return;
     }
@@ -6684,15 +6684,24 @@ window.openTechnicalScreener=open;window.PULSE_TECHNICAL_SCREENER={load,open,ren
       // If the endpoint only has date-only daily records, use persisted real snapshots.
       const apiSession=latestSession(history);
       const savedSession=latestSession(intradayPoints);
-      if(apiSession.points.length>=2){
+      // A timestamp alone does not prove that a point is a genuine intraday
+      // movement: cached index snapshots can be saved repeatedly while the
+      // exchange is closed, creating a misleading flat line for the current day.
+      // Require at least two distinct index values before treating a session as
+      // usable chart history. Real, timestamped backend history is preferred.
+      const hasMovement=points=>{
+        const values=points.map(x=>x.close).filter(Number.isFinite);
+        return values.length>=2 && values.some(v=>Math.abs(v-values[0])>0.000001);
+      };
+      if(apiSession.points.length>=2 && hasMovement(apiSession.points)){
         history=apiSession.points;
         if(subtitle)subtitle.textContent='Intraday session · '+apiSession.day;
-      }else if(savedSession.points.length>=2){
+      }else if(savedSession.points.length>=2 && hasMovement(savedSession.points)){
         history=savedSession.points;
         if(subtitle)subtitle.textContent='Saved intraday session · '+savedSession.day;
       }else{
         history=[];
-        if(subtitle)subtitle.textContent='No saved intraday session yet · backend must provide timestamped intraday history';
+        if(subtitle)subtitle.textContent='No verified intraday movement available · waiting for real session data';
       }
     }else if(subtitle){
       subtitle.textContent=history.length?'NEPSE daily index history':'Real market history unavailable';
