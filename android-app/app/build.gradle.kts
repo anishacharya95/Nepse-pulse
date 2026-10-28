@@ -1,4 +1,3 @@
-
 plugins {
     id("com.android.application")
 }
@@ -17,7 +16,17 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // Play Console reports obfuscation and optimisation below threshold
+            // because R8 was disabled. Enable shrinking, obfuscation and
+            // optimisation with the optimising default rule set plus the
+            // project's own keep rules (proguard-rules.pro).
+            // Signing configuration is deliberately not changed here.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
 }
