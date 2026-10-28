@@ -388,6 +388,211 @@ jobs:
           printf '\nconfigurations.configureEach { resolutionStrategy.force "androidx.browser:browser:1.8.0" }\n' >> android/app/build.gradle
 
 
+      # Android 15 (API 35+) draws apps that target SDK 35+ edge-to-edge, so the
+      # window extends behind the status and navigation bars. Consume those insets
+      # as padding on the activity content so the page header, bottom navigation,
+      # buttons and the bottom ad banner are never hidden behind the system bars.
+      # Only non-deprecated framework APIs are used here: no status/navigation bar
+      # colour calls and no systemUiVisibility flags.
+      - name: Apply Android 15 edge-to-edge insets
+        run: |
+          python3 - <<'PYINSETS'
+          from pathlib import Path
+          import re
+
+          candidates = list(Path("android/app/src/main/java").rglob("MainActivity.java"))
+          if not candidates:
+              raise SystemExit("MainActivity.java not found in the generated Capacitor project")
+          main = candidates[0]
+          src = main.read_text()
+
+          template = """package com.nepsepulse.app;
+
+          import android.os.Build;
+          import android.os.Bundle;
+          import android.view.View;
+
+          import com.getcapacitor.BridgeActivity;
+
+          public class MainActivity extends BridgeActivity {
+
+              @Override
+              public void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  applySystemBarInsets();
+              }
+
+              /**
+               * Android 15 (API 35) draws apps that target SDK 35 or higher
+               * edge-to-edge, so the window content sits behind the status and
+               * navigation bars. Consume the system-bar insets as padding on the
+               * activity content so the page header, the bottom navigation, buttons
+               * and the bottom ad banner all stay in the safe area while scrolling
+               * still behaves normally.
+               *
+               * Padding the content view also keeps any native child (including the
+               * AdMob banner) inside the safe area, so ad placements are preserved.
+               *
+               * On API 34 and below the window decor already fits the system bars, so
+               * no padding is added there and double padding is impossible. Only
+               * non-deprecated framework APIs are used; this replaces deprecated
+               * status/navigation bar colour and system-ui-visibility handling.
+               */
+              private void applySystemBarInsets() {
+                  if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) return;
+
+                  View content = findViewById(android.R.id.content);
+                  if (content == null) return;
+
+                  content.setOnApplyWindowInsetsListener((view, insets) -> {
+                      android.graphics.Insets bars = insets.getInsets(
+                          android.view.WindowInsets.Type.systemBars()
+                              | android.view.WindowInsets.Type.displayCutout());
+                      view.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+                      return insets;
+                  });
+                  content.requestApplyInsets();
+              }
+          }
+          """
+
+          if "applySystemBarInsets" in src:
+              print("Edge-to-edge inset handling already present.")
+          else:
+              pattern = re.compile(r"public\s+class\s+MainActivity\s+extends\s+BridgeActivity\s*\{\s*\}", re.S)
+              if not pattern.search(src) or src.count("package ") != 1:
+                  raise SystemExit("MainActivity does not match the expected Capacitor template; review it manually")
+              # The template is a complete, self-contained MainActivity, so it
+              # replaces the whole file. Splicing it at the class declaration
+              # would leave the original package/import preamble in front of a
+              # second one, which javac rejects.
+              main.write_text(template)
+              print("Wrote edge-to-edge inset handling into " + str(main))
+
+          check = main.read_text()
+          if "applySystemBarInsets" not in check or "setOnApplyWindowInsetsListener" not in check:
+              raise SystemExit("Edge-to-edge inset handling was not applied")
+          if check.count("package com.nepsepulse.app;") != 1 or check.count("import com.getcapacitor.BridgeActivity;") != 1:
+              raise SystemExit("MainActivity has duplicate package/import declarations")
+          if "setStatusBarColor" in check or "setNavigationBarColor" in check or "SYSTEM_UI_FLAG" in check:
+              raise SystemExit("Deprecated edge-to-edge API found in generated source")
+          print("Verified edge-to-edge inset handling in " + str(main))
+          PYINSETS
+
+      # Play Console reports obfuscation at 1% and optimization below threshold
+      # because the release buildType ships with R8 disabled. Enable shrinking,
+      # obfuscation and optimization with the optimising default rule set plus
+      # project keep rules. Capacitor supplies its plugin keep rules through
+      # consumerProguardFiles, so reflection-based plugins, auth, networking and
+      # the AdMob bridge keep working. Signing configuration is not touched.
+      - name: Enable R8 optimization for release
+        run: |
+          python3 - <<'PYR8'
+          from pathlib import Path
+          import re
+
+          gradle = Path("android/app/build.gradle")
+          s = gradle.read_text()
+
+          def matching_close(text, open_pos):
+              depth = 0
+              quote = None
+              escaped = False
+              for i in range(open_pos, len(text)):
+                  ch = text[i]
+                  if quote:
+                      if escaped:
+                          escaped = False
+                      elif ch == "\\":
+                          escaped = True
+                      elif ch == quote:
+                          quote = None
+                      continue
+                  if ch in ("'", '"'):
+                      quote = ch
+                  elif ch == "{":
+                      depth += 1
+                  elif ch == "}":
+                      depth -= 1
+                      if depth == 0:
+                          return i
+              raise SystemExit("Could not parse Gradle braces")
+
+          m = re.search(r"(?m)^\s*buildTypes\s*\{", s)
+          if not m:
+              raise SystemExit("buildTypes block not found")
+          brace = s.find("{", m.start())
+          close = matching_close(s, brace)
+          block = s[brace + 1:close]
+
+          rel = re.search(r"(?m)^\s*release\s*\{", block)
+          if not rel:
+              raise SystemExit("release buildType not found")
+          rel_brace = block.find("{", rel.start())
+          rel_close = matching_close(block, rel_brace)
+          body = block[rel_brace + 1:rel_close]
+
+          if re.search(r"(?m)^\s*signingConfig\b", body):
+              raise SystemExit("Refusing to edit a release block that declares signingConfig here")
+
+          # Normalise instead of toggling: drop every existing minify/shrink line
+          # and write exactly one of each, so re-running the step is safe.
+          new_body = re.sub(r"(?m)^[ \t]*(?:minifyEnabled|shrinkResources)[ \t]+\w+[ \t]*\r?\n?", "", body)
+          new_body = "\n            minifyEnabled true\n            shrinkResources true" + new_body
+          new_body = new_body.replace("'proguard-android.txt'", "'proguard-android-optimize.txt'")
+
+          block = block[:rel_brace + 1] + new_body + block[rel_close:]
+          s = s[:brace + 1] + block + s[close:]
+          gradle.write_text(s)
+
+          out = gradle.read_text()
+          m2 = re.search(r"(?m)^\s*buildTypes\s*\{", out)
+          b2 = out.find("{", m2.start())
+          c2 = matching_close(out, b2)
+          blk = out[b2 + 1:c2]
+          r2 = re.search(r"(?m)^\s*release\s*\{", blk)
+          rb = blk.find("{", r2.start())
+          rc = matching_close(blk, rb)
+          final = blk[rb + 1:rc]
+
+          for required in ("minifyEnabled true", "shrinkResources true", "proguard-android-optimize.txt"):
+              if final.count(required) != 1:
+                  raise SystemExit("Expected exactly one %r in the release block, found %d" % (required, final.count(required)))
+          if "minifyEnabled false" in final:
+              raise SystemExit("Release minification is still disabled")
+
+          pro = Path("android/app/proguard-rules.pro")
+          rules = pro.read_text() if pro.exists() else ""
+          addition = """
+          # --- NEPSE Pulse release hardening (added by CI) ---
+          # Keep readable stack traces from the R8-mapped release build.
+          -keepattributes SourceFile,LineNumberTable
+          -renamesourcefileattribute SourceFile
+          # Retain runtime annotations so Capacitor's @CapacitorPlugin /
+          # @PluginMethod keep rules still match plugin classes and methods.
+          -keepattributes *Annotation*
+          # WebView JavaScript bridges must never be stripped.
+          -keepclassmembers class * {
+              @android.webkit.JavascriptInterface <methods>;
+          }
+          # Native library entry points (system WebView / ads) stay resolvable.
+          -keepclasseswithmembernames,includedescriptorclasses class * {
+              native <methods>;
+          }
+          """
+          if "NEPSE Pulse release hardening" not in rules:
+              pro.write_text(rules.rstrip() + "\n" + addition)
+
+          pro_check = pro.read_text()
+          for required in ("@android.webkit.JavascriptInterface", "*Annotation*", "SourceFile"):
+              if required not in pro_check:
+                  raise SystemExit("Missing R8 keep rule: " + required)
+
+          print("--- release buildType after edit ---")
+          print(final.strip())
+          print("R8 enabled for release; keep rules written to", pro)
+          PYR8
+
       # Always produce a debug APK for device testing. This uses the Android debug key,
       # and does not modify or replace the Play Store upload keystore.
       - name: Build Debug APK

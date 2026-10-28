@@ -4,6 +4,7 @@
 <script>window.NEPSE_PULSE_BACKEND_URL = 'https://nepse-pulse-1.onrender.com';</script>
 <script src="config.js?v=4"></script>
 <script src="auth-config.js?v=2"></script>
+<script src="market-math.js?v=1"></script>
 <script id="np-auth-config-fallback">
 /* Safe public browser configuration fallback. Publishable/anon keys are designed for client use. */
 window.NEPSE_PULSE_AUTH = window.NEPSE_PULSE_AUTH || {
@@ -2002,6 +2003,20 @@ input:focus,select:focus,textarea:focus{border-color:var(--np-blue)!important;bo
 }
 </style>
 
+<style id="np-android-first-polish">
+/* Android-first refinements: clear the system bars at the top of the page and
+   give the main controls comfortable touch targets on narrow screens.
+   Colours, layout, ad slots and navigation order are unchanged.
+   env(safe-area-inset-*) is 0 when the Android wrapper has already inset the
+   WebView, so this never produces double padding. */
+.topbar,.topbar.mobile-exact-topbar{padding-top:max(13px,env(safe-area-inset-top))!important}
+@media(max-width:768px){
+  .mobile-exact-bottom .nav button,.bottom .nav button{min-height:46px!important;padding-top:6px!important;padding-bottom:6px!important}
+  .nepse-chart-ranges button{min-height:40px!important}
+  .nepse-chart-switch button{min-height:40px!important}
+  .pulse-segment button{min-height:36px!important}
+}
+</style>
 </head>
 <body>
 
@@ -2568,12 +2583,12 @@ const PulseFeedEngine = (()=>{
   const first=v=>{const a=arr(v);return a.length?a[0]:(v&&typeof v==='object'?v:{})};
   const normalizeLive=rows=>arr(rows).map(o=>{
     const ltp=num(pick(o,['ltp','lasttradedprice','lastprice','closeprice','closingprice','close','price','currentprice']));
-    const prev=num(pick(o,['previousclose','previousclosingprice','prevclose','previousprice','previousdayclose']));
+    const prev=num(pick(o,['previousdaycloseprice','previousdayclosingprice','previousclose','previousclosingprice','prevclose','previousprice','previousdayclose']));
     let change=num(pick(o,['change','pointchange','changevalue','pricechange','difference']));
     let pct=num(pick(o,['percentagechange','percentchange','changepercent','perchange','pct','pchange','changepercentage','percent_change']));
     if(change===null && ltp!==null && prev!==null) change=ltp-prev;
     if(pct===null && change!==null && prev!==null && prev!==0) pct=(change/prev)*100;
-    return {...o,symbol:String(pick(o,['symbol','stocksymbol','securitysymbol','ticker','code'])||'').trim().toUpperCase(),company:String(pick(o,['name','companyname','company','securityname'])||''),ltp,pct,prev,volume:num(pick(o,['volume','tradedshares','quantity','totaltradedshares','totaltradequantity','sharevolume'])),turnover:num(pick(o,['turnover','totalturnover','amount','totaltradevalue','totaltradedvalue'])),transactions:num(pick(o,['transactions','totaltransactions','numberoftransactions','totaltransactions','totaltrades','tradecount'])),change};
+    return {...o,symbol:String(pick(o,['symbol','stocksymbol','securitysymbol','ticker','code'])||'').trim().toUpperCase(),company:String(pick(o,['name','companyname','company','securityname'])||''),ltp,pct,prev,volume:num(pick(o,['volume','totaltradedquantity','tradedshares','quantity','totaltradedshares','totaltradequantity','sharevolume'])),turnover:num(pick(o,['turnover','totalturnover','amount','totaltradevalue','totaltradedvalue'])),transactions:num(pick(o,['transactions','totaltransactions','numberoftransactions','totaltransactions','totaltrades','tradecount'])),change};
   }).filter(x=>x.symbol);
   const normalizeIndex=v=>arr(v).length?arr(v):[v].filter(x=>x&&typeof x==='object');
   const withTimeout=async(promise,label)=>{const c=new AbortController();const t=setTimeout(()=>c.abort(),PULSE_FEED_CONFIG.timeoutMs);try{return await promise(c.signal)}catch(e){if(e.name==='AbortError')throw new Error(label+' timeout');throw e}finally{clearTimeout(t)}};
@@ -2835,27 +2850,30 @@ function renderPulseMarket(){
   const rows=Array.isArray(st.live)?st.live:[];
   let list=Array.isArray(st.index)?st.index:[];
   let v=list.find(x=>String(PulseFeedEngine.pick(x,['index','name','indexname'])||'').toLowerCase().replace(/[^a-z]/g,'').includes('nepse')) || list[0] || {};
-  const feedIdx=PulseFeedEngine.num(PulseFeedEngine.pick(v,['close','currentvalue','value','indexvalue','latest']));
-  /* Correct the top dashboard's stale previous-session close only; keep all other feed data unchanged. */
-  const idx=feedIdx!==null && Math.abs(feedIdx-2625.93)<0.005 ? 2634.17 : feedIdx;
-  const ch=PulseFeedEngine.num(PulseFeedEngine.pick(v,['change','pointchange','changevalue']));
-  const pct=PulseFeedEngine.num(PulseFeedEngine.pick(v,['perchange','percentchange','percentagechange','changepercent']));
+  /* One verified observation drives the index value, the point change and the
+     percent change, so this card can never disagree with the chart summary.
+     Every figure is reconciled from the provider's own fields for the same
+     session; no index or breadth value is hardcoded here. */
+  const NPP=window.NPP;
+  const obs=NPP&&NPP.indexObservation?NPP.indexObservation(v):{value:null,prevClose:null,change:null,pct:null};
+  const idx=obs.value, ch=obs.change, pct=obs.pct;
   const iv=document.getElementById('nepseIndexValue');
-  if(iv){iv.textContent=idx===null?'—':idx.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});iv.className='np-index '+(ch>0?'up':ch<0?'down':'');}
+  if(iv){iv.textContent=idx===null?'\u2014':idx.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});iv.className='np-index '+(ch>0?'up':ch<0?'down':'');}
   const cp=document.getElementById('npChangePoints'), cpc=document.getElementById('npChangePct'), change=document.getElementById('nepseIndexChange');
-  if(cp)cp.textContent=ch===null?'—':(ch>=0?'+':'')+ch.toFixed(2);
-  if(cpc)cpc.textContent=pct===null?'—':(pct>=0?'+':'')+pct.toFixed(2)+'%';
+  if(cp)cp.textContent=ch===null?'\u2014':(ch>=0?'+':'')+ch.toFixed(2);
+  if(cpc)cpc.textContent=pct===null?'\u2014':(pct>=0?'+':'')+pct.toFixed(2)+'%';
   if(change)change.className='np-change '+(ch>0?'up':ch<0?'down':'');
-  const arrow=document.querySelector('.np-arrow'); if(arrow)arrow.textContent=ch>0?'▲':ch<0?'▼':'•';
-  const b=st.breadth&&typeof st.breadth==='object'?st.breadth:{};
-  const explicit=(Number.isFinite(Number(b.advancing))||Number.isFinite(Number(b.declining))||Number.isFinite(Number(b.unchanged)));
-  const adv=explicit?Number(b.advancing||0):rows.filter(x=>{const q=PulseFeedEngine.num(PulseFeedEngine.pick(x,['percentageChange','changePercent','perChange','change']));return q!==null&&q>0}).length;
-  const dec=explicit?Number(b.declining||0):rows.filter(x=>{const q=PulseFeedEngine.num(PulseFeedEngine.pick(x,['percentageChange','changePercent','perChange','change']));return q!==null&&q<0}).length;
-  const unc=explicit?Number(b.unchanged||0):rows.filter(x=>{const q=PulseFeedEngine.num(PulseFeedEngine.pick(x,['percentageChange','changePercent','perChange','change']));return q!==null&&q===0}).length;
+  const arrow=document.querySelector('.np-arrow'); if(arrow)arrow.textContent=ch>0?'\u25b2':ch<0?'\u25bc':'\u2022';
+  /* Breadth is counted from this session's valid, de-duplicated securities
+     using close vs previous-day close. Provider counts are accepted only when
+     they reconcile with the session total; otherwise the card shows "unavailable". */
+  const scrips=NPP&&NPP.summaryValue?NPP.summaryValue(st.summary,['scripstraded','tradedscrips','totalscrips']):null;
+  const bd=NPP&&NPP.breadth?NPP.breadth(rows,st.breadth,scrips):{advancing:null,declining:null,unchanged:null};
+  const asText=x=>(x===null||x===undefined)?'\u2014':Number(x).toLocaleString();
   const a=document.getElementById('npAdv'),d=document.getElementById('npDec'),u=document.getElementById('npUnch');
-  if(a)a.textContent=adv.toLocaleString(); if(d)d.textContent=dec.toLocaleString(); if(u)u.textContent=unc.toLocaleString();
+  if(a)a.textContent=asText(bd.advancing); if(d)d.textContent=asText(bd.declining); if(u)u.textContent=asText(bd.unchanged);
   const status=document.getElementById('npMarketStatus');
-  if(status){const open=st.marketOpen===true; status.classList.toggle('open',open); const b=status.querySelector('b');if(b)b.textContent=open?'OPEN':'CLOSED';}
+  if(status){const open=st.marketOpen===true; status.classList.toggle('open',open); const label=status.querySelector('b');if(label)label.textContent=open?'OPEN':'CLOSED';}
   const stamp=document.getElementById('stamp');
   if(stamp)stamp.textContent=st.updatedAt?'Updated '+new Date(st.updatedAt).toLocaleTimeString():'Waiting for feed';
 };
@@ -6175,14 +6193,14 @@ window.openTechnicalScreener=open;window.PULSE_TECHNICAL_SCREENER={load,open,ren
   function change(r){
     const direct=n(pick(r,['percentageChange','percentChange','changePercent','changePct','pChange','perChange','perchange','percentagechange','percentchange','changePercentage','percent_change']));
     if(direct!==null)return direct;
-    const p=price(r), prev=n(pick(r,['previousClose','previousclose','previousClosingPrice','prevClose','previousPrice','previousDayClose']));
+    const p=price(r), prev=n(pick(r,['previousDayClosePrice','previous_day_close_price','previousClose','previousclose','previousClosingPrice','prevClose','previousPrice','previousDayClose']));
     return p!==null&&prev!==null&&prev!==0?((p-prev)/prev)*100:null;
   }
   function price(r){return n(pick(r,['lastTradedPrice','lastPrice','ltp','LTP','price','closePrice','closingPrice','close','currentPrice']))}
   function ch(r){
     const direct=n(pick(r,['change','priceChange','pointChange','changeValue','difference']));
     if(direct!==null)return direct;
-    const p=price(r), prev=n(pick(r,['previousClose','previousclose','previousClosingPrice','prevClose','previousPrice','previousDayClose']));
+    const p=price(r), prev=n(pick(r,['previousDayClosePrice','previous_day_close_price','previousClose','previousclose','previousClosingPrice','prevClose','previousPrice','previousDayClose']));
     return p!==null&&prev!==null? p-prev:null;
   }
   function vol(r){return n(pick(r,['volume','totalTradedQuantity','quantity','shares','tradedShares','shareVolume']))}
@@ -6242,20 +6260,21 @@ window.openTechnicalScreener=open;window.PULSE_TECHNICAL_SCREENER={load,open,ren
       return null;
     };
 
-    const idx=pick(nepse,['close','currentvalue','value','indexvalue','latest']);
-    const point=pick(nepse,['change','pointchange','changevalue']);
-    const pct=pick(nepse,['perchange','percentchange','percentagechange','changepercent']);
     const turnoverTotal=summaryValue(['totalturnover','turnover']) ?? rs.reduce((a,r)=>a+(turnover(r)||0),0);
-    const adv=rs.filter(r=>(change(r)||0)>0).length;
-    const dec=rs.filter(r=>(change(r)||0)<0).length;
-    const unc=rs.filter(r=>(change(r)||0)===0).length;
     const scrips=summaryValue(['tradedscrips','scripstraded']) ?? rs.length;
+    /* Same verified observation as the market card and the chart summary. */
+    const NPP=window.NPP;
+    const obs=NPP&&NPP.indexObservation?NPP.indexObservation(nepse):{value:null,change:null,pct:null};
+    const idx=obs.value, point=obs.change, pct=obs.pct;
+    /* Breadth from verified session rows; provider counts only if they reconcile. */
+    const bd=NPP&&NPP.breadth?NPP.breadth(rs,lastState.breadth,scrips):{advancing:null,declining:null,unchanged:null};
+    const adv=bd.advancing, dec=bd.declining, unc=bd.unchanged;
     const totalVol=summaryValue(['totaltradedshares','tradedshares','totalvolume']) ?? rs.reduce((a,r)=>a+(vol(r)||0),0);
     const transactions=summaryValue(['totaltransactions','transactions','totaltrades','numberoftransactions']) ?? rs.reduce((a,r)=>a+(transactionCount(r)||0),0);
     const marketCap=rs.reduce((a,r)=>a+(n(pick(r,['market_cap','marketcap','marketCapitalization']))||0),0) || summaryValue(['marketcap','totalmarketcap']);
     const floatCap=summaryValue(['floatmarketcap','totalfloatmarketcap']);
 
-    const positive=n(pct)>=0;
+    const positive=pct===null?null:n(pct)>=0;
     setBox('[data-market="index"]',fmt(idx),positive);
     setBox('[data-market="points"]',(n(point)===null?'—':(n(point)>=0?'+':'')+fmt(point)),positive);
     setBox('[data-market="percent"]',(n(pct)===null?'—':(n(pct)>=0?'+':'')+fmt(pct)+'%'),positive);
@@ -6268,21 +6287,21 @@ window.openTechnicalScreener=open;window.PULSE_TECHNICAL_SCREENER={load,open,ren
       stBox.style.color='#fff';
     }
 
-    q('[data-market="turnover"]').textContent='Turnover: '+money(turnoverTotal);
-    q('[data-market="time"]').textContent=lastState.updatedAt
+    const turnoverBox=q('[data-market="turnover"]'); if(turnoverBox)turnoverBox.textContent='Turnover: '+money(turnoverTotal);
+    const timeBox=q('[data-market="time"]'); if(timeBox)timeBox.textContent=lastState.updatedAt
       ? new Date(lastState.updatedAt).toLocaleString(undefined,{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})
       : 'Market data';
 
     [['advance',adv],['decline',dec],['unchanged',unc]].forEach(([k,v])=>{
-      const e=q('[data-breadth="'+k+'"] b'); if(e)e.textContent=fmt(v,0);
+      const e=q('[data-breadth="'+k+'"] b'); if(e)e.textContent=(v===null||v===undefined)?'\u2014':fmt(v,0);
     });
 
     // YONEPSE does not publish security circuit counts in the summary endpoint.
     // Use percentage movement as a transparent approximation.
     const plusCircuit=rs.filter(r=>(change(r)||0)>=9.9).length;
     const minusCircuit=rs.filter(r=>(change(r)||0)<=-9.9).length;
-    q('[data-breadth="positive"] b').textContent=fmt(plusCircuit,0);
-    q('[data-breadth="negative"] b').textContent=fmt(minusCircuit,0);
+    const posBox=q('[data-breadth="positive"] b'); if(posBox)posBox.textContent=fmt(plusCircuit,0);
+    const negBox=q('[data-breadth="negative"] b'); if(negBox)negBox.textContent=fmt(minusCircuit,0);
 
     const liveGainers=Array.isArray(lastState.gainers)?lastState.gainers:[];
     const liveLosers=Array.isArray(lastState.losers)?lastState.losers:[];
@@ -6436,7 +6455,14 @@ window.openTechnicalScreener=open;window.PULSE_TECHNICAL_SCREENER={load,open,ren
       const date=pick(o,['date','businessdate','publisheddate','generatedtime','timestamp','tradedate','time','datetime','datetimevalue']);
       const ts=n(date),ms=ts!=null&&ts<100000000000?ts*1000:ts;
       return {date:ms!=null&&Number.isFinite(ms)?new Date(ms).toISOString():String(date??''),open:n(pick(o,['open','openingprice','openprice'])),high:n(pick(o,['high','highprice','dayhigh'])),low:n(pick(o,['low','lowprice','daylow'])),close:n(pick(o,['close','closingprice','currentvalue','indexvalue','ltp','lasttradedprice','lastprice','price','value'])),volume:n(pick(o,['volume','tradedshares','quantity','totaltradedquantity']))};
-    }).filter(x=>x.close!==null||(x.open!==null&&x.high!==null&&x.low!==null));
+    }).filter(x=>x.close!==null||(x.open!==null&&x.high!==null&&x.low!==null))
+      /* Render real chronological observations only: drop unusable timestamps
+         and repeated dates, then sort ascending so the series, the latest
+         value and the period high/low are all computed from the same order. */
+      .reduce((acc,x)=>{const t=Date.parse(x.date||'');if(Number.isFinite(t))acc.push({row:x,t:t});return acc;},[])
+      .sort((a,b)=>a.t-b.t)
+      .filter((x,i,arr)=>i===0||x.t!==arr[i-1].t)
+      .map(x=>x.row);
   };
 
   function getState(){
@@ -6462,7 +6488,8 @@ window.openTechnicalScreener=open;window.PULSE_TECHNICAL_SCREENER={load,open,ren
     }
     let value=null;
     for(let i=candidates.length-1;i>=0;i--){
-      value=n(pick(candidates[i],['currentvalue','indexvalue','value','close','latest','current','ltp','lastprice','price']));
+      const obs=(window.NPP&&window.NPP.indexObservation)?window.NPP.indexObservation(candidates[i]):null;
+      value=obs&&obs.value!==null?obs.value:n(pick(candidates[i],['currentvalue','indexvalue','value','close','latest','current','ltp','lastprice','price']));
       if(value!==null)break;
     }
     if(value===null)return;
@@ -6639,34 +6666,53 @@ window.openTechnicalScreener=open;window.PULSE_TECHNICAL_SCREENER={load,open,ren
       return;
     }
     const first=data[0].close,last=data[data.length-1].close;
-    const vals=data.map(x=>x.close);
     const delta=last-first;
     const pct=first!==0?(delta/first)*100:0;
+    /* Period high/low use the session's own high/low whenever the source
+       provides them, falling back to the close series for close-only rows. */
+    const highs=data.map(x=>x.high??x.close);
+    const lows=data.map(x=>x.low??x.close);
     put('npChartLatest',fmt(last));
-    put('npChartHigh',fmt(Math.max(...vals)));
-    put('npChartLow',fmt(Math.min(...vals)));
+    put('npChartHigh',fmt(Math.max(...highs)));
+    put('npChartLow',fmt(Math.min(...lows)));
     put('npChartChangeValue',(delta>0?'+':'')+fmt(delta));
     put('npChartChangePct',(delta>0?'+':'')+pct.toFixed(2)+'% for selected range');
     if(badge)badge.classList.toggle('down',delta<0);
   }
 
+  let historyRequest=0;
+  const dailyHistory={raw:null,at:0};
+  const intradayHistory={raw:null,at:0};
+  const DAILY_TTL_MS=10*60*1000, INTRADAY_TTL_MS=60*1000;
   async function loadHistory(){
     let raw=null;
     let ok=false;
+    /* A slow response must never overwrite a newer range selection, and range
+       switches must not re-download a history series that is already fresh. */
+    const reqId=++historyRequest;
     const backend=(window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com').replace(/\/$/,'');
     try{
       if(range==='1D'){
         // 1D must be real intraday data. Never fall back to daily history.
-        raw=await fetch(backend+'/api/index/intraday?_pulse='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw new Error('intraday history HTTP '+r.status);return r.json();});
+        if(intradayHistory.raw && Date.now()-intradayHistory.at<INTRADAY_TTL_MS){
+          raw=intradayHistory.raw;
+        }else{
+          raw=await fetch(backend+'/api/index/intraday?_pulse='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw new Error('intraday history HTTP '+r.status);return r.json();});
+          intradayHistory.raw=raw; intradayHistory.at=Date.now();
+        }
         if(raw && raw.ok===false) { console.info(raw.message || 'No backend intraday session stored yet'); }
         if(raw?.intraday===false && subtitle) subtitle.textContent='NEPSE daily history · intraday feed unavailable';
+      }else if(dailyHistory.raw && Date.now()-dailyHistory.at<DAILY_TTL_MS){
+        raw=dailyHistory.raw;
       }else{
         raw=await fetch(backend+'/api/history?index=58&_pulse='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw new Error('history HTTP '+r.status);return r.json();});
+        dailyHistory.raw=raw; dailyHistory.at=Date.now();
       }
       ok=true;
     }catch(e){
       console.warn('NEPSE real chart unavailable:',e);
     }
+    if(reqId!==historyRequest) return;   // a newer range selection superseded this response
     history=ok?normalize(raw):[];
     if(range==='1D'){
       const hasClockTime=x=>/T\d{2}:\d{2}|\d{1,2}:\d{2}/.test(String(x.date||''));
@@ -7566,7 +7612,7 @@ header.topbar, header.topbar .toprow, .mobile-exact-topbar {
   }
   function normalizeRow(o){
     const ltp=num(pick(o,['ltp','lastTradedPrice','lastPrice','price','closePrice','closingPrice','close','currentPrice']));
-    const prev=num(pick(o,['previousClose','previousclose','previousClosingPrice','prevClose','previousPrice','previousDayClose']));
+    const prev=num(pick(o,['previousDayClosePrice','previous_day_close_price','previousClose','previousclose','previousClosingPrice','prevClose','previousPrice','previousDayClose']));
     let change=num(pick(o,['change','pointChange','changeValue','priceChange','difference']));
     let pct=num(pick(o,['pct','percentageChange','percentChange','changePercent','changePct','pChange','perChange','perchange','changePercentage','percent_change']));
     if(change===null&&ltp!==null&&prev!==null)change=ltp-prev;
@@ -7608,10 +7654,12 @@ header.topbar, header.topbar .toprow, .mobile-exact-topbar {
   function extractIndex(payload){
     const list=arr(payload.index);
     const item=list.find(x=>normKey(String(pick(x,['index','indexName','name','symbol'])||'')).includes('nepse'))||list[0]||{};
-    return {
-      value:num(pick(item,['close','currentValue','indexValue','value','latest','current'])),
+    // Same verified observation as the market card and the chart summary.
+    const obs=window.NPP&&window.NPP.indexObservation?window.NPP.indexObservation(item):null;
+    return obs?{value:obs.value,change:obs.change,pct:obs.pct}:{
+      value:num(pick(item,['currentValue','close','indexValue','value','latest','current'])),
       change:num(pick(item,['change','pointChange','changeValue','difference'])),
-      pct:num(pick(item,['percentageChange','percentChange','perChange','changePercent','pChange']))
+      pct:num(pick(item,['perChange','percentageChange','percentChange','changePercent','pChange']))
     };
   }
   function extractSnapshot(payload){
@@ -7628,7 +7676,7 @@ header.topbar, header.topbar .toprow, .mobile-exact-topbar {
     const losers=uniqueRows(Array.isArray(payload.losers)?payload.losers:[]).filter(r=>r.symbol);
     const finalGainers=gainers.length?gainers:[...rows].filter(r=>r.pct!==null).sort((a,b)=>(b.pct??-Infinity)-(a.pct??-Infinity));
     const finalLosers=losers.length?losers:[...rows].filter(r=>r.pct!==null).sort((a,b)=>(a.pct??Infinity)-(b.pct??Infinity));
-    return {rows,gainers:finalGainers,losers:finalLosers,index:extractIndex(payload),summary:payload.summary,marketOpen:payload.marketOpen,updatedAt:payload.updatedAt||null};
+    return {rows,gainers:finalGainers,losers:finalLosers,index:extractIndex(payload),summary:payload.summary,breadth:payload.breadth,marketOpen:payload.marketOpen,updatedAt:payload.updatedAt||null};
   }
   function summaryNumber(labels,summary,rows,key){
     const direct=num(stateValue(labels,summary));
@@ -7646,9 +7694,12 @@ header.topbar, header.topbar .toprow, .mobile-exact-topbar {
     if(statusBox){statusBox.textContent=s.marketOpen===true?'OPEN':s.marketOpen===false?'CLOSED':'—';statusBox.style.background=s.marketOpen===false?'#ff5b60':s.marketOpen===true?'#68bc72':'#71808a';statusBox.style.color='#fff';}
     setText('[data-market="turnover"]','Turnover: '+money(summaryNumber(['totalTurnover','turnover'],s.summary,rows,'turnover')));
     const timeEl=document.querySelector('[data-market="time"]');if(timeEl)timeEl.textContent=s.updatedAt?'Updated '+new Date(s.updatedAt).toLocaleTimeString():'Update time unavailable';
-    setText('[data-breadth="advance"] b',fmt0(rows.filter(r=>(r.pct??0)>0).length));
-    setText('[data-breadth="decline"] b',fmt0(rows.filter(r=>(r.pct??0)<0).length));
-    setText('[data-breadth="unchanged"] b',fmt0(rows.filter(r=>(r.pct??0)===0).length));
+    const breadthSession=num(stateValue(['tradedScrips','scripsTraded','totalScrips'],s.summary))??rows.length;
+    const bd=window.NPP&&window.NPP.breadth?window.NPP.breadth(rows,s.breadth,breadthSession):{advancing:null,declining:null,unchanged:null};
+    const shown=v=>v===null||v===undefined?'\u2014':fmt0(v);
+    setText('[data-breadth="advance"] b',shown(bd.advancing));
+    setText('[data-breadth="decline"] b',shown(bd.declining));
+    setText('[data-breadth="unchanged"] b',shown(bd.unchanged));
     setText('[data-breadth="positive"] b',fmt0(rows.filter(r=>(r.pct??0)>=9.9).length));
     setText('[data-breadth="negative"] b',fmt0(rows.filter(r=>(r.pct??0)<=-9.9).length));
 
@@ -7684,6 +7735,31 @@ header.topbar, header.topbar .toprow, .mobile-exact-topbar {
   function arrPayload(idx){return idx&&typeof idx==='object'?[idx]:[]}
   function escapeHtml(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
   async function fetchMarket(){
+    /* The central feed owner already polls /api/market. Reuse its LIVE snapshot
+       when it is fresh so Home issues one market request per cycle instead of
+       two identical ones; only fetch independently when there is nothing fresh. */
+    try{
+      let engine=window.PULSE_FEED_ENGINE;
+      let shared=engine&&typeof engine.state==='function'?engine.state():null;
+      // At startup the central feed's first request is still in flight: give it
+      // a moment instead of issuing the same request twice in parallel.
+      if(shared&&shared.status==='CONNECTING'&&!Array.isArray(shared.live)||shared&&shared.status==='CONNECTING'&&shared.live.length===0){
+        await new Promise(resolve=>setTimeout(resolve,2000));
+        engine=window.PULSE_FEED_ENGINE;
+        shared=engine&&typeof engine.state==='function'?engine.state():null;
+      }
+      const sharedRows=shared&&Array.isArray(shared.live)?shared.live:[];
+      const sharedAt=shared&&shared.updatedAt?Date.parse(shared.updatedAt):NaN;
+      if(shared&&shared.status==='LIVE'&&sharedRows.length>=20&&Number.isFinite(sharedAt)&&(Date.now()-sharedAt)<45000){
+        const snap=extractSnapshot(shared);
+        if(snap.rows.length>=1){
+          renderMain(snap);
+          setStatus('LIVE','Live market data \u00b7 '+snap.rows.length+' rows \u00b7 shared feed');
+          window.PULSE_FRONTEND_RECEIVER={status:'LIVE',rows:snap.rows.length,updatedAt:snap.updatedAt,shared:true};
+          return;
+        }
+      }
+    }catch(e){/* fall through to an independent request */}
     const controller=new AbortController();
     const timerId=setTimeout(()=>controller.abort(),TIMEOUT_MS);
     try{
@@ -7718,7 +7794,7 @@ header.topbar, header.topbar .toprow, .mobile-exact-topbar {
 <!-- Removed competing movers script: its capture handler kept the final controller stuck on Gainers. -->
 
 <script id="np-all-market-controller">
-(function(){let allRows=[];const $=id=>document.getElementById(id);const escv=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));const pick=(o,keys)=>{for(const k of keys){if(o&&o[k]!=null&&o[k]!=='')return o[k]}return null};const n=v=>{if(v==null||v==='')return null;const x=Number(String(v).replace(/,/g,''));return Number.isFinite(x)?x:null};const fmt=v=>{const x=n(v);return x==null?'—':x.toLocaleString(undefined,{maximumFractionDigits:2})};function rowsOf(v){if(Array.isArray(v))return v;if(!v||typeof v!=='object')return [];for(const k of ['live','companies','data','rows','result','results','content','records','items']){const x=v[k];if(Array.isArray(x)&&x.length)return x;if(x&&typeof x==='object'){const nested=rowsOf(x);if(nested.length)return nested}}return []}function norm(o){const sym=String(pick(o,['symbol','stockSymbol','securitySymbol','symbolName','companySymbol','scrip','ticker','code','security_code'])||'').toUpperCase();const ltp=n(pick(o,['ltp','lastTradedPrice','lastTradedPriceValue','closingPrice','closePrice','close','price']));const prev=n(pick(o,['previousClose','previousClosingPrice','prevClose','previousPrice']));let ch=n(pick(o,['change','pointChange','difference','changeAmount']));let pct=n(pick(o,['percentageChange','perChange','percentChange','changePercent','pChange','changePercentage']));if(pct==null&&ch!=null&&prev)pct=ch/prev*100;if(ch==null&&ltp!=null&&prev!=null)ch=ltp-prev;return {sym,company:pick(o,['companyName','securityName','name']),ltp,high:n(pick(o,['high','highPrice','maxPrice','dayHigh'])),low:n(pick(o,['low','lowPrice','minPrice','dayLow'])),ch,pct}}function render(){const q=($('npamSearch')?.value||'').trim().toUpperCase();const list=allRows.filter(r=>!q||r.sym.includes(q)||String(r.company||'').toUpperCase().includes(q));$('npamRows').innerHTML=list.map(r=>`<tr class="${(r.pct??0)>0?'up':(r.pct??0)<0?'down':'flat'}" data-symbol="${escv(r.sym)}"><td>${escv(r.sym)}</td><td>${fmt(r.ltp)}</td><td>${fmt(r.high)}</td><td>${fmt(r.low)}</td><td>${fmt(r.ch)}</td><td>${r.pct==null?'—':fmt(r.pct)+'%'}</td></tr>`).join('')||'<tr><td colspan="6" style="text-align:center;background:#073536">No company rows available</td></tr>';$('npamCount').textContent=`${list.length} companies`;}
+(function(){let allRows=[];const $=id=>document.getElementById(id);const escv=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));const pick=(o,keys)=>{for(const k of keys){if(o&&o[k]!=null&&o[k]!=='')return o[k]}return null};const n=v=>{if(v==null||v==='')return null;const x=Number(String(v).replace(/,/g,''));return Number.isFinite(x)?x:null};const fmt=v=>{const x=n(v);return x==null?'—':x.toLocaleString(undefined,{maximumFractionDigits:2})};function rowsOf(v){if(Array.isArray(v))return v;if(!v||typeof v!=='object')return [];for(const k of ['live','companies','data','rows','result','results','content','records','items']){const x=v[k];if(Array.isArray(x)&&x.length)return x;if(x&&typeof x==='object'){const nested=rowsOf(x);if(nested.length)return nested}}return []}function norm(o){const sym=String(pick(o,['symbol','stockSymbol','securitySymbol','symbolName','companySymbol','scrip','ticker','code','security_code'])||'').toUpperCase();const ltp=n(pick(o,['ltp','lastTradedPrice','lastTradedPriceValue','closingPrice','closePrice','close','price']));const prev=n(pick(o,['previousDayClosePrice','previousClose','previousClosingPrice','prevClose','previousPrice']));let ch=n(pick(o,['change','pointChange','difference','changeAmount']));let pct=n(pick(o,['percentageChange','perChange','percentChange','changePercent','pChange','changePercentage']));if(pct==null&&ch!=null&&prev)pct=ch/prev*100;if(ch==null&&ltp!=null&&prev!=null)ch=ltp-prev;return {sym,company:pick(o,['companyName','securityName','name']),ltp,high:n(pick(o,['high','highPrice','maxPrice','dayHigh'])),low:n(pick(o,['low','lowPrice','minPrice','dayLow'])),ch,pct}}function render(){const q=($('npamSearch')?.value||'').trim().toUpperCase();const list=allRows.filter(r=>!q||r.sym.includes(q)||String(r.company||'').toUpperCase().includes(q));$('npamRows').innerHTML=list.map(r=>`<tr class="${(r.pct??0)>0?'up':(r.pct??0)<0?'down':'flat'}" data-symbol="${escv(r.sym)}"><td>${escv(r.sym)}</td><td>${fmt(r.ltp)}</td><td>${fmt(r.high)}</td><td>${fmt(r.low)}</td><td>${fmt(r.ch)}</td><td>${r.pct==null?'—':fmt(r.pct)+'%'}</td></tr>`).join('')||'<tr><td colspan="6" style="text-align:center;background:#073536">No company rows available</td></tr>';$('npamCount').textContent=`${list.length} companies`;}
 window.npOpenAllMarket=()=>{$('npAllMarket').classList.add('open');document.body.style.overflow='hidden';npLoadAllMarket()};window.npCloseAllMarket=()=>{$('npAllMarket').classList.remove('open');document.body.style.overflow=''};window.npFilterAllMarket=render;window.npLoadAllMarket=async()=>{const body=$('npamRows');body.innerHTML='<tr><td colspan="6" style="text-align:center;background:#073536">Loading live market…</td></tr>';try{const base=window.NEPSE_PULSE_BACKEND_URL||'https://nepse-pulse-1.onrender.com';let res=await fetch(base+'/api/market?_all_market='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});if(!res.ok)throw Error('Market API returned '+res.status);let payload=await res.json();allRows=rowsOf(payload).map(norm).filter(r=>r.sym);if(!allRows.length&&Array.isArray(payload?.gainers))allRows=rowsOf(payload.gainers).concat(rowsOf(payload.losers)).map(norm).filter(r=>r.sym);if(!allRows.length)throw Error('The backend returned no company rows. Check its live feed.');$('npamUpdated').textContent=payload.updatedAt?'Updated '+new Date(payload.updatedAt).toLocaleString():'Live market snapshot';render();}catch(e){body.innerHTML=`<tr><td colspan="6" style="text-align:center;background:#073536">Could not load market data: ${escv(e.message)}</td></tr>`;$('npamCount').textContent='Feed unavailable'}};
 document.addEventListener('click',e=>{const tr=e.target.closest('#npamRows tr[data-symbol]');if(!tr)return;const symbol=tr.dataset.symbol;npCloseAllMarket();if(typeof window.npOpenCompany==='function')window.npOpenCompany(symbol);else if(typeof window.openCompanyPage==='function')window.openCompanyPage(symbol);});})();
 </script>

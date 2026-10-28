@@ -1,7 +1,7 @@
-
 package com.nepsepulse.app
 
 import android.app.Activity
+import android.os.Build
 import android.os.Bundle
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -64,11 +64,44 @@ class MainActivity : Activity() {
             )
         )
 
+        applySystemBarInsets()
+
         if (savedInstanceState == null) {
             webView.loadUrl(homeUrl)
         } else {
             webView.restoreState(savedInstanceState)
         }
+    }
+
+    /**
+     * Android 15 (API 35+) draws apps that target SDK 35 or higher
+     * edge-to-edge: the WebView then extends behind the status and navigation
+     * bars, which would hide the page header, the bottom navigation and the
+     * bottom ad slot.
+     *
+     * The insets are consumed here as padding on the WebView itself, so the
+     * page starts below the status bar and ends above the navigation bar while
+     * scrolling still behaves normally. Because the WebView no longer overlaps
+     * the bars, the page's own `env(safe-area-inset-*)` values become 0 and no
+     * double padding is produced.
+     *
+     * On API 34 and below the window decor still fits the system bars, so no
+     * padding is added there. Only non-deprecated framework APIs are used:
+     * this replaces the deprecated status/navigation bar colour and
+     * system-ui-visibility edge-to-edge handling entirely.
+     */
+    private fun applySystemBarInsets() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) return
+
+        webView.setOnApplyWindowInsetsListener { view, insets ->
+            val bars = insets.getInsets(
+                android.view.WindowInsets.Type.systemBars() or
+                    android.view.WindowInsets.Type.displayCutout()
+            )
+            view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            insets
+        }
+        webView.requestApplyInsets()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
