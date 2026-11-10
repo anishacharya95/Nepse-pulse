@@ -296,7 +296,7 @@ jobs:
               pos = s.lower().rfind('</head>')
               if pos < 0:
                   raise SystemExit('Could not find </head> for AdMob layout fix')
-              s = s[:pos] + style + '\\n' + s[pos:]
+              s = s[:pos] + style + '\n' + s[pos:]
           tags = [
               '<script src="./np-capacitor-plugins.bundle.js"></script>',
               '<script src="./np-admob-banner.js"></script>'
