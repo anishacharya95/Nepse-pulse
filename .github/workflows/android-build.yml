@@ -69,39 +69,60 @@ jobs:
           cat > android-web/np-admob-banner.js <<'EOF'
           (function () {
             'use strict';
-
+          
             let started = false;
             let interstitialReady = false;
             let navActions = 0;
             let lastInterstitialAt = 0;
             let interstitialShowing = false;
+            let lastStatus = 'Waiting for native app…';
+            const BANNER_ID = 'ca-app-pub-1565800134063497/8028868444';
             const INTERSTITIAL_ID = 'ca-app-pub-1565800134063497/1639379056';
+            const DEBUG_ADS = BANNER_ID.indexOf('3940256099942544') !== -1;
             const NAV_LABELS = /^(home|market|screener|quant|alerts|watchlist|market structure|professional charting|charting|ipo center|profile|more|traders zone)$/i;
             const COOLDOWN_MS = 5 * 60 * 1000;
             const ACTIONS_BETWEEN_ADS = 8;
-
+          
             function nativeAndroid() {
               return !!(window.Capacitor &&
                 typeof window.Capacitor.isNativePlatform === 'function' &&
                 window.Capacitor.isNativePlatform());
             }
-
+          
             function report(message) {
-              console.log('[NEPSE AdMob]', message);
+              lastStatus = String(message);
+              console.log('[NEPSE AdMob]', lastStatus);
+              if (DEBUG_ADS && document.body) {
+                let chip = document.getElementById('np-admob-debug');
+                if (!chip) {
+                  chip = document.createElement('div');
+                  chip.id = 'np-admob-debug';
+                  chip.setAttribute('role', 'status');
+                  chip.style.cssText = 'position:fixed;z-index:2147483647;top:calc(env(safe-area-inset-top, 0px) + 8px);right:8px;max-width:78vw;padding:7px 10px;border-radius:8px;background:#202124;color:#fff;font:12px/1.35 sans-serif;box-shadow:0 2px 8px #0006;pointer-events:none;white-space:normal;overflow-wrap:anywhere;';
+                  document.body.appendChild(chip);
+                }
+                chip.textContent = 'AdMob: ' + lastStatus;
+              }
             }
-
+          
+            function errorText(error) {
+              if (!error) return 'unknown error';
+              if (typeof error === 'string') return error;
+              try { return JSON.stringify(error); }
+              catch (_) { return String(error.message || error); }
+            }
+          
             async function prepareInterstitial(admob) {
               try {
                 await admob.prepareInterstitial({ adId: INTERSTITIAL_ID });
                 interstitialReady = true;
-                report('banner configured; interstitial ready');
+                report('Banner active; interstitial prepared');
               } catch (error) {
                 interstitialReady = false;
-                console.warn('[NEPSE AdMob] Interstitial load failed:', error);
-                report('banner requested; interstitial not available yet');
+                report('Interstitial load failed: ' + errorText(error));
               }
             }
-
+          
             async function showInterstitialAtTransition(admob) {
               const now = Date.now();
               if (!interstitialReady || interstitialShowing ||
@@ -110,18 +131,15 @@ jobs:
               interstitialReady = false;
               lastInterstitialAt = now;
               try {
-                // Only called after several explicit top-level navigation actions;
-                // never show on app launch, app exit, or every tap.
                 await admob.showInterstitial({ adId: INTERSTITIAL_ID });
               } catch (error) {
-                console.warn('[NEPSE AdMob] Interstitial display failed:', error);
+                report('Interstitial display failed: ' + errorText(error));
               } finally {
                 interstitialShowing = false;
-                // Prepare the next ad after the current presentation attempt.
                 await prepareInterstitial(admob);
               }
             }
-
+          
             function installNavigationPlacement(admob) {
               document.addEventListener('click', function (event) {
                 if (!nativeAndroid()) return;
@@ -135,62 +153,108 @@ jobs:
                 navActions += 1;
                 if (navActions >= ACTIONS_BETWEEN_ADS) {
                   navActions = 0;
-                  // A brief delay lets the navigation click finish before the ad opens.
                   Promise.resolve().then(() => showInterstitialAtTransition(admob));
                 }
               }, true);
             }
-
+          
+            async function initializeWithRetry(admob) {
+              const waits = [0, 1500, 3500];
+              let lastError;
+              for (let attempt = 0; attempt < waits.length; attempt += 1) {
+                if (waits[attempt]) {
+                  report('Waiting for Android ad view (retry ' + (attempt + 1) + '/3)…');
+                  await new Promise(resolve => setTimeout(resolve, waits[attempt]));
+                }
+                try {
+                  await admob.initialize();
+                  return;
+                } catch (error) {
+                  lastError = error;
+                  report('AdMob SDK init attempt ' + (attempt + 1) + ' failed: ' + errorText(error));
+                }
+              }
+              throw lastError || new Error('AdMob SDK initialization failed');
+            }
+          
             async function startAdMob() {
-              if (started || !nativeAndroid()) return;
+              if (started || !nativeAndroid()) {
+                if (!nativeAndroid()) report('Not running as a native Android app');
+                return;
+              }
               started = true;
               const admob = window.NP_CAP_ADMOB;
               if (!admob) {
-                report('FAILED — native AdMob plugin unavailable');
+                report('ERROR: native AdMob plugin unavailable');
+                started = false;
                 return;
               }
-
+          
               try {
-                report('checking consent…');
-                let consent = await admob.requestConsentInfo();
-                if (consent && consent.isConsentFormAvailable &&
-                    String(consent.status).toLowerCase().includes('required')) {
-                  consent = await admob.showConsentForm();
+                report('Requesting consent information…');
+                let consent;
+                try {
+                  consent = await admob.requestConsentInfo();
+                } catch (error) {
+                  throw new Error('Consent request failed: ' + errorText(error));
                 }
+                report('Consent status: ' + (consent && consent.status ? consent.status : 'unknown') +
+                  '; canRequestAds=' + (consent ? String(consent.canRequestAds) : 'no response'));
+          
+                if (consent && consent.isConsentFormAvailable &&
+                    String(consent.status).toLowerCase() === 'required') {
+                  report('Showing required consent form…');
+                  consent = await admob.showConsentForm();
+                  report('Consent form completed; canRequestAds=' +
+                    (consent ? String(consent.canRequestAds) : 'unknown'));
+                }
+          
                 if (consent && consent.canRequestAds === false) {
-                  report('ads paused until consent permits requests');
+                  report('Consent does not currently allow ad requests');
+                  started = false;
                   return;
                 }
-
-                await admob.initialize();
+          
+                report('Initializing Google Mobile Ads SDK…');
+                await initializeWithRetry(admob);
+          
                 if (typeof admob.addListener === 'function') {
-                  try {
-                    await admob.addListener('bannerAdLoaded', () => report('banner loaded'));
-                    await admob.addListener('bannerAdFailedToLoad', error => {
-                      report('banner failed to load — ' + JSON.stringify(error));
-                    });
-                  } catch (_) {}
+                  await admob.addListener('bannerAdLoaded', () => report('TEST BANNER LOADED'));
+                  await admob.addListener('bannerAdFailedToLoad', error =>
+                    report('BANNER LOAD ERROR: ' + errorText(error)));
+                  await admob.addListener('bannerAdSizeChanged', size =>
+                    report('Banner size: ' + errorText(size)));
                 }
-
+          
+                report('Requesting Google test banner…');
                 await admob.showBanner({
-                  adId: 'ca-app-pub-1565800134063497/8028868444',
+                  adId: BANNER_ID,
                   adSize: 'ADAPTIVE_BANNER',
                   position: 'BOTTOM_CENTER',
                   margin: 0
                 });
-                report('real banner requested; preparing interstitial…');
+                report('Banner request sent; waiting for load callback…');
                 installNavigationPlacement(admob);
                 await prepareInterstitial(admob);
               } catch (error) {
-                report('ERROR — ' + (error && error.message ? error.message : JSON.stringify(error)));
+                report('STARTUP ERROR: ' + errorText(error));
                 started = false;
               }
             }
-
-            if (document.readyState === 'loading') {
-              document.addEventListener('DOMContentLoaded', startAdMob, { once: true });
-            } else {
+          
+            function scheduleStart() {
+              if (!nativeAndroid()) {
+                report('Native Android bridge not ready; retrying…');
+                setTimeout(scheduleStart, 1200);
+                return;
+              }
               startAdMob();
+            }
+          
+            if (document.readyState === 'loading') {
+              document.addEventListener('DOMContentLoaded', scheduleStart, { once: true });
+            } else {
+              scheduleStart();
             }
           })();
           EOF
