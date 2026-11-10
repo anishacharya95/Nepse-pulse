@@ -75,10 +75,8 @@ jobs:
             let navActions = 0;
             let lastInterstitialAt = 0;
             let interstitialShowing = false;
-            let lastStatus = 'Waiting for native app…';
             const BANNER_ID = 'ca-app-pub-1565800134063497/8028868444';
             const INTERSTITIAL_ID = 'ca-app-pub-1565800134063497/1639379056';
-            const DEBUG_ADS = BANNER_ID.indexOf('3940256099942544') !== -1;
             const COOLDOWN_MS = 90 * 1000;
             const ACTIONS_BETWEEN_ADS = 3;
           
@@ -89,19 +87,7 @@ jobs:
             }
           
             function report(message) {
-              lastStatus = String(message);
-              console.log('[NEPSE AdMob]', lastStatus);
-              if (DEBUG_ADS && document.body) {
-                let chip = document.getElementById('np-admob-debug');
-                if (!chip) {
-                  chip = document.createElement('div');
-                  chip.id = 'np-admob-debug';
-                  chip.setAttribute('role', 'status');
-                  chip.style.cssText = 'position:fixed;z-index:2147483647;top:calc(env(safe-area-inset-top, 0px) + 8px);right:8px;max-width:78vw;padding:7px 10px;border-radius:8px;background:#202124;color:#fff;font:12px/1.35 sans-serif;box-shadow:0 2px 8px #0006;pointer-events:none;white-space:normal;overflow-wrap:anywhere;';
-                  document.body.appendChild(chip);
-                }
-                chip.textContent = 'AdMob: ' + lastStatus;
-              }
+              console.log('[NEPSE AdMob]', String(message));
             }
           
             function errorText(error) {
