@@ -3935,6 +3935,33 @@ jobs:
 
       # Always produce a debug APK for device testing. This uses the Android debug key,
       # and does not modify or replace the Play Store upload keystore.
+      # Use Google's official demo ad units in the debug APK. This verifies
+      # native AdMob loading without generating traffic on production ad units.
+      - name: Configure Google test ad units for Debug APK
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("android/app/src/main/assets/public/np-admob-banner.js")
+          s = p.read_text()
+          replacements = {
+              "ca-app-pub-1565800134063497/8028868444": "ca-app-pub-3940256099942544/6300978111",
+              "ca-app-pub-1565800134063497/1639379056": "ca-app-pub-3940256099942544/1033173712",
+          }
+          for production, test in replacements.items():
+              if s.count(production) != 1:
+                  raise SystemExit("Expected exactly one occurrence of " + production)
+              s = s.replace(production, test)
+          p.write_text(s)
+          print("Debug APK configured with Google's official test banner and interstitial units.")
+
+          check = p.read_text()
+          if "ca-app-pub-3940256099942544/6300978111" not in check:
+              raise SystemExit("Google test banner ID missing from debug assets")
+          if "ca-app-pub-3940256099942544/1033173712" not in check:
+              raise SystemExit("Google test interstitial ID missing from debug assets")
+          PY
+
       - name: Build Debug APK
         run: |
           cd android
@@ -4055,6 +4082,32 @@ jobs:
           s = s[:rel_brace + 1] + release_body + s[rel_close:]
           gradle.write_text(s)
           print("Release signing configured in buildTypes.release.")
+          PY
+
+      # Restore the user's real ad units only for the signed Play Store release.
+      - name: Restore production AdMob units for Release AAB
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("android/app/src/main/assets/public/np-admob-banner.js")
+          s = p.read_text()
+          replacements = {
+              "ca-app-pub-3940256099942544/6300978111": "ca-app-pub-1565800134063497/8028868444",
+              "ca-app-pub-3940256099942544/1033173712": "ca-app-pub-1565800134063497/1639379056",
+          }
+          for test, production in replacements.items():
+              if s.count(test) != 1:
+                  raise SystemExit("Expected exactly one occurrence of " + test)
+              s = s.replace(test, production)
+          p.write_text(s)
+          print("Release AAB restored to the supplied production ad units.")
+
+          check = p.read_text()
+          if "ca-app-pub-1565800134063497/8028868444" not in check:
+              raise SystemExit("Production banner ID missing from release assets")
+          if "ca-app-pub-1565800134063497/1639379056" not in check:
+              raise SystemExit("Production interstitial ID missing from release assets")
           PY
 
       - name: Build release Android App Bundle
