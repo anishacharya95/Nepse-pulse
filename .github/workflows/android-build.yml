@@ -144,18 +144,29 @@ jobs:
             }
           
             async function showInterstitialAtTransition(admob) {
-              const now = Date.now();
-              if (!interstitialReady || interstitialShowing ||
-                  now - lastInterstitialAt < COOLDOWN_MS) return;
+              if (interstitialShowing || navActions < ACTIONS_BETWEEN_ADS) return;
+              if (!interstitialReady) {
+                report('3 navigation actions reached; waiting for interstitial to finish loading');
+                return;
+              }
+              const remaining = COOLDOWN_MS - (Date.now() - lastInterstitialAt);
+              if (remaining > 0) {
+                report('3 navigation actions reached; cooldown active for ' +
+                  Math.ceil(remaining / 1000) + ' more seconds');
+                return;
+              }
+
               interstitialShowing = true;
               interstitialReady = false;
-              lastInterstitialAt = now;
               try {
                 report('Showing interstitial at navigation transition…');
                 await admob.showInterstitial({ adId: INTERSTITIAL_ID });
-                report('Interstitial show request completed');
+                lastInterstitialAt = Date.now();
+                navActions = 0;
+                report('Interstitial show request completed; next ad after 3 more navigation actions');
               } catch (error) {
-                report('Interstitial display failed: ' + errorText(error));
+                report('Interstitial display failed: ' + errorText(error) +
+                  '; will retry on a later navigation action');
               } finally {
                 interstitialShowing = false;
                 await prepareInterstitial(admob);
@@ -169,11 +180,10 @@ jobs:
                   ? event.target.closest('.nav button, .feature-item')
                   : null;
                 if (!target) return;
-                navActions += 1;
-                report('Navigation action ' + navActions + '/' + ACTIONS_BETWEEN_ADS +
-                  (interstitialReady ? '; interstitial ready' : '; interstitial still loading'));
+                navActions = Math.min(navActions + 1, ACTIONS_BETWEEN_ADS);
+                report('Navigation progress ' + navActions + '/' + ACTIONS_BETWEEN_ADS +
+                  (interstitialReady ? '; interstitial ready' : '; interstitial loading'));
                 if (navActions >= ACTIONS_BETWEEN_ADS) {
-                  navActions = 0;
                   Promise.resolve().then(() => showInterstitialAtTransition(admob));
                 }
               }, true);
