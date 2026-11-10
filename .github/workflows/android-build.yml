@@ -79,9 +79,8 @@ jobs:
             const BANNER_ID = 'ca-app-pub-1565800134063497/8028868444';
             const INTERSTITIAL_ID = 'ca-app-pub-1565800134063497/1639379056';
             const DEBUG_ADS = BANNER_ID.indexOf('3940256099942544') !== -1;
-            const NAV_LABELS = /^(home|market|screener|quant|alerts|watchlist|market structure|professional charting|charting|ipo center|profile|more|traders zone)$/i;
-            const COOLDOWN_MS = 5 * 60 * 1000;
-            const ACTIONS_BETWEEN_ADS = 8;
+            const COOLDOWN_MS = 90 * 1000;
+            const ACTIONS_BETWEEN_ADS = 3;
           
             function nativeAndroid() {
               return !!(window.Capacitor &&
@@ -134,9 +133,10 @@ jobs:
           
             async function prepareInterstitial(admob) {
               try {
+                report('Loading interstitial test ad…');
                 await admob.prepareInterstitial({ adId: INTERSTITIAL_ID });
                 interstitialReady = true;
-                report('Banner active; interstitial prepared');
+                report('Interstitial prepared and ready');
               } catch (error) {
                 interstitialReady = false;
                 report('Interstitial load failed: ' + errorText(error));
@@ -151,7 +151,9 @@ jobs:
               interstitialReady = false;
               lastInterstitialAt = now;
               try {
+                report('Showing interstitial at navigation transition…');
                 await admob.showInterstitial({ adId: INTERSTITIAL_ID });
+                report('Interstitial show request completed');
               } catch (error) {
                 report('Interstitial display failed: ' + errorText(error));
               } finally {
@@ -164,13 +166,12 @@ jobs:
               document.addEventListener('click', function (event) {
                 if (!nativeAndroid()) return;
                 const target = event.target && event.target.closest
-                  ? event.target.closest('button, a, [role="tab"], [role="button"]')
+                  ? event.target.closest('.nav button, .feature-item')
                   : null;
                 if (!target) return;
-                const label = String(target.innerText || target.getAttribute('aria-label') || target.title || '')
-                  .replace(/\s+/g, ' ').trim();
-                if (!NAV_LABELS.test(label)) return;
                 navActions += 1;
+                report('Navigation action ' + navActions + '/' + ACTIONS_BETWEEN_ADS +
+                  (interstitialReady ? '; interstitial ready' : '; interstitial still loading'));
                 if (navActions >= ACTIONS_BETWEEN_ADS) {
                   navActions = 0;
                   Promise.resolve().then(() => showInterstitialAtTransition(admob));
@@ -283,6 +284,19 @@ jobs:
           from pathlib import Path
           p = Path('android-web/index.html')
           s = p.read_text()
+          # Keep the native bottom banner below the app's fixed panel navigation.
+          # Reserve extra scroll space so page content is not obscured.
+          style = """<style id="np-admob-layout-fix">
+          body { padding-bottom: 170px !important; }
+          .bottom, .bottom.mobile-exact-bottom {
+            bottom: calc(50px + env(safe-area-inset-bottom, 0px)) !important;
+          }
+          </style>"""
+          if 'id="np-admob-layout-fix"' not in s:
+              pos = s.lower().rfind('</head>')
+              if pos < 0:
+                  raise SystemExit('Could not find </head> for AdMob layout fix')
+              s = s[:pos] + style + '\\n' + s[pos:]
           tags = [
               '<script src="./np-capacitor-plugins.bundle.js"></script>',
               '<script src="./np-admob-banner.js"></script>'
