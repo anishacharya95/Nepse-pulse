@@ -106,10 +106,30 @@ jobs:
             }
           
             function errorText(error) {
-              if (!error) return 'unknown error';
-              if (typeof error === 'string') return error;
-              try { return JSON.stringify(error); }
-              catch (_) { return String(error.message || error); }
+              if (error === null || error === undefined) return 'No error details supplied';
+              if (typeof error === 'string') return error.trim() || 'Empty error string';
+              if (error instanceof Error) {
+                const name = error.name && error.name !== 'Error' ? error.name + ': ' : '';
+                return name + (error.message || 'Error object has no message');
+              }
+              if (typeof error === 'object') {
+                const fields = ['message', 'errorMessage', 'localizedDescription', 'code', 'domain', 'details'];
+                const parts = fields
+                  .filter(key => error[key] !== undefined && error[key] !== null && String(error[key]).trim())
+                  .map(key => key + '=' + (typeof error[key] === 'object'
+                    ? JSON.stringify(error[key]) : String(error[key])));
+                if (parts.length) return parts.join(' | ');
+                try {
+                  const serialized = JSON.stringify(error);
+                  if (serialized && serialized !== '{}' && serialized !== '[]') return serialized;
+                } catch (_) {}
+                try {
+                  const ownKeys = Object.getOwnPropertyNames(error);
+                  if (ownKeys.length) return ownKeys.map(key => key + '=' + String(error[key])).join(' | ');
+                } catch (_) {}
+                return Object.prototype.toString.call(error);
+              }
+              return String(error);
             }
           
             async function prepareInterstitial(admob) {
