@@ -329,7 +329,7 @@ jobs:
           body = m.group(2)
           body, code_count = re.subn(
               r"(?m)^\s*versionCode\s+\d+\s*$",
-              "        versionCode 2",
+              "        versionCode 7",
               body,
           )
           body, name_count = re.subn(
@@ -347,10 +347,10 @@ jobs:
           p.write_text(s)
 
           check = p.read_text()
-          if not re.search(r"(?m)^\s*versionCode\s+2\s*$", check):
-              raise SystemExit("versionCode 2 verification failed")
-          if not re.search(r'(?m)^\s*versionName\s+"1\.0\.1"\s*$', check):
-              raise SystemExit("versionName 1.0.1 verification failed")
+          if not re.search(r"(?m)^\s*versionCode\s+7\s*$", check):
+              raise SystemExit("versionCode 7 verification failed")
+          if not re.search(r'(?m)^\s*versionName\s+"1\.0.7"\s*$', check):
+              raise SystemExit("versionName 1.0.7 verification failed")
           print("Configured NEPSE Pulse Play release: versionCode=2, versionName=1.0.1")
           PYVERSION
 
