@@ -322,12 +322,12 @@ jobs:
 
           p = Path("android/app/build.gradle")
           s = p.read_text()
-          m = re.search(r"(?ms)(defaultConfig\\s*\\{)(.*?)(\\n\\s*\\})", s)
+          m = re.search(r"(?ms)(defaultConfig\s*\{)(.*?)(\n\s*\})", s)
           if not m:
               raise SystemExit("defaultConfig block not found; refusing to build with an unknown version code")
 
           body, count = re.subn(
-              r"(?m)^\\s*versionCode\\s+\\d+\\s*$",
+              r"(?m)^\s*versionCode\s+\d+\s*$",
               "        versionCode 7",
               m.group(2),
           )
@@ -338,7 +338,7 @@ jobs:
           p.write_text(s)
 
           check = p.read_text()
-          if not re.search(r"(?m)^\\s*versionCode\\s+7\\s*$", check):
+          if not re.search(r"(?m)^\s*versionCode\s+7\s*$", check):
               raise SystemExit("versionCode 7 verification failed")
           print("Configured NEPSE Pulse Play versionCode=7; versionName left unchanged")
           PYVERSION
