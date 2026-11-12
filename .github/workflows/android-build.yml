@@ -334,7 +334,7 @@ jobs:
           )
           body, name_count = re.subn(
               r"(?m)^\s*versionName\s+.*$",
-              '        versionName "1.0.1"',
+              '        versionName "1.0.7"',
               body,
           )
           if code_count != 1 or name_count != 1:
@@ -351,7 +351,7 @@ jobs:
               raise SystemExit("versionCode 7 verification failed")
           if not re.search(r'(?m)^\s*versionName\s+"1\.0.7"\s*$', check):
               raise SystemExit("versionName 1.0.7 verification failed")
-          print("Configured NEPSE Pulse Play release: versionCode=2, versionName=1.0.1")
+          print("Configured NEPSE Pulse Play release: versionCode=7, versionName=1.0.7")
           PYVERSION
 
       - name: Apply NEPSE Pulse launcher icon
