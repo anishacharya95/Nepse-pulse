@@ -327,23 +327,33 @@ jobs:
               raise SystemExit("defaultConfig block not found; refusing to build with an unknown version")
 
           body = m.group(2)
-          body, code_count = re.subn(r"(?m)^\s*versionCode\s+\d+\s*$",
-                                     "        versionCode 2", body)
-          body, name_count = re.subn(r"(?m)^\s*versionName\s+.*$",
-
-                                     '        versionName "1.0.1"', body)
+          body, code_count = re.subn(
+              r"(?m)^\s*versionCode\s+\d+\s*$",
+              "        versionCode 2",
+              body,
+          )
+          body, name_count = re.subn(
+              r"(?m)^\s*versionName\s+.*$",
+              '        versionName "1.0.1"',
+              body,
+          )
           if code_count != 1 or name_count != 1:
               raise SystemExit(
                   f"Expected one versionCode and one versionName in defaultConfig; "
                   f"found versionCode={code_count}, versionName={name_count}"
               )
+
           s = s[:m.start(2)] + body + s[m.end(2):]
           p.write_text(s)
 
           check = p.read_text()
           if not re.search(r"(?m)^\s*versionCode\s+2\s*$", check):
               raise SystemExit("versionCode 2 verification failed")
-          if not re.search(r'(?m)^\s*versionName\s+"1\.0\.1"\s*
+          if not re.search(r'(?m)^\s*versionName\s+"1\.0\.1"\s*$', check):
+              raise SystemExit("versionName 1.0.1 verification failed")
+          print("Configured NEPSE Pulse Play release: versionCode=2, versionName=1.0.1")
+          PYVERSION
+
       - name: Apply NEPSE Pulse launcher icon
         run: |
           python3 -m pip install --quiet pillow
