@@ -314,7 +314,7 @@ jobs:
 
       # Set the Play Store release version explicitly. Capacitor creates this
       # Gradle file from its template, so the value must be applied after cap add.
-      - name: Set Google Play version
+      - name: Set Google Play version code
         run: |
           python3 - <<'PYVERSION'
           from pathlib import Path
@@ -322,36 +322,25 @@ jobs:
 
           p = Path("android/app/build.gradle")
           s = p.read_text()
-          m = re.search(r"(?ms)(defaultConfig\s*\{)(.*?)(\n\s*\})", s)
+          m = re.search(r"(?ms)(defaultConfig\\s*\\{)(.*?)(\\n\\s*\\})", s)
           if not m:
-              raise SystemExit("defaultConfig block not found; refusing to build with an unknown version")
+              raise SystemExit("defaultConfig block not found; refusing to build with an unknown version code")
 
-          body = m.group(2)
-          body, code_count = re.subn(
-              r"(?m)^\s*versionCode\s+\d+\s*$",
+          body, count = re.subn(
+              r"(?m)^\\s*versionCode\\s+\\d+\\s*$",
               "        versionCode 7",
-              body,
+              m.group(2),
           )
-          body, name_count = re.subn(
-              r"(?m)^\s*versionName\s+.*$",
-              '        versionName "1.0.7"',
-              body,
-          )
-          if code_count != 1 or name_count != 1:
-              raise SystemExit(
-                  f"Expected one versionCode and one versionName in defaultConfig; "
-                  f"found versionCode={code_count}, versionName={name_count}"
-              )
+          if count != 1:
+              raise SystemExit(f"Expected one versionCode in defaultConfig; found {count}")
 
           s = s[:m.start(2)] + body + s[m.end(2):]
           p.write_text(s)
 
           check = p.read_text()
-          if not re.search(r"(?m)^\s*versionCode\s+7\s*$", check):
+          if not re.search(r"(?m)^\\s*versionCode\\s+7\\s*$", check):
               raise SystemExit("versionCode 7 verification failed")
-          if not re.search(r'(?m)^\s*versionName\s+"1\.0.7"\s*$', check):
-              raise SystemExit("versionName 1.0.7 verification failed")
-          print("Configured NEPSE Pulse Play release: versionCode=7, versionName=1.0.7")
+          print("Configured NEPSE Pulse Play versionCode=7; versionName left unchanged")
           PYVERSION
 
       - name: Apply NEPSE Pulse launcher icon
