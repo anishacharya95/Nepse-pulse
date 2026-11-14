@@ -3687,17 +3687,17 @@ jobs:
                       print(f"Set {key} to {value} in {gradle}")
               gradle.write_text(text)
 
-          # Increment versionCode so this bundle can replace version code 1 in Play Console.
+          # Set the Play Store release versionCode to 8.
           app_gradle = Path("android/app/build.gradle")
           if not app_gradle.exists():
               app_gradle = Path("android/app/build.gradle.kts")
           if not app_gradle.exists():
               raise SystemExit("Could not find app/build.gradle or app/build.gradle.kts")
           text = app_gradle.read_text()
-          updated, count = re.subn(r"(?m)^(\s*versionCode\s*(?:=|\s)\s*)\d+(\s*(?://.*)?)$", r"\g<1>7\g<2>", text, count=1)
+          updated, count = re.subn(r"(?m)^(\s*versionCode\s*(?:=|\s)\s*)\d+(\s*(?://.*)?)$", r"\g<1>8\g<2>", text, count=1)
           if count:
               app_gradle.write_text(updated)
-              print("Set versionCode to 7")
+              print("Set versionCode to 8")
           else:
               print("No numeric versionCode found; leaving version code unchanged")
 
