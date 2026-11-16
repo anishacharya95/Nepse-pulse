@@ -77,6 +77,9 @@ jobs:
             let interstitialShowing = false;
             const BANNER_ID = 'ca-app-pub-1565800134063497/8028868444';
             const INTERSTITIAL_ID = 'ca-app-pub-1565800134063497/1639379056';
+            const APP_OPEN_ID = 'ca-app-pub-1565800134063497/9483086731';
+            let appOpenReady = false;
+            let appOpenShowing = false;
             const COOLDOWN_MS = 90 * 1000;
             const ACTIONS_BETWEEN_ADS = 3;
           
@@ -117,6 +120,32 @@ jobs:
               return String(error);
             }
           
+            async function loadAppOpen(admob) {
+              try {
+                await admob.loadAppOpen({ adId: APP_OPEN_ID });
+                appOpenReady = true;
+                report('App Open ad loaded');
+              } catch (error) {
+                appOpenReady = false;
+                report('App Open load failed: ' + errorText(error));
+              }
+            }
+
+            async function showAppOpenIfReady(admob) {
+              if (!appOpenReady || appOpenShowing) return;
+              appOpenShowing = true;
+              appOpenReady = false;
+              try {
+                await admob.showAppOpen({ adId: APP_OPEN_ID });
+                report('App Open ad displayed');
+              } catch (error) {
+                report('App Open display failed: ' + errorText(error));
+              } finally {
+                appOpenShowing = false;
+                await loadAppOpen(admob);
+              }
+            }
+
             async function prepareInterstitial(admob) {
               try {
                 report('Loading interstitial test ad…');
@@ -253,6 +282,12 @@ jobs:
                 report('Banner request sent; waiting for load callback…');
                 installNavigationPlacement(admob);
                 await prepareInterstitial(admob);
+                await loadAppOpen(admob);
+                if (window.NP_CAP_APP && typeof window.NP_CAP_APP.addListener === 'function') {
+                  await window.NP_CAP_APP.addListener('appStateChange', state => {
+                    if (state && state.isActive) showAppOpenIfReady(admob);
+                  });
+                }
               } catch (error) {
                 report('STARTUP ERROR: ' + errorText(error));
                 started = false;
@@ -3687,17 +3722,17 @@ jobs:
                       print(f"Set {key} to {value} in {gradle}")
               gradle.write_text(text)
 
-          # Set the Play Store release versionCode to 8.
+          # Set the Play Store release versionCode to 9.
           app_gradle = Path("android/app/build.gradle")
           if not app_gradle.exists():
               app_gradle = Path("android/app/build.gradle.kts")
           if not app_gradle.exists():
               raise SystemExit("Could not find app/build.gradle or app/build.gradle.kts")
           text = app_gradle.read_text()
-          updated, count = re.subn(r"(?m)^(\s*versionCode\s*(?:=|\s)\s*)\d+(\s*(?://.*)?)$", r"\g<1>8\g<2>", text, count=1)
+          updated, count = re.subn(r"(?m)^(\s*versionCode\s*(?:=|\s)\s*)\d+(\s*(?://.*)?)$", r"\g<1>9\g<2>", text, count=1)
           if count:
               app_gradle.write_text(updated)
-              print("Set versionCode to 8")
+              print("Set versionCode to 9")
           else:
               print("No numeric versionCode found; leaving version code unchanged")
 
@@ -4041,6 +4076,7 @@ jobs:
           replacements = {
               "ca-app-pub-1565800134063497/8028868444": "ca-app-pub-3940256099942544/6300978111",
               "ca-app-pub-1565800134063497/1639379056": "ca-app-pub-3940256099942544/1033173712",
+              "ca-app-pub-1565800134063497/9483086731": "ca-app-pub-3940256099942544/5575463023",
           }
           for production, test in replacements.items():
               if s.count(production) != 1:
@@ -4052,6 +4088,8 @@ jobs:
           check = p.read_text()
           if "ca-app-pub-3940256099942544/6300978111" not in check:
               raise SystemExit("Google test banner ID missing from debug assets")
+          if "ca-app-pub-3940256099942544/5575463023" not in check:
+              raise SystemExit("Google test App Open ID missing from debug assets")
           if "ca-app-pub-3940256099942544/1033173712" not in check:
               raise SystemExit("Google test interstitial ID missing from debug assets")
           PY
@@ -4189,6 +4227,7 @@ jobs:
           replacements = {
               "ca-app-pub-3940256099942544/6300978111": "ca-app-pub-1565800134063497/8028868444",
               "ca-app-pub-3940256099942544/1033173712": "ca-app-pub-1565800134063497/1639379056",
+              "ca-app-pub-3940256099942544/5575463023": "ca-app-pub-1565800134063497/9483086731",
           }
           for test, production in replacements.items():
               if s.count(test) != 1:
@@ -4200,6 +4239,8 @@ jobs:
           check = p.read_text()
           if "ca-app-pub-1565800134063497/8028868444" not in check:
               raise SystemExit("Production banner ID missing from release assets")
+          if "ca-app-pub-1565800134063497/9483086731" not in check:
+              raise SystemExit("Production App Open ID missing from release assets")
           if "ca-app-pub-1565800134063497/1639379056" not in check:
               raise SystemExit("Production interstitial ID missing from release assets")
           PY
