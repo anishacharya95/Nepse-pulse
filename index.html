@@ -7614,7 +7614,7 @@ header.topbar, header.topbar .toprow, .mobile-exact-topbar {
     return {...o,symbol,company,ltp,prev,change,pct,
       volume:num(pick(o,['volume','tradedShares','quantity','totalTradedQuantity','totalTradeQuantity','shareVolume'])),
       turnover:num(pick(o,['turnover','totalTurnover','amount','totalTradeValue','totalTradedValue','value'])),
-      transactions:num(pick(o,['transactions','totalTransactions','numberOfTransactions','totalTrades','tradeCount']))
+      transactions:num(pick(o,['transactions','transaction','totalTransactions','totalTransaction','numberOfTransactions','noOfTransactions','noOfTransaction','totalNoOfTransactions','totalTransactionCount','transactionCount','transactionsCount','transaction_count','total_transactions','totalNumberOfTransactions','total_number_of_transactions','no_of_transactions','totalTrades','totalTrade','numberOfTrades','noOfTrades','noOfTrade','totalNoOfTrades','totalTradeCount','total_trade_count','tradeCount','trade_count']))
     };
   }
   function uniqueRows(list){
@@ -7668,7 +7668,9 @@ header.topbar, header.topbar .toprow, .mobile-exact-topbar {
     const losers=uniqueRows(Array.isArray(payload.losers)?payload.losers:[]).filter(r=>r.symbol);
     const finalGainers=gainers.length?gainers:[...rows].filter(r=>r.pct!==null).sort((a,b)=>(b.pct??-Infinity)-(a.pct??-Infinity));
     const finalLosers=losers.length?losers:[...rows].filter(r=>r.pct!==null).sort((a,b)=>(a.pct??Infinity)-(b.pct??Infinity));
-    return {rows,gainers:finalGainers,losers:finalLosers,index:extractIndex(payload),summary:payload.summary,breadth:payload.breadth,marketOpen:payload.marketOpen,updatedAt:payload.updatedAt||null};
+    const transactionSource=Array.isArray(payload.topTransactions)?payload.topTransactions:Array.isArray(payload.top_transactions)?payload.top_transactions:Array.isArray(payload.transactions)?payload.transactions:[];
+    const transactionRows=uniqueRows(transactionSource).filter(r=>r.transactions!==null).sort((a,b)=>(b.transactions??-1)-(a.transactions??-1));
+    return {rows,gainers:finalGainers,losers:finalLosers,transactions:transactionRows,index:extractIndex(payload),summary:payload.summary,breadth:payload.breadth,marketOpen:payload.marketOpen,updatedAt:payload.updatedAt||null};
   }
   function summaryNumber(labels,summary,rows,key){
     const direct=num(stateValue(labels,summary));
@@ -7698,7 +7700,7 @@ header.topbar, header.topbar .toprow, .mobile-exact-topbar {
     const movers=s.gainers.slice(0,10);
     const moversEl=document.getElementById('pulseMoversRows');
     if(moversEl)moversEl.innerHTML=movers.map(r=>`<div class="pulse-row"><b>${escapeHtml(r.symbol)}</b><span class="up">${r.change===null?'—':fmt(r.change,2)}</span><span class="up">${r.pct===null?'—':(r.pct>=0?'+':'')+fmt(r.pct,2)+'%'}</span><span>${fmt(r.ltp,2)}</span></div>`).join('')||'<div class="pulse-row"><span>No verified rows</span></div>';
-    renderLiquidity(rows);
+    renderLiquidity(rows,s.transactions);
     const turnover=summaryNumber(['totalTurnover','turnover'],s.summary,rows,'turnover');
     const volume=summaryNumber(['totalTradedShares','tradedShares','totalVolume','volume'],s.summary,rows,'volume');
     const transactions=summaryNumber(['totalTransactions','transactions'],s.summary,rows,'transactions');
@@ -7712,12 +7714,12 @@ header.topbar, header.topbar .toprow, .mobile-exact-topbar {
     try{window.dispatchEvent(new CustomEvent('pulse-central-snapshot',{detail}))}catch(e){}
     return positive;
   }
-  function renderLiquidity(rows){
+  function renderLiquidity(rows,transactionRows=[]){
     const el=document.getElementById('pulseLiquidityRows');if(!el)return;
     let mode=(document.querySelector('[data-liq-tab].active')?.dataset.liqTab)||'turnover';
-    let list=[...rows];
+    let list=mode==='transactions'&&transactionRows.length?[...transactionRows]:[...rows];
     if(mode==='volume')list.sort((a,b)=>(b.volume??-1)-(a.volume??-1));
-    else if(mode==='transactions')list.sort((a,b)=>(b.transactions??-1)-(a.transactions??-1));
+    else if(mode==='transactions')list=list.filter(r=>r.transactions!==null&&r.transactions!==undefined).sort((a,b)=>(b.transactions??-1)-(a.transactions??-1));
     else list.sort((a,b)=>(b.turnover??-1)-(a.turnover??-1));
     el.innerHTML=list.slice(0,10).map(r=>{
       const value=mode==='volume'?r.volume:mode==='transactions'?r.transactions:r.turnover;
