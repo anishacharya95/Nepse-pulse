@@ -2574,7 +2574,7 @@ try {
 }catch(e){}
 
 const PulseFeedEngine = (()=>{
-  const state={status:'CONNECTING',updatedAt:null,lastError:null,summary:null,index:null,live:[],gainers:[],losers:[],companies:[],floorsheet:[],health:null,source:'NEPSE API',providerType:'Unofficial NEPSE REST API',marketOpen:null,diagnostics:{listedSymbols:461,coveredRows:0,api:'nepse-pulse-1.onrender.com'},breadth:{advancing:0,declining:0,unchanged:0}};
+  const state={status:'CONNECTING',updatedAt:null,lastError:null,summary:null,index:null,live:[],gainers:[],losers:[],transactions:[],topTransactions:[],companies:[],floorsheet:[],health:null,source:'NEPSE API',providerType:'Unofficial NEPSE REST API',marketOpen:null,diagnostics:{listedSymbols:461,coveredRows:0,api:'nepse-pulse-1.onrender.com'},breadth:{advancing:0,declining:0,unchanged:0}};
   const subscribers=new Set(); let pollTimer=null;
   const emit=()=>subscribers.forEach(fn=>{try{fn({...state})}catch(e){}});
   const num=v=>{if(v===null||v===undefined||v==='')return null;const n=Number(String(v).replace(/,/g,''));return Number.isFinite(n)?n:null};
@@ -2722,6 +2722,11 @@ const PulseFeedEngine = (()=>{
     state.companies=arr(d.companies).length?d.companies:rowsToStore;
     state.gainers=normalizeLive(d.gainers);
     state.losers=normalizeLive(d.losers);
+    // Preserve the dedicated NEPSE top-transaction leaderboard in the central feed.
+    // Without this, the Home Activity tab silently falls back to live quote rows.
+    const transactionRows=[d.topTransactions,d.top_transactions,d.transactions,d.transactionLeaderboard,d.topTenTransactionScrips].find(Array.isArray)||[];
+    state.transactions=transactionRows;
+    state.topTransactions=transactionRows;
     state.index=normalizeIndex(d.index);
     state.summary=d.summary||{};
     state.breadth=d.breadth||{};
@@ -7710,7 +7715,7 @@ header.topbar, header.topbar .toprow, .mobile-exact-topbar {
     const sm={turnover,volume,transactions,scrips,marketcap:marketCap,floatcap:floatCap};
     Object.entries(sm).forEach(([k,v])=>{const e=document.querySelector('[data-summary="'+k+'"]');if(e)e.textContent=k==='turnover'||k==='marketcap'||k==='floatcap'?money(v):fmt0(v)});
     // If the existing engine is listening, feed it a normalized snapshot too.
-    const detail={ok:true,status:'LIVE',live:rows,companies:rows,gainers:s.gainers,losers:s.losers,index:arrPayload(s.index),summary:s.summary,marketOpen:s.marketOpen,updatedAt:s.updatedAt,diagnostics:{coveredRows:rows.length,listedsymbols:461}};
+    const detail={ok:true,status:'LIVE',live:rows,companies:rows,gainers:s.gainers,losers:s.losers,transactions:s.transactions||[],topTransactions:s.transactions||[],index:arrPayload(s.index),summary:s.summary,marketOpen:s.marketOpen,updatedAt:s.updatedAt,diagnostics:{coveredRows:rows.length,listedsymbols:461}};
     try{window.dispatchEvent(new CustomEvent('pulse-central-snapshot',{detail}))}catch(e){}
     return positive;
   }
