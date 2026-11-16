@@ -10452,10 +10452,10 @@ const priorLoad=window.loadPriceVolumeActions;window.loadPriceVolumeActions=asyn
  const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  function rowHTML(r,kind){const s=symbol(r);const c=pct(r), ch=change(r), p=price(r);let a,b,cls=c!==null&&c<0?'down':'up';if(kind==='movers'){a=ch===null?'—':(ch>0?'+':'')+fmt(ch);b=c===null?'—':(c>0?'+':'')+fmt(c)+'%';return `<div class="pulse-row" data-symbol="${esc(s)}" tabindex="0"><b>${esc(s)}</b><span class="${cls}">${a}</span><span class="${cls}">${b}</span><span>${fmt(p)}</span></div>`}let value=kind==='transactions'?count(r):kind==='volume'?vol(r):turn(r);let display=kind==='turnover'?money(value):fmt(value,0);return `<div class="pulse-row" data-symbol="${esc(s)}" tabindex="0"><b>${esc(s)}</b><span>${display}</span><span class="${cls}">${p===null?'—':fmt(p)+(c===null?'':` (${c>0?'+':''}${fmt(c)}%)`)}</span></div>`}
  function paint(){const d=datasets();const m=$('#pulseMoversRows'),l=$('#pulseLiquidityRows');if(m){const list=moverMode==='losers'?d.lose:d.gain;const shown=expandedMovers?list:list.slice(0,10);m.innerHTML=shown.map(r=>rowHTML(r,'movers')).join('')||'<div class="pulse-row"><span>No verified rows for this list.</span></div>';const b=$('#npMoversMore');if(b){b.hidden=list.length<=10;b.style.display=list.length>10?'block':'none';b.textContent=expandedMovers?'View Less ↑':'View More >';b.setAttribute('aria-expanded',String(expandedMovers));b.disabled=list.length<=10;}}
- if(l){const list=d.liq;const shown=expandedLiq?list:list.slice(0,10);l.innerHTML=shown.map(r=>rowHTML(r,liqMode)).join('')||'<div class="pulse-row"><span>'+(liqMode==='transactions'?'Transaction counts are not present in the loaded backend data.':'No verified rows for this list.')+'</span></div>';const b=$('#npLiquidityMore');if(b){b.hidden=list.length<=10;b.style.display=list.length>10?'block':'none';b.textContent=expandedLiq?'View Less ↑':'View More >';b.setAttribute('aria-expanded',String(expandedLiq));b.disabled=list.length<=10;}}
+ if(l){const list=d.liq;const shown=expandedLiq?list:list.slice(0,10);l.innerHTML=shown.map(r=>rowHTML(r,liqMode)).join('')||'<div class="pulse-row"><span>'+(liqMode==='transactions'?(roots().__npTransactionLoadMessage||'Transaction counts are not present in the loaded backend data.'):'No verified rows for this list.')+'</span></div>';const b=$('#npLiquidityMore');if(b){b.hidden=list.length<=10;b.style.display=list.length>10?'block':'none';b.textContent=expandedLiq?'View Less ↑':'View More >';b.setAttribute('aria-expanded',String(expandedLiq));b.disabled=list.length<=10;}}
  $$('[data-mover-tab]').forEach(b=>b.classList.toggle('active',b.dataset.moverTab===moverMode));$$('[data-liq-tab]').forEach(b=>b.classList.toggle('active',b.dataset.liqTab===liqMode));}
  // Capture-phase handling intentionally supersedes the conflicting older dashboard scripts.
- document.addEventListener('click',function(e){const b=e.target?.closest?.('#npMoversMore,#npLiquidityMore,[data-mover-tab],[data-liq-tab]');if(!b)return;e.preventDefault();e.stopImmediatePropagation();if(b.id==='npMoversMore')expandedMovers=!expandedMovers;else if(b.id==='npLiquidityMore')expandedLiq=!expandedLiq;else if(b.hasAttribute('data-mover-tab')){moverMode=b.dataset.moverTab==='losers'?'losers':'gainers';expandedMovers=false;}else{liqMode=['turnover','volume','transactions'].includes(b.dataset.liqTab)?b.dataset.liqTab:'turnover';expandedLiq=false;}paint();},true);
+ document.addEventListener('click',function(e){const b=e.target?.closest?.('#npMoversMore,#npLiquidityMore,[data-mover-tab],[data-liq-tab]');if(!b)return;e.preventDefault();e.stopImmediatePropagation();if(b.id==='npMoversMore')expandedMovers=!expandedMovers;else if(b.id==='npLiquidityMore'){if(liqMode==='transactions'){loadFullTransactionLeaderboard().then(ok=>{if(ok)expandedLiq=!expandedLiq;paint();});return;}expandedLiq=!expandedLiq;}else if(b.hasAttribute('data-mover-tab')){moverMode=b.dataset.moverTab==='losers'?'losers':'gainers';expandedMovers=false;}else{liqMode=['turnover','volume','transactions'].includes(b.dataset.liqTab)?b.dataset.liqTab:'turnover';expandedLiq=false;if(liqMode==='transactions')loadFullTransactionLeaderboard().then(()=>paint());}paint();},true);
  function transactionRowsFrom(obj){return mergeRows(arrays(obj,['transactions','topTransactions','top_transactions','transactionLeaderboard','topTransactionScrips','topTenTransactionScrips','trades','topTrades']));}
  function mergeSnapshot(next){
    const incoming=next&&typeof next==='object'?next:{};
@@ -10468,6 +10468,28 @@ const priorLoad=window.loadPriceVolumeActions;window.loadPriceVolumeActions=asyn
    state={...previous,...incoming};
    if(keepTx.length)state.transactions=keepTx;
    return state;
+ }
+ let fullTransactionsLoaded=false, fullTransactionsLoading=null;
+ async function loadFullTransactionLeaderboard(){
+   if(fullTransactionsLoaded)return true;
+   if(fullTransactionsLoading)return fullTransactionsLoading;
+   fullTransactionsLoading=(async()=>{
+     try{
+       const response=await fetch(apiBase+'/api/market/transactions?_np_full='+Date.now(),{cache:'no-store',headers:{Accept:'application/json'}});
+       if(!response.ok)return false;
+       const payload=await response.json();
+       if(payload.complete!==true||!Array.isArray(payload.data)||!payload.data.length){
+         state={...roots(),__npTransactionLoadMessage:'The complete transaction leaderboard is not ready yet.'};
+         return false;
+       }
+       const rows=payload.data.map(x=>({...x,symbol:symbol(x),transactions:num(x.transactions)})).filter(x=>x.symbol&&x.transactions!==null).sort((a,b)=>b.transactions-a.transactions);
+       state={...roots(),transactions:rows,topTransactions:rows,__npTransactionSource:payload.source,__npTransactionBusinessDate:payload.businessDate};
+       fullTransactionsLoaded=true;
+       return true;
+     }catch(e){return false;}
+     finally{fullTransactionsLoading=null;}
+   })();
+   return fullTransactionsLoading;
  }
  window.addEventListener('pulse-central-snapshot',e=>{mergeSnapshot(e.detail||{});paint();});
  // Initial state and direct API refresh make the view work even if the legacy render event fires early.
@@ -10508,7 +10530,7 @@ const priorLoad=window.loadPriceVolumeActions;window.loadPriceVolumeActions=asyn
      paint();
    }catch(e){/* Keep the existing market data and never invent transaction counts. */}
  }
- loadVerifiedTransactionCounts();
+ // Full verified daily transaction totals are loaded from /api/market/transactions on demand.
 })();
 </script>
 
