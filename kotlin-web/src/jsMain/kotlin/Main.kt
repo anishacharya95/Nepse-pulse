@@ -33,8 +33,10 @@ private fun fmt(value: Double?): String {
     return value.toLong().toString().reversed().chunked(3).joinToString(",").reversed()
 }
 
+private fun fixed(value: Double): String = js("Number(value).toFixed(2)") as String
+
 private fun pct(value: Double?): String =
-    if (value == null) "—" else (if (value > 0) "+" else "") + "%.2f".format(value) + "%"
+    if (value == null) "—" else (if (value > 0) "+" else "") + fixed(value) + "%"
 
 private fun rowsOf(value: dynamic): List<dynamic> {
     if (value == null || value == undefined) return emptyList()
@@ -84,7 +86,7 @@ private fun render(root: HTMLElement, payload: dynamic, search: String = "") {
     indexCard.appendChild(el("div", "card-kicker", "NEPSE INDEX"))
     indexCard.appendChild(el("div", "index-value", fmt(indexValue)))
     val change = el("div", if ((indexChange ?: 0.0) >= 0) "positive index-change" else "negative index-change",
-        (if ((indexChange ?: 0.0) > 0) "+" else "") + (indexChange?.let { "%.2f".format(it) } ?: "—") + "  ·  " + pct(indexPct))
+        (if ((indexChange ?: 0.0) > 0) "+" else "") + (indexChange?.let { fixed(it) } ?: "—") + "  ·  " + pct(indexPct))
     indexCard.appendChild(change)
     indexCard.appendChild(el("div", "market-state", marketLabel))
     hero.appendChild(indexCard)
