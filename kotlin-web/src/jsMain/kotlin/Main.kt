@@ -6,6 +6,14 @@ import kotlin.js.Promise
 
 private const val API_BASE = "https://nepse-pulse-1.onrender.com"
 private var supabaseClient: dynamic = null
+private var currentSearch = ""
+private var currentSelectedSymbol = ""
+private var currentFilterMode = "all"
+private var accountExpanded = false
+private var authEmailDraft = ""
+private var authPasswordDraft = ""
+private var authPhoneDraft = ""
+private var authOtpDraft = ""
 
 private fun initializeSupabase() {
     val host = window.asDynamic()
@@ -98,6 +106,9 @@ private fun rowsOf(value: dynamic): List<dynamic> {
 }
 
 private fun render(root: HTMLElement, payload: dynamic, search: String = "", selectedSymbol: String = "", filterMode: String = "all") {
+    currentSearch = search
+    currentSelectedSymbol = selectedSymbol
+    currentFilterMode = filterMode
     val data = if (payload.data != null && payload.data != undefined) payload.data else payload
     val live = rowsOf(data.live)
     val indexRows = rowsOf(data.index)
@@ -134,7 +145,7 @@ private fun render(root: HTMLElement, payload: dynamic, search: String = "", sel
     shell.appendChild(header)
 
     val accountPanel = el("section", "account-panel")
-    accountPanel.style.display = "none"
+    accountPanel.style.display = if (accountExpanded) "block" else "none"
     accountPanel.appendChild(el("div", "eyebrow", "SUPABASE ACCOUNT"))
     accountPanel.appendChild(el("h2", "", "Sign in to NEPSE Pulse"))
     accountPanel.appendChild(el("p", "account-copy", "Use your existing NEPSE Pulse account to access cloud features."))
@@ -142,10 +153,14 @@ private fun render(root: HTMLElement, payload: dynamic, search: String = "", sel
     emailInput.type = "email"
     emailInput.placeholder = "Email address"
     emailInput.autocomplete = "email"
+    emailInput.value = authEmailDraft
+    emailInput.addEventListener("input", { _ -> authEmailDraft = emailInput.value })
     val passwordInput = document.createElement("input") as HTMLInputElement
     passwordInput.type = "password"
     passwordInput.placeholder = "Password"
     passwordInput.autocomplete = "current-password"
+    passwordInput.value = authPasswordDraft
+    passwordInput.addEventListener("input", { _ -> authPasswordDraft = passwordInput.value })
     val accountFields = el("div", "account-fields")
     accountFields.appendChild(emailInput)
     accountFields.appendChild(passwordInput)
@@ -239,10 +254,14 @@ private fun render(root: HTMLElement, payload: dynamic, search: String = "", sel
     val phoneInput = document.createElement("input") as HTMLInputElement
     phoneInput.type = "tel"
     phoneInput.placeholder = "Phone number with country code"
+    phoneInput.value = authPhoneDraft
+    phoneInput.addEventListener("input", { _ -> authPhoneDraft = phoneInput.value })
     val otpInput = document.createElement("input") as HTMLInputElement
     otpInput.type = "text"
     otpInput.inputMode = "numeric"
     otpInput.placeholder = "SMS verification code"
+    otpInput.value = authOtpDraft
+    otpInput.addEventListener("input", { _ -> authOtpDraft = otpInput.value })
     phoneFields.appendChild(phoneInput)
     phoneFields.appendChild(otpInput)
     accountPanel.appendChild(phoneFields)
@@ -291,7 +310,8 @@ private fun render(root: HTMLElement, payload: dynamic, search: String = "", sel
     cloudWatchlist.appendChild(el("div", "watchlist-items", "Sign in to load your saved symbols."))
     accountPanel.appendChild(cloudWatchlist)
     accountButton.addEventListener("click", { _ ->
-        accountPanel.style.display = if (accountPanel.style.display == "none") "block" else "none"
+        accountExpanded = !accountExpanded
+        accountPanel.style.display = if (accountExpanded) "block" else "none"
     })
     if (supabaseClient != null) {
         (supabaseClient.auth.getSession() as Promise<dynamic>).then { result: dynamic ->
@@ -567,7 +587,7 @@ private fun refresh(root: HTMLElement) {
         response.json() as Promise<dynamic>
     }.then { payload: dynamic ->
         if (payload.ok == false) throw IllegalStateException(pick(payload, "error")?.toString() ?: "Market service returned an error")
-        render(root, payload)
+        render(root, payload, currentSearch, currentSelectedSymbol, currentFilterMode)
         null
     }.catch { error: Throwable ->
         showError(root, error.message ?: "Network error")
