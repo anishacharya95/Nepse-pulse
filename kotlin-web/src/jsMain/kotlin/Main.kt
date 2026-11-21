@@ -1,5 +1,4 @@
 import kotlinx.browser.document
-import kotlinx.browser.window
 import org.w3c.dom.HTMLElement
 
 private fun element(tag: String, className: String = "", text: String = ""): HTMLElement {
@@ -45,8 +44,7 @@ fun main() {
     val note = element("section", "panel")
     note.appendChild(element("p", "muted", "Feature parity is not claimed yet. Each original screen and API must be ported and tested before this Kotlin site replaces the production website."))
     shell.appendChild(note)
-    root.replaceChildren(shell)
-
-    // Keep runtime diagnostics visible without exposing Supabase credentials.
-    window.console.info("NEPSE Pulse Kotlin/JS migration shell started")
+    // Append rather than Element.replaceChildren, which is not exposed by the
+    // Kotlin DOM compatibility declarations used by this project.
+    root.appendChild(shell)
 }
