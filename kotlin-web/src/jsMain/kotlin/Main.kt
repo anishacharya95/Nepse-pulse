@@ -286,6 +286,10 @@ private fun render(root: HTMLElement, payload: dynamic, search: String = "", sel
             null
         }
     }
+    val cloudWatchlist = el("div", "cloud-watchlist")
+    cloudWatchlist.appendChild(el("div", "eyebrow", "YOUR CLOUD WATCHLIST"))
+    cloudWatchlist.appendChild(el("div", "watchlist-items", "Sign in to load your saved symbols."))
+    accountPanel.appendChild(cloudWatchlist)
     accountButton.addEventListener("click", { _ ->
         accountPanel.style.display = if (accountPanel.style.display == "none") "block" else "none"
     })
@@ -293,6 +297,22 @@ private fun render(root: HTMLElement, payload: dynamic, search: String = "", sel
         (supabaseClient.auth.getSession() as Promise<dynamic>).then { result: dynamic ->
             val user = result.data?.session?.user
             accountStatus.textContent = if (user != null) "Signed in as " + user.email.toString() else "Not signed in."
+            if (user != null) {
+                (supabaseClient.from("watchlists").select("symbol").order("symbol") as Promise<dynamic>).then { watchResult: dynamic ->
+                    val items = cloudWatchlist.querySelector(".watchlist-items") as? HTMLElement
+                    if (items != null) {
+                        items.textContent = ""
+                        val symbols = rowsOf(watchResult.data).mapNotNull { pick(it, "symbol")?.toString() }
+                        if (symbols.isEmpty()) items.textContent = "No saved symbols yet."
+                        else symbols.forEach { symbol -> items.appendChild(el("span", "watchlist-symbol", symbol)) }
+                    }
+                    null
+                }.catch { error: Throwable ->
+                    val items = cloudWatchlist.querySelector(".watchlist-items") as? HTMLElement
+                    if (items != null) items.textContent = error.message ?: "Could not load watchlist."
+                    null
+                }
+            }
             null
         }.catch { _ -> null }
     }
