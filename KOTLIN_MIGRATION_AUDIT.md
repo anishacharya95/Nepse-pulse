@@ -79,11 +79,13 @@ The current workflow also includes consent handling, adaptive banner positioning
 - [ ] Port portfolio, dividend, cloud watchlist and alert persistence.
 - [ ] Port Supabase Auth flows and OAuth return/deep links.
 - [ ] Port account deletion and policy screens.
-- [ ] Build native Android Compose UI (replace the current WebView only after feature parity).
-- [ ] Integrate native AdMob consent/banner/interstitial/app-open placements and verify policy behavior.
+- [ ] Package the Kotlin/JS web app in the Capacitor Android container and verify HTTPS-origin routing/OAuth return behavior.
+- [ ] Verify native AdMob consent/banner/interstitial/app-open placements and policy behavior in debug/release builds.
 - [ ] Add signed release APK/AAB using the existing upload/signing secrets; never commit keystore files.
 - [ ] Run API, UI, Android and regression tests before production cutover.
 
 ## Current branch status
 
-The first Kotlin/JS shell and CI validation workflow are scaffolding only. It is not a replacement for the production site and does not claim feature parity. Existing main-branch website, backend, Supabase and Android build are untouched.
+The Kotlin/JS production bundle has passed CI compilation. The migration dashboard currently includes the Render market API connection, index summary, provider-reported turnover, price-pair-based breadth, market movers, gainers/losers filters, searchable live rows and a clickable Stock X-Ray snapshot. A separate Android workflow now compiles the Kotlin/JS bundle, packages it into a Capacitor Android app, and carries forward the existing AdMob consent and ad-placement script/IDs.
+
+The Android APK/AAB pipeline is still being validated. No successful APK/AAB artifact is claimed until the current GitHub Actions run completes and the artifacts are checked. The current Kotlin app is an incremental migration, not feature parity: the full stock research, TradingView chart UI, screeners, floorsheet/broker tools, portfolio, Supabase auth/watchlists/alerts, corporate actions and IPO flows remain to be ported and tested. Existing main-branch website, backend, Supabase and Android build are untouched.
