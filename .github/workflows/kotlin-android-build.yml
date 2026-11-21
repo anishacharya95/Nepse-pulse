@@ -105,18 +105,27 @@ jobs:
 
           variables = Path("android/variables.gradle")
           if variables.exists():
-              s = variables.read_text()
-              for key, value in (("minSdkVersion", 24), ("targetSdkVersion", 36), ("compileSdkVersion", 36)):
-                  s = re.sub(r"(?m)^(\\s*" + key + r"\\s*=\\s*)\\d+", lambda m: m.group(1) + str(value), s)
-              variables.write_text(s)
+              lines = variables.read_text().splitlines()
+              for i, line in enumerate(lines):
+                  for key, value in (("minSdkVersion", 24), ("targetSdkVersion", 36), ("compileSdkVersion", 36)):
+                      if re.match(r"^\\s*" + key + r"\\s*=", line):
+                          lines[i] = re.sub(r"=\\s*\\d+", "= " + str(value), line)
+              variables.write_text("\\n".join(lines) + "\\n")
 
           gradle = Path("android/app/build.gradle")
-          s = gradle.read_text()
-          s, count = re.subn(r"(?m)^(\\s*versionCode\\s+)\\d+", r"\\g<1>10", s, count=1)
-          if not count:
+          lines = gradle.read_text().splitlines()
+          version_code_set = False
+          for i, line in enumerate(lines):
+              stripped = line.strip()
+              indent = line[:len(line) - len(line.lstrip())]
+              if stripped.startswith("versionCode "):
+                  lines[i] = indent + "versionCode 10"
+                  version_code_set = True
+              elif stripped.startswith("versionName "):
+                  lines[i] = indent + 'versionName "2.0.0"'
+          if not version_code_set:
               raise SystemExit("Could not set Android versionCode")
-          s = re.sub(r"(?m)^(\\s*versionName\\s+)[\\\"]?[^\\\"\\n]+[\\\"]?", r'\\g<1>"2.0.0"', s, count=1)
-          gradle.write_text(s)
+          gradle.write_text("\\n".join(lines) + "\\n")
           print("Configured minSdk 24, target/compile SDK 36, versionCode 10.")
           PY
 
