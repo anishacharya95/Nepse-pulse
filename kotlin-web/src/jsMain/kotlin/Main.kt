@@ -91,7 +91,7 @@ private fun summaryValue(summary: dynamic, vararg labels: String): Double? {
 
 private fun fmt(value: Double?): String {
     if (value == null) return "—"
-    return value.toLong().toString().reversed().chunked(3).joinToString(",").reversed()
+    return js("Number(value).toLocaleString('en-IN', { maximumFractionDigits: 2 })") as String
 }
 
 private fun fixed(value: Double): String = js("Number(value).toFixed(2)") as String
