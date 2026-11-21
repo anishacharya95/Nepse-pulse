@@ -534,6 +534,40 @@ fun flattenPairs(value: dynamic, prefix: String = "", depth: Int = 0): List<Pair
     return out
 }
 
+
+private fun fundamentalKey(value: String): String =
+    value.lowercase().filter { it.isLetterOrDigit() }
+
+private fun findFundamentalValue(
+    source: dynamic,
+    aliases: Set<String>,
+    depth: Int = 0
+): dynamic {
+    if (source == null || source == undefined || depth > 5) return null
+    val names = keysOf(source)
+    for (key in names) {
+        val item = source[key]
+        if (item == null || item == undefined) continue
+        if (fundamentalKey(key) in aliases && (item is String || item is Number)) return item
+    }
+    for (key in names) {
+        val item = source[key]
+        if (item != null && item != undefined && !(item is String) && !(item is Number) && !(item is Boolean)) {
+            val found = findFundamentalValue(item, aliases, depth + 1)
+            if (found != null && found != undefined) return found
+        }
+    }
+    return null
+}
+
+private fun fundamentalNumber(source: dynamic, vararg aliases: String): Double? {
+    val value = findFundamentalValue(source, aliases.map { fundamentalKey(it) }.toSet())
+    return if (value == null || value == undefined) null else num(value)
+}
+
+private fun fundamentalDisplay(value: Double?, suffix: String = ""): String =
+    value?.let { fixed(it, 2) + suffix } ?: "Not reported"
+
 fun stockXrayScreen(symbol: String = ""): HTMLElement {
     val root = el("div", "screen")
     root.appendChild(pageHead(
@@ -701,40 +735,72 @@ fun stockXrayScreen(symbol: String = ""): HTMLElement {
         }
 
         loadFundamentals = { pane ->
-            pane.appendChild(skeleton(160))
+            pane.appendChild(skeleton(180))
             Http.get("/api/stock-xray/" + encode(activeSymbol), ttlMs = 600_000.0, onData = { payload ->
                 pane.innerHTML = ""
+                val source = payload?.fundamentals ?: payload
+                val profile = payload?.profile ?: payload?.company ?: source
+                val quotePrice = quote?.ltp
+                val eps = fundamentalNumber(source, "eps", "earningPerShare", "earningsPerShare", "basicEps", "dilutedEps")
+                    ?: fundamentalNumber(profile, "eps", "earningPerShare", "earningsPerShare", "basicEps", "dilutedEps")
+                val bookValueDirect = fundamentalNumber(source, "bookValuePerShare", "bookValue", "netWorthPerShare", "bvps")
+                    ?: fundamentalNumber(profile, "bookValuePerShare", "bookValue", "netWorthPerShare", "bvps")
+                val netProfit = fundamentalNumber(source, "netProfit", "profitForTheYear", "profitAfterTax", "netIncome", "profit")
+                val paidUp = fundamentalNumber(source, "paidUpCapital", "paidupCapital", "paidUpCapitalAmount")
+                val reserves = fundamentalNumber(source, "reservesAndSurplus", "reserveAndSurplus", "retainedEarnings", "generalReserve")
+                val totalShares = fundamentalNumber(source, "totalListedShares", "listedShares", "totalShares", "numberOfShares")
+                val totalEquity = fundamentalNumber(source, "totalEquity", "shareholdersEquity", "netWorth")
+                val totalAssets = fundamentalNumber(source, "totalAssets", "assets")
+                val faceValue = fundamentalNumber(source, "faceValue", "parValue")
+                val shares = totalShares ?: if (paidUp != null && (faceValue ?: 0.0) > 0.0) paidUp / faceValue!! else null
+                val bookValue = bookValueDirect ?: if (shares != null && shares > 0.0 && totalEquity != null) totalEquity / shares else null
+                val pe = fundamentalNumber(source, "peRatio", "priceEarningsRatio", "priceToEarnings")
+                    ?: if (quotePrice != null && eps != null && eps > 0.0) quotePrice / eps else null
+                val pb = fundamentalNumber(source, "pbRatio", "priceBookRatio", "priceToBook")
+                    ?: if (quotePrice != null && bookValue != null && bookValue > 0.0) quotePrice / bookValue else null
+                val roe = fundamentalNumber(source, "roe", "returnOnEquity")
+                    ?: if (netProfit != null && totalEquity != null && totalEquity > 0.0) netProfit / totalEquity * 100.0 else null
+                val roa = fundamentalNumber(source, "roa", "returnOnAssets")
+                    ?: if (netProfit != null && totalAssets != null && totalAssets > 0.0) netProfit / totalAssets * 100.0 else null
+
                 val cardNode = card()
-                cardNode.appendChild(cardHead("Fundamentals", "Valuation, profitability and capital structure"))
-                val fundamentals = payload?.fundamentals ?: payload
-                val skip = setOf("company", "profile", "ok", "symbol", "securityid", "id")
-                val pairs = ArrayList<Pair<String, String>>()
-                val names = keysOf(fundamentals)
-                val count = names.size
-                for (i in 0 until count) {
-                    val key = names[i].toString()
-                    if (key.lowercase() in skip) continue
-                    val item = fundamentals[key]
-                    if (item == null || item == undefined) continue
-                    if (item is Number) {
-                        pairs.add(key.replace("_", " ") to price(item.toDouble()))
-                    } else if (item is String) {
-                        pairs.add(key.replace("_", " ") to item)
-                    } else {
-                        val nested = flattenPairs(item)
-                        for ((label, value) in nested) pairs.add(key + " · " + label to value)
-                    }
-                }
-                if (pairs.isEmpty()) {
-                    cardNode.appendChild(emptyState("No fundamental metrics", "The provider returned a company profile without valuation metrics for this symbol."))
-                } else {
-                    val grid = el("div", "kv-grid")
-                    for ((label, value) in pairs.take(28)) {
-                        grid.appendChild(pair(label.replaceFirstChar { it.uppercase() }.take(46), value))
-                    }
-                    cardNode.appendChild(grid)
-                }
+                cardNode.appendChild(cardHead("Key financial metrics", activeSymbol + " · reported values where available"))
+                val metrics = el("div", "kv-grid")
+                metrics.appendChild(pair("EPS", fundamentalDisplay(eps, " per share")))
+                metrics.appendChild(pair("Book value / share", fundamentalDisplay(bookValue)))
+                metrics.appendChild(pair("P/E ratio", fundamentalDisplay(pe, "×")))
+                metrics.appendChild(pair("P/B ratio", fundamentalDisplay(pb, "×")))
+                metrics.appendChild(pair("ROE", fundamentalDisplay(roe, "%")))
+                metrics.appendChild(pair("ROA", fundamentalDisplay(roa, "%")))
+                metrics.appendChild(pair("Net profit", netProfit?.let { rupees(it) } ?: "Not reported"))
+                metrics.appendChild(pair("Paid-up capital", paidUp?.let { rupees(it) } ?: "Not reported"))
+                metrics.appendChild(pair("Reserves & surplus", reserves?.let { rupees(it) } ?: "Not reported"))
+                metrics.appendChild(pair("Total equity", totalEquity?.let { rupees(it) } ?: "Not reported"))
+                metrics.appendChild(pair("Total assets", totalAssets?.let { rupees(it) } ?: "Not reported"))
+                metrics.appendChild(pair("Shares outstanding", shares?.let { integer(it) } ?: "Not reported"))
+                cardNode.appendChild(metrics)
+                cardNode.appendChild(el("p", "muted small", "P/E and P/B are calculated only when the latest price and the corresponding per-share metric are available. Missing figures are shown as Not reported rather than estimated."))
                 pane.appendChild(cardNode)
+
+                val dividends = payload?.dividends ?: source?.dividends
+                if (dividends != null && dividends != undefined) {
+                    val dividendCard = card()
+                    dividendCard.appendChild(cardHead("Dividend history", "Company-reported corporate actions"))
+                    val rows = if (dividends is Array<dynamic>) dividends else arrayOf(dividends)
+                    val shown = el("div", "kv-grid")
+                    val limit = minOf(rows.length as Int, 12)
+                    for (i in 0 until limit) {
+                        val item = rows[i]
+                        val year = findFundamentalValue(item, setOf("fiscalyear", "year", "date", "announcementdate"))
+                        val cash = findFundamentalValue(item, setOf("cashdividend", "cashdividendpercent", "cashdividendpercentage"))
+                        val bonus = findFundamentalValue(item, setOf("bonusshare", "bonussharepercent", "bonuspercentage"))
+                        val label = (year?.toString() ?: "Dividend " + (i + 1))
+                        shown.appendChild(pair(label, "Cash " + (cash?.toString() ?: "—") + " · Bonus " + (bonus?.toString() ?: "—")))
+                    }
+                    if (limit > 0) dividendCard.appendChild(shown)
+                    else dividendCard.appendChild(el("p", "muted small", "No dividend records were returned for this company."))
+                    pane.appendChild(dividendCard)
+                }
             }, onError = { message ->
                 pane.innerHTML = ""
                 pane.appendChild(emptyState("Fundamentals unavailable", message))
