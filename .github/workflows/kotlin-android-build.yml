@@ -101,13 +101,17 @@ jobs:
           npx cap add android
           npx cap sync android
 
-      - name: Generate launcher icon and splash screen
+      - name: Generate NEPSE Pulse launcher icon and splash screen
         run: |
-          test -s resources/icon.png
-          test -s resources/splash.png
-          npx @capacitor/assets generate --android --assetPath resources \
-            --iconBackgroundColor "#061020" --splashBackgroundColor "#061020"
-          echo "Generated adaptive launcher icon and splash screen from project artwork."
+          python3 -m pip install --quiet --disable-pip-version-check pillow
+          test -s nepse-pulse-exact-icon.png
+          # Uses the exact repository artwork for both the launcher icon and the
+          # Android 12 / pre-12 splash screen. The overlay XML is copied over the
+          # generated project so a later `npx cap sync` cannot remove it.
+          python3 scripts/generate_android_branding.py android/app/src/main/res
+          test -s android/app/src/main/res/drawable-xxxhdpi/np_splash_logo.png
+          test -s android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
+          echo "Branded launcher and splash resources generated from nepse-pulse-exact-icon.png."
 
 
       - name: Set Android SDK levels and Play Store version
@@ -124,6 +128,19 @@ jobs:
                       if re.match(r"^\s*" + key + r"\s*=", line):
                           lines[i] = re.sub(r"=\s*\d+", "= " + str(value), line)
               variables.write_text("\n".join(lines) + "\n")
+
+          # compileSdk 36 needs AGP 8.9+; Capacitor's template pins an older
+          # plugin that only warns about SDK 36.
+          root_gradle = Path("android/build.gradle")
+          root_text = root_gradle.read_text()
+          root_text = re.sub(
+              r"com\\.android\\.tools\\.build:gradle:[0-9.]+",
+              "com.android.tools.build:gradle:8.9.2",
+              root_text,
+          )
+          if "com.android.tools.build:gradle:8.9.2" not in root_text:
+              raise SystemExit("Could not pin Android Gradle Plugin 8.9.2")
+          root_gradle.write_text(root_text)
 
           gradle = Path("android/app/build.gradle")
           lines = gradle.read_text().splitlines()
@@ -239,6 +256,70 @@ jobs:
           ET.indent(tree, space="    ")
           tree.write(p, encoding="utf-8", xml_declaration=True)
           print("Supabase OAuth deep-link callback configured on Capacitor MainActivity.")
+          PY
+
+      - name: Verify Capacitor plugins, SDK levels, deep link and branding
+        run: |
+          python3 - <<'PY'
+          import json, re, sys
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          errors = []
+          variables = Path("android/variables.gradle").read_text()
+          for key, expected in (("minSdkVersion", 24), ("targetSdkVersion", 36), ("compileSdkVersion", 36)):
+              match = re.search(r"^\s*" + key + r"\s*=\s*(\d+)", variables, re.MULTILINE)
+              if not match or int(match.group(1)) != expected:
+                  errors.append(f"{key} is not {expected}")
+
+          plugins = json.loads(Path("android/app/src/main/assets/capacitor.plugins.json").read_text())
+          registered = {entry.get("pkg", "") for entry in plugins}
+          for required in ("@capacitor/app", "@capacitor/browser"):
+              if required not in registered:
+                  errors.append(f"{required} is not registered in capacitor.plugins.json")
+
+          manifest = ET.parse("android/app/src/main/AndroidManifest.xml")
+          ns = "{http://schemas.android.com/apk/res/android}"
+          activity = next((a for a in manifest.getroot().iter("activity") if "MainActivity" in a.get(ns + "name", "")), None)
+          if activity is None:
+              errors.append("MainActivity is missing")
+          else:
+              if activity.get(ns + "launchMode") != "singleTask":
+                  errors.append("MainActivity launchMode is not singleTask")
+              data = [d for i in activity.findall("intent-filter") for d in i.findall("data")]
+              if not any(d.get(ns + "scheme") == "com.nepsepulse.app" and d.get(ns + "host") == "login-callback" for d in data):
+                  errors.append("OAuth deep-link intent filter is missing")
+
+          res = Path("android/app/src/main/res")
+          required_files = [
+              "values/styles.xml",
+              "values-v31/styles.xml",
+              "drawable/np_splash.xml",
+              "mipmap-anydpi-v26/ic_launcher.xml",
+              "mipmap-anydpi-v26/ic_launcher_round.xml",
+              "drawable-xxxhdpi/np_splash_logo.png",
+              "drawable-xxxhdpi/np_splash_icon.png",
+              "mipmap-xxxhdpi/ic_launcher.png",
+              "mipmap-xxxhdpi/ic_launcher_foreground.png",
+          ]
+          for relative in required_files:
+              if not (res / relative).is_file():
+                  errors.append(f"missing branding resource {relative}")
+          styles = (res / "values/styles.xml").read_text()
+          for marker in ("windowSplashScreenAnimatedIcon", "@drawable/np_splash", "@color/np_splash_background"):
+              if marker not in styles:
+                  errors.append(f"launch theme is missing {marker}")
+          v31 = (res / "values-v31/styles.xml").read_text()
+          if "android:windowSplashScreenAnimatedIcon" not in v31:
+              errors.append("Android 12 splash theme is incomplete")
+
+          if errors:
+              print("Android verification failed:")
+              for error in errors:
+                  print(" - " + error)
+              sys.exit(1)
+          print("Verified SDK 24/36, registered @capacitor/app + @capacitor/browser,")
+          print("singleTask OAuth deep link, and NEPSE Pulse launcher/splash resources.")
           PY
 
       - name: Build Debug APK with Google test ad units

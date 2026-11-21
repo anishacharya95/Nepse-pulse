@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark navy from the NEPSE Pulse artwork. -->
+    <color name="np_splash_background">#061020</color>
+    <color name="np_launcher_background">#061020</color>
+    <color name="colorPrimary">#061020</color>
+    <color name="colorPrimaryDark">#061020</color>
+    <color name="colorAccent">#16A34A</color>
+</resources>

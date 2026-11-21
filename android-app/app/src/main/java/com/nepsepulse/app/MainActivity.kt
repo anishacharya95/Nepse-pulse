@@ -1,22 +1,52 @@
 package com.nepsepulse.app
 
 import android.app.Activity
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.webkit.WebView
-import android.webkit.WebViewClient
+import android.view.ViewGroup
+import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
-import android.content.Intent
-import android.view.ViewGroup
+import android.webkit.WebView
+import android.webkit.WebViewClient
 
 class MainActivity : Activity() {
 
     private lateinit var webView: WebView
 
+    // A deep link can launch a cold process before the WebView has loaded the
+    // Kotlin app, so it is queued until onPageFinished.
+    private var pendingDeepLink: String? = null
+
     // Load the compiled Kotlin/JS app packaged into android_asset/www by CI.
     private val homeUrl = "https://anishacharya95.github.io/Nepse-pulse/"
+
+    /**
+     * Native side of the sign-in hand-off. The external provider page opens in
+     * the system browser; the Supabase redirect returns through the
+     * com.nepsepulse.app://login-callback intent filter and is delivered to the
+     * single WebView that holds the PKCE verifier.
+     */
+    private inner class NativeAppBridge {
+        @JavascriptInterface
+        fun openBrowser(url: String) {
+            if (url.isBlank()) return
+            runOnUiThread {
+                try {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    startActivity(intent)
+                } catch (_: Exception) {
+                }
+            }
+        }
+
+        @JavascriptInterface
+        fun isNative(): Boolean = true
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -27,6 +57,7 @@ class MainActivity : Activity() {
         webView.settings.domStorageEnabled = true
         webView.settings.allowFileAccess = false
         webView.settings.allowContentAccess = false
+        webView.addJavascriptInterface(NativeAppBridge(), "NP_NATIVE_APP")
 
         webView.webViewClient = object : WebViewClient() {
             // Keep the established HTTPS origin for Supabase OAuth/CORS while
@@ -81,6 +112,15 @@ class MainActivity : Activity() {
 
                 return true
             }
+
+            override fun onPageFinished(view: WebView, url: String?) {
+                super.onPageFinished(view, url)
+                val queued = pendingDeepLink
+                if (queued != null) {
+                    pendingDeepLink = null
+                    deliverDeepLink(queued)
+                }
+            }
         }
 
         webView.webChromeClient = WebChromeClient()
@@ -100,6 +140,7 @@ class MainActivity : Activity() {
         } else {
             webView.restoreState(savedInstanceState)
         }
+        handleIntent(intent)
     }
 
     /**
@@ -131,6 +172,39 @@ class MainActivity : Activity() {
             insets
         }
         webView.requestApplyInsets()
+    }
+
+    private fun jsString(value: String): String {
+        val escaped = value
+            .replace("\\", "\\\\")
+            .replace("'", "\\'")
+            .replace("\n", "\\n")
+            .replace("\r", "")
+        return "'" + escaped + "'"
+    }
+
+    private fun deliverDeepLink(rawUrl: String) {
+        if (rawUrl.isBlank()) return
+        if (webView.url == null) {
+            pendingDeepLink = rawUrl
+            return
+        }
+        val script = "(function(){var u=" + jsString(rawUrl) +
+            ";if(window.NP_onNativeDeepLink){window.NP_onNativeDeepLink(u);}return true;})()"
+        webView.evaluateJavascript(script, null)
+    }
+
+    private fun handleIntent(source: Intent?) {
+        val uri = source?.data ?: return
+        if (uri.scheme == "com.nepsepulse.app" && uri.host == "login-callback") {
+            deliverDeepLink(uri.toString())
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIntent(intent)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

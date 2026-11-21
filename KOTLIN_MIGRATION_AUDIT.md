@@ -70,10 +70,10 @@ Design system: dark/light themes with CSS variables, Inter + JetBrains Mono, rou
 
 ### Accounts
 - [ ] Email/password sign-in verified end-to-end with a real account (Supabase connectivity and error handling verified; no credentials available in this environment).
-- [ ] Google/Facebook OAuth round-trip verified on a device with provider configuration.
+- [ ] Google/Facebook OAuth round-trip verified on a device with provider configuration. The PKCE authorize URL, verifier persistence and callback exchange were verified in a browser; a live provider callback still needs the Supabase redirect allow-list and a Google test account.
 - [ ] Phone OTP verified with an SMS-enabled number.
-- [ ] Password-reset email delivered and deep link followed.
-- [x] Session restoration wiring, auth state subscription, sign-out binding.
+- [x] OAuth callback now extracts the authorization code, exchanges it (not the URL), handles provider errors, cold-start launch URLs, duplicate callbacks and browser cancellation.
+- [x] Session restoration wiring, auth state subscription, sign-out binding, Profile & Settings identity refresh.
 - [x] Cloud watchlist read/write/delete code paths use the existing schema and RLS.
 
 ## 4. Verification performed
@@ -98,7 +98,10 @@ Design system: dark/light themes with CSS variables, Inter + JetBrains Mono, rou
   - `apk/release/app-release.apk` 5.4 MB — production unit IDs (`.../8028868444`, `.../1639379056`, `.../9483086731`) and production app ID `ca-app-pub-1565800134063497~9972330494`; APK Signature Scheme v2 block present, `META-INF` has no v1 entries (modern v2/v3 signing).
   - `bundle/release/app-release.aab` 7.8 MB — `jarsigner -verify` passes, signer certificate valid until 2054-03-10.
   - Manifest in both APKs: package `com.nepsepulse.app`, versionName `2.1.0`, permissions INTERNET, ACCESS_NETWORK_STATE, AD_ID, AdServices, foreground service. Adaptive icons (`mipmap-anydpi-v26/ic_launcher.xml`, foreground/background, round) and splash images at ldpi→xxxhdpi, portrait, landscape and night variants are packaged from `resources/`.
-- Not verified here: full authenticated flows and native AdMob rendering on a device. This environment has no Android device/emulator and no Supabase test account.
+- Kotlin/JS production build passes (240 KiB minified).
+- Android Gradle build reproduced locally with the same CI steps and SDK 36: debug APK, release APK and AAB all build. Debug APK verified signed with the Android debug certificate; release artifacts are unsigned because no signing secrets exist in this environment. Manifest verified: package `com.nepsepulse.app`, minSdk 24, targetSdk 36, singleTask OAuth deep link, `@capacitor/app`, `@capacitor/browser` and AdMob registered, branded launcher and splash resources packaged.
+- Stock X-Ray fundamentals verified against live `/api/fundamentals/{symbol}` data for NABIL and NTC: reported EPS/P/E/book value/net profit, calculated P/B, dividend yield, market cap, TTM EPS/profit and annual ROE, with N/A for revenue, operating profit, assets and liabilities that the provider does not publish.
+- Not verified here: full authenticated flows on a physical device and native AdMob rendering. This environment has no Android device/emulator and no Supabase test account.
 
 ## 5. Known provider limitations
 
@@ -108,8 +111,9 @@ The Render service currently returns 404/500 (and missing CORS headers) for `/ap
 
 - Kotlin/JS production webpack bundle is copied into the Capacitor `android-web` directory (minified output preferred).
 - Capacitor 7 project generated in CI with app name `NEPSE Pulse`, package `com.nepsepulse.app`, SDK 24/36, versionCode 11, versionName 2.1.0.
-- Launcher icon and splash screen generated from `resources/icon.png` and `resources/splash.png` (derived from the existing artwork).
-- Deep-link intent filter for `com.nepsepulse.app://login-callback`, `singleTask` launch mode.
+- Launcher icon, adaptive icon and Android 12 / pre-12 splash screens generated from the exact `nepse-pulse-exact-icon.png` by `scripts/generate_android_branding.py`; the committed `android-overlay/` launch theme uses dark navy `#061020`.
+- Deep-link intent filter for `com.nepsepulse.app://login-callback`, `singleTask` launch mode, verified in the built manifest.
+- CI pins AGP 8.9.2 for compileSdk 36 and verifies plugin registration, SDK levels, the deep link and every branded resource before building.
 - AdMob app ID and the existing production unit IDs restored for release; Google test units used for the debug APK.
 - Release signing from repository secrets (`ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`); keystores are never committed.
 - Artifacts uploaded: debug APK, release APK, signed AAB (signing requires the secrets to be present).
@@ -118,6 +122,6 @@ The Render service currently returns 404/500 (and missing CORS headers) for `/ap
 
 - Install `app-release.apk` (or the debug APK) on a physical device and smoke-test launch, navigation and the WebView AdMob bridge.
 - Validate AdMob consent, adaptive banner, interstitial frequency and app-open behaviour in a debug build with test units. Debug builds keep the production app ID with test unit IDs; switch the manifest app ID to Google's test app ID if the account must never see debug requests.
-- Complete OAuth/OTP/reset verification with real provider accounts and confirm the Supabase redirect allow-list includes the production web origin and the Android deep link.
+- Complete OAuth/OTP/reset verification with real provider accounts. The Supabase redirect allow-list must include the production web origin and `com.nepsepulse.app://login-callback`.
 - Fix or replace the provider notice/event endpoints on Render so corporate actions and IPO data can populate.
 - Decide whether to publish the Kotlin/JS build as the main web experience; `main` still serves the legacy single-page app.

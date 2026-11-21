@@ -47,6 +47,7 @@ Open `http://localhost:3000`. Supabase and the Render API are loaded from their 
 - `core.kt` — API layer (TTL cache, request de-duplication, abort timeouts), market normalisation, formatting, OHLCV parsing, technical analysis, local storage.
 - `ui.kt` — design system: icons, cards, tables, states, toasts, modals, themes, canvas candlestick/area charts.
 - `auth.kt` — Supabase auth (email, Google, Facebook, phone OTP, reset, session, sign-out), cloud watchlist, OAuth deep-link exchange.
+- `fundamentals.kt` — NEPSE company fundamentals for Stock X-Ray: valuation, profitability, financial position, TTM calculations, reporting periods and honest N/A handling.
 - `screens_market.kt` — dashboard, market overview, Stock X-Ray, sectors, market structure.
 - `screens_flow.kt` — screener, quant, broker analytics, traders zone, AI tools.
 - `screens_floorsheet.kt` — floorsheet, broker aggregation, bulk and unusual scans.
@@ -68,11 +69,24 @@ Open `http://localhost:3000`. Supabase and the Render API are loaded from their 
 - Account deletion remains an operator-verified email request via `delete-account.html`.
 
 ## Android packaging
-
 `.github/workflows/kotlin-android-build.yml` compiles this module, copies the bundle into a Capacitor
-Android project (`com.nepsepulse.app`), generates the launcher icon and splash screen from `resources/`,
-configures AdMob and the OAuth deep link, builds a debug APK (test ads) and signed release APK/AAB
-(production ads) from repository secrets, then uploads the artifacts.
+Android project (`com.nepsepulse.app`), pins SDK 24/36 and AGP 8.9.2, configures AdMob and the OAuth
+deep link, builds a debug APK and a release APK/AAB (release signing requires repository secrets),
+then uploads the artifacts.
+
+### Native branding
+`scripts/generate_android_branding.py` uses the repository's existing `nepse-pulse-exact-icon.png` to
+generate every launcher density, the adaptive icon foreground and the Android 12 / pre-12 splash
+bitmaps. The committed XML in `android-overlay/` defines the dark-navy launch theme. Run
+`scripts/android-sync.sh` instead of a bare `npx cap sync android` so Capacitor's generated project is
+re-branded after every sync.
+
+### Provider sign-in
+OAuth uses PKCE and the app deep link `com.nepsepulse.app://login-callback`. The Supabase dashboard
+must list that exact URL (and `com.nepsepulse.app://login-callback/**`) under Authentication → URL
+Configuration → Redirect URLs, because Supabase validates `redirectTo` server-side. The app handles
+authorization codes, provider errors, cold-start launch URLs, duplicate callbacks and session
+restoration; the code is exchanged in the same WebView that stored the PKCE verifier.
 
 ## Data notes
 

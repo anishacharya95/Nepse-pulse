@@ -652,7 +652,13 @@ fun profileScreen(): HTMLElement {
 
     fun render() {
         body.innerHTML = ""
-        if (!Auth.signedIn) {
+        if (!Auth.signedIn && !Auth.ready) {
+            val waiting = card("auth-card")
+            waiting.appendChild(cardHead("Restoring your session", "Checking the Supabase session stored on this device"))
+            waiting.appendChild(skeleton(72))
+            waiting.appendChild(el("p", "muted small", "If this takes more than a few seconds, check your connection and reopen Profile & settings."))
+            body.appendChild(waiting)
+        } else if (!Auth.signedIn) {
             renderAuth()
         } else {
             renderAccount()
@@ -669,7 +675,7 @@ fun profileScreen(): HTMLElement {
         }
         panel.appendChild(tabs)
 
-        val status = el("p", "auth-status", if (Auth.client == null) "Supabase is not configured for this build." else "Secure session with Supabase Auth.")
+        val status = el("p", "auth-status", Auth.statusMessage())
         if (mode == "email") {
             val emailInput = field("Email address", "email")
             emailInput.autocomplete = "email"
@@ -766,7 +772,7 @@ fun profileScreen(): HTMLElement {
         google.onClick {
             status.textContent = "Opening Google…"
             Auth.startOAuth("google") { error ->
-                if (error != null) status.textContent = error else status.textContent = "Complete sign-in in the opened window."
+                status.textContent = if (error != null) error else Auth.statusMessage()
             }
         }
         val facebook = el("button", "btn btn-oauth facebook")
@@ -775,12 +781,21 @@ fun profileScreen(): HTMLElement {
         facebook.onClick {
             status.textContent = "Opening Facebook…"
             Auth.startOAuth("facebook") { error ->
-                if (error != null) status.textContent = error else status.textContent = "Complete sign-in in the opened window."
+                status.textContent = if (error != null) error else Auth.statusMessage()
             }
         }
         oauth.add(google, facebook)
         panel.appendChild(oauth)
-        panel.appendChild(el("p", "muted small", "On Android, provider sign-in returns through the com.nepsepulse.app://login-callback deep link."))
+        val sessionRow = el("div", "inline-actions")
+        sessionRow.appendChild(actionButton("Refresh session", "ghost", "refresh") {
+            status.textContent = "Checking your session…"
+            Auth.refreshSession {
+                status.textContent = Auth.statusMessage()
+                render()
+            }
+        })
+        panel.appendChild(sessionRow)
+        panel.appendChild(el("p", "muted small", "On Android, provider sign-in returns through the com.nepsepulse.app://login-callback deep link. The session is stored on this device and restored when the app reopens."))
         body.appendChild(panel)
     }
 
@@ -801,6 +816,8 @@ fun profileScreen(): HTMLElement {
         grid.appendChild(pair("Phone", Auth.phone()))
         grid.appendChild(pair("User ID", text(Auth.user?.id)?.take(8)?.plus("…") ?: "—"))
         grid.appendChild(pair("Joined", shortDate(text(Auth.user?.created_at)?.take(10) ?: "")))
+        grid.appendChild(pair("Last sign-in", shortDate(text(Auth.user?.last_sign_in_at)?.take(10) ?: "")))
+        grid.appendChild(pair("Session", if (Auth.signedIn) "Active · restored automatically" else "Not signed in"))
         identity.appendChild(grid)
         body.appendChild(identity)
 

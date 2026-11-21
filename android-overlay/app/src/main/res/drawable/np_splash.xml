@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Pre-Android-12 launch background: the exact NEPSE Pulse icon centred on
+    dark navy. The density-specific bitmap keeps the icon proportional.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/np_splash_background" />
+    <item android:gravity="center">
+        <bitmap
+            android:gravity="center"
+            android:filter="true"
+            android:src="@drawable/np_splash_logo" />
+    </item>
+</layer-list>

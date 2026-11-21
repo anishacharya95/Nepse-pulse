@@ -6,3 +6,4 @@ public/charting_library/
 kotlin-web/build/
 kotlin-web/.gradle/
 kotlin-web/build/web-preview/
+artifacts/

@@ -534,6 +534,17 @@ fun flattenPairs(value: dynamic, prefix: String = "", depth: Int = 0): List<Pair
     return out
 }
 
+/**
+ * Loads the fundamentals bundle, falling back to the Stock X-Ray endpoint when
+ * the richer fundamentals route is unavailable. Both routes are served by the
+ * existing Render backend; no new data service is introduced.
+ */
+fun loadFundamentalsPayload(symbol: String, onData: (dynamic) -> Unit, onError: (String) -> Unit) {
+    Http.get("/api/fundamentals/" + encode(symbol), ttlMs = 600_000.0, onData = onData, onError = {
+        Http.get("/api/stock-xray/" + encode(symbol), ttlMs = 600_000.0, onData = onData, onError = onError)
+    })
+}
+
 fun stockXrayScreen(symbol: String = ""): HTMLElement {
     val root = el("div", "screen")
     root.appendChild(pageHead(
@@ -671,8 +682,16 @@ fun stockXrayScreen(symbol: String = ""): HTMLElement {
 
         loadOverview = { pane ->
             pane.appendChild(skeleton(120))
-            Http.get("/api/company/" + encode(activeSymbol), ttlMs = 600_000.0, onData = { payload ->
-                pane.innerHTML = ""
+            val requestSymbol = activeSymbol
+            val profileHost = el("div")
+            profileHost.appendChild(skeleton(120))
+            pane.appendChild(profileHost)
+            val summaryHost = el("div")
+            summaryHost.appendChild(skeleton(90))
+            pane.appendChild(summaryHost)
+            Http.get("/api/company/" + encode(requestSymbol), ttlMs = 600_000.0, onData = { payload ->
+                if (activeSymbol != requestSymbol) return@get
+                profileHost.innerHTML = ""
                 val profileCard = card()
                 profileCard.appendChild(cardHead("Company profile", "Provider-reported listing information"))
                 val details = payload?.details ?: payload?.company
@@ -686,10 +705,19 @@ fun stockXrayScreen(symbol: String = ""): HTMLElement {
                     for ((label, value) in fields.take(12)) grid.appendChild(pair(label.replaceFirstChar { it.uppercase() }, value))
                     profileCard.appendChild(grid)
                 }
-                pane.appendChild(profileCard)
+                profileHost.appendChild(profileCard)
             }, onError = { message ->
-                pane.innerHTML = ""
-                pane.appendChild(emptyState("Company profile unavailable", message))
+                if (activeSymbol != requestSymbol) return@get
+                profileHost.innerHTML = ""
+                profileHost.appendChild(emptyState("Company profile unavailable", message))
+            })
+            loadFundamentalsPayload(requestSymbol, { payload ->
+                if (activeSymbol != requestSymbol) return@loadFundamentalsPayload
+                summaryHost.innerHTML = ""
+                summaryHost.appendChild(fundamentalsSummary(payload))
+            }, {
+                if (activeSymbol != requestSymbol) return@loadFundamentalsPayload
+                summaryHost.innerHTML = ""
             })
             val watch = card()
             watch.appendChild(cardHead("Track this stock", "Your watchlist syncs with Supabase when signed in"))
@@ -701,43 +729,17 @@ fun stockXrayScreen(symbol: String = ""): HTMLElement {
         }
 
         loadFundamentals = { pane ->
+            val requestSymbol = activeSymbol
+            pane.innerHTML = ""
             pane.appendChild(skeleton(160))
-            Http.get("/api/stock-xray/" + encode(activeSymbol), ttlMs = 600_000.0, onData = { payload ->
+            loadFundamentalsPayload(requestSymbol, { payload ->
+                if (activeSymbol != requestSymbol || tab != "fundamentals") return@loadFundamentalsPayload
                 pane.innerHTML = ""
-                val cardNode = card()
-                cardNode.appendChild(cardHead("Fundamentals", "Valuation, profitability and capital structure"))
-                val fundamentals = payload?.fundamentals ?: payload
-                val skip = setOf("company", "profile", "ok", "symbol", "securityid", "id")
-                val pairs = ArrayList<Pair<String, String>>()
-                val names = keysOf(fundamentals)
-                val count = names.size
-                for (i in 0 until count) {
-                    val key = names[i].toString()
-                    if (key.lowercase() in skip) continue
-                    val item = fundamentals[key]
-                    if (item == null || item == undefined) continue
-                    if (item is Number) {
-                        pairs.add(key.replace("_", " ") to price(item.toDouble()))
-                    } else if (item is String) {
-                        pairs.add(key.replace("_", " ") to item)
-                    } else {
-                        val nested = flattenPairs(item)
-                        for ((label, value) in nested) pairs.add(key + " · " + label to value)
-                    }
-                }
-                if (pairs.isEmpty()) {
-                    cardNode.appendChild(emptyState("No fundamental metrics", "The provider returned a company profile without valuation metrics for this symbol."))
-                } else {
-                    val grid = el("div", "kv-grid")
-                    for ((label, value) in pairs.take(28)) {
-                        grid.appendChild(pair(label.replaceFirstChar { it.uppercase() }.take(46), value))
-                    }
-                    cardNode.appendChild(grid)
-                }
-                pane.appendChild(cardNode)
-            }, onError = { message ->
+                pane.appendChild(fundamentalsView(requestSymbol, payload))
+            }, { message ->
+                if (activeSymbol != requestSymbol) return@loadFundamentalsPayload
                 pane.innerHTML = ""
-                pane.appendChild(emptyState("Fundamentals unavailable", message))
+                pane.appendChild(errorState(message) { tab = "fundamentals"; paintTabs() })
             })
         }
 
