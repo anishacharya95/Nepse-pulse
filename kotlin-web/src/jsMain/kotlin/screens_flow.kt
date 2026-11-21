@@ -338,7 +338,7 @@ fun loadFloorsheet(force: Boolean = false, done: (Boolean, String?) -> Unit) {
         done(true, null)
         return
     }
-    Http.get("/api/floorsheet?limit=5000", ttlMs = 120_000.0, force = force, timeoutMs = 120_000, onData = { payload ->
+    Http.get("/api/floorsheet", ttlMs = 120_000.0, force = force, timeoutMs = 120_000, onData = { payload ->
         val rows = rowsOf(payload.data)
         if (rows.isEmpty()) {
             FloorsheetStore.error = "The provider returned no executed contracts for this session."
