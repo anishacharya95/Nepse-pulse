@@ -19,11 +19,54 @@ private fun number(value: dynamic): Double? {
     return parsed
 }
 
+private fun normKey(value: String): String = value.lowercase().filter { it.isLetterOrDigit() }
+
 private fun pick(obj: dynamic, vararg keys: String): dynamic {
     if (obj == null || obj == undefined) return null
-    for (key in keys) {
-        val value = obj[key]
-        if (value != null && value != undefined && value.toString().isNotBlank()) return value
+    val wanted = keys.map { normKey(it) }.toSet()
+    val names = js("Object.keys(obj)") as Array<String>
+    for (name in names) {
+        if (normKey(name) in wanted) {
+            val value = obj[name]
+            if (value != null && value != undefined && value.toString().isNotBlank()) return value
+        }
+    }
+    return null
+}
+
+private fun breadth(rows: List<dynamic>): Triple<Int?, Int?, Int?> {
+    val seen = mutableSetOf<String>()
+    var advancing = 0
+    var declining = 0
+    var unchanged = 0
+    for (row in rows) {
+        val symbol = pick(row, "symbol", "stockSymbol", "securitySymbol", "ticker", "scrip", "code", "security_code")
+            ?.toString()?.trim()?.uppercase() ?: continue
+        if (symbol.isBlank() || !seen.add(symbol)) continue
+        val close = number(pick(row, "ltp", "closePrice", "closingPrice", "lastTradedPrice", "lastPrice", "close", "price", "currentPrice"))
+        val previous = number(pick(row, "prev", "previousDayClosePrice", "previousClose", "previousClosingPrice", "prevClose", "previousPrice", "previousDayClose", "previousDayClosingPrice"))
+        if (close == null || previous == null || close <= 0.0 || previous <= 0.0) continue
+        when {
+            close > previous -> advancing++
+            close < previous -> declining++
+            else -> unchanged++
+        }
+    }
+    return if (advancing + declining + unchanged > 0) Triple(advancing, declining, unchanged)
+    else Triple(null, null, null)
+}
+
+private fun summaryValue(summary: dynamic, vararg labels: String): Double? {
+    val entries = rowsOf(summary).ifEmpty {
+        if (summary != null && summary != undefined) listOf(summary) else emptyList()
+    }
+    val targets = labels.map { normKey(it) }
+    for (item in entries) {
+        val label = pick(item, "detail", "label", "name", "title", "key", "metric")?.toString() ?: continue
+        if (targets.any { normKey(label).contains(it) }) {
+            val value = number(pick(item, "value", "amount", "count", "total", "val"))
+            if (value != null) return value
+        }
     }
     return null
 }
@@ -101,9 +144,11 @@ private fun render(root: HTMLElement, payload: dynamic, search: String = "") {
         metrics.appendChild(card)
     }
     metric("MARKET MOVERS", live.size.toString(), "Live symbols received")
-    metric("ADVANCING", "—", "Awaiting verified breadth")
-    metric("DECLINING", "—", "Awaiting verified breadth")
+    val breadthCounts = breadth(live)
+    metric("ADVANCING", breadthCounts.first?.toString() ?: "—", if (breadthCounts.first != null) "Verified from session prices" else "No verified price pairs", "positive")
+    metric("DECLINING", breadthCounts.second?.toString() ?: "—", if (breadthCounts.second != null) "Verified from session prices" else "No verified price pairs", "negative")
     val turnover = number(pick(summary, "totalTurnover", "turnover", "totalAmount"))
+        ?: summaryValue(summary, "turnover", "total traded amount")
     metric("TURNOVER", turnover?.let { "Rs. " + fmt(it) } ?: "—", "Provider-reported session value")
     shell.appendChild(metrics)
 
