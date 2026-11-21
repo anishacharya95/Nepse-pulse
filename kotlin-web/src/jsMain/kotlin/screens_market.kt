@@ -291,7 +291,6 @@ fun dashboardScreen(): HTMLElement {
             range.appendChild(pair("Day high", price(index["high"])))
             range.appendChild(pair("Day low", price(index["low"])))
             range.appendChild(pair("Previous close", price(index["prev"])))
-            range.appendChild(pair("Source", marketSourceLabel()))
             indexCard.appendChild(range)
             hero.appendChild(indexCard)
 

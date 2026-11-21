@@ -657,7 +657,6 @@ fun profileScreen(): HTMLElement {
         } else {
             renderAccount()
         }
-        renderAppInfo()
     }
 
     renderAuth = {
