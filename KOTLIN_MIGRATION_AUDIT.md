@@ -87,9 +87,18 @@ Design system: dark/light themes with CSS variables, Inter + JetBrains Mono, rou
   - Stock screener returns 250 securities from the provider technical endpoint (loading takes ~35–60 s on the free backend).
   - Floorsheet returns 500 contracts and broker aggregation; bulk and unusual scans derive from them.
   - Sector heatmap renders 22 tiles and loads constituents on selection.
-  - Portfolio add/valuation, watchlist add, alert creation, theme toggle and mobile layout (390 px, no horizontal page overflow) verified.
+  - Dashboard intraday chart canvas renders (629×156 in the overview card; 881×450 in Stock X-Ray).
+  - Portfolio add/valuation, watchlist add, alert creation, theme toggle and mobile layout (390 px, document scroll width 375 < 390, no horizontal page overflow) verified.
   - Supabase client initialises and a sign-in attempt returns the provider's error ("Invalid login credentials"), proving the auth endpoint is reachable.
-- Not verified here: full authenticated flows, native AdMob rendering, and Android APK/AAB output. This environment has no Android SDK and no Supabase test account; those checks require the CI run with signing secrets and a device/emulator.
+- GitHub Actions on commit `ee3d514` (both workflows succeeded):
+  - `Kotlin migration validation` — success.
+  - `NEPSE Pulse Kotlin Android Build` — success in 6m 24s, artifact `NEPSE-Pulse-Kotlin-Android` (24 MB).
+- Artifact contents downloaded and inspected directly:
+  - `apk/debug/app-debug.apk` 12.4 MB — AdMob unit IDs are Google test IDs (`ca-app-pub-3940256099942544/6300978111`, `/1033173712`, `/5575463023`).
+  - `apk/release/app-release.apk` 5.4 MB — production unit IDs (`.../8028868444`, `.../1639379056`, `.../9483086731`) and production app ID `ca-app-pub-1565800134063497~9972330494`; APK Signature Scheme v2 block present, `META-INF` has no v1 entries (modern v2/v3 signing).
+  - `bundle/release/app-release.aab` 7.8 MB — `jarsigner -verify` passes, signer certificate valid until 2054-03-10.
+  - Manifest in both APKs: package `com.nepsepulse.app`, versionName `2.1.0`, permissions INTERNET, ACCESS_NETWORK_STATE, AD_ID, AdServices, foreground service. Adaptive icons (`mipmap-anydpi-v26/ic_launcher.xml`, foreground/background, round) and splash images at ldpi→xxxhdpi, portrait, landscape and night variants are packaged from `resources/`.
+- Not verified here: full authenticated flows and native AdMob rendering on a device. This environment has no Android device/emulator and no Supabase test account.
 
 ## 5. Known provider limitations
 
@@ -107,8 +116,8 @@ The Render service currently returns 404/500 (and missing CORS headers) for `/ap
 
 ## 7. Remaining work before production cutover
 
-- Run the Android workflow and confirm the three artifacts, then install the APK on a physical device.
-- Validate AdMob consent, adaptive banner, interstitial frequency and app-open behaviour in a debug build with test units.
+- Install `app-release.apk` (or the debug APK) on a physical device and smoke-test launch, navigation and the WebView AdMob bridge.
+- Validate AdMob consent, adaptive banner, interstitial frequency and app-open behaviour in a debug build with test units. Debug builds keep the production app ID with test unit IDs; switch the manifest app ID to Google's test app ID if the account must never see debug requests.
 - Complete OAuth/OTP/reset verification with real provider accounts and confirm the Supabase redirect allow-list includes the production web origin and the Android deep link.
 - Fix or replace the provider notice/event endpoints on Render so corporate actions and IPO data can populate.
 - Decide whether to publish the Kotlin/JS build as the main web experience; `main` still serves the legacy single-page app.
