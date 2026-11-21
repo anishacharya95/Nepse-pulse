@@ -152,6 +152,37 @@ private fun render(root: HTMLElement, payload: dynamic, search: String = "") {
     metric("TURNOVER", turnover?.let { "Rs. " + fmt(it) } ?: "—", "Provider-reported session value")
     shell.appendChild(metrics)
 
+    val movers = el("section", "movers-grid")
+    fun moverPanel(title: String, items: List<dynamic>, positive: Boolean) {
+        val panel = el("article", "mover-panel")
+        panel.appendChild(el("div", "eyebrow", if (positive) "TOP GAINERS" else "TOP LOSERS"))
+        panel.appendChild(el("h3", "", title))
+        if (items.isEmpty()) {
+            panel.appendChild(el("div", "mover-empty", "No verified mover list in this response"))
+        } else {
+            items.take(5).forEach { item ->
+                val symbol = pick(item, "symbol", "stockSymbol", "securitySymbol", "ticker", "code")?.toString() ?: "—"
+                val company = pick(item, "company", "companyName", "name", "securityName")?.toString() ?: ""
+                val last = number(pick(item, "ltp", "lastTradedPrice", "close", "price", "currentPrice"))
+                val changePercent = number(pick(item, "percentChange", "percentageChange", "changePercent", "perChange", "pChange"))
+                val line = el("div", "mover-line")
+                val left = el("div", "mover-name")
+                left.appendChild(el("strong", "", symbol))
+                left.appendChild(el("small", "", company))
+                line.appendChild(left)
+                val right = el("div", "mover-quote")
+                right.appendChild(el("strong", "", last?.let { fmt(it) } ?: "—"))
+                right.appendChild(el("small", if (positive) "positive" else "negative", pct(changePercent)))
+                line.appendChild(right)
+                panel.appendChild(line)
+            }
+        }
+        movers.appendChild(panel)
+    }
+    moverPanel("Stocks gaining today", rowsOf(data.gainers), true)
+    moverPanel("Stocks declining today", rowsOf(data.losers), false)
+    shell.appendChild(movers)
+
     val sectionHead = el("div", "section-head")
     val sectionTitle = el("div")
     sectionTitle.appendChild(el("div", "eyebrow", "MARKET WATCH"))
