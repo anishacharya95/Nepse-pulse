@@ -404,7 +404,8 @@ fun main() {
     Auth.init()
     Auth.onChange {
         updateAccountChip()
-        if (currentRoute == "profile") render()
+        // Re-apply the auth gate immediately if a session expires or the user signs out elsewhere.
+        if (!Auth.signedIn || currentRoute == "profile") render()
     }
     parseHash()
     buildShell()
