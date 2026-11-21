@@ -191,7 +191,8 @@ jobs:
             mkdir -p "$RUNNER_TEMP/nepse-signing"
             printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/nepse-signing/upload-keystore.jks"
             keytool -list -keystore "$RUNNER_TEMP/nepse-signing/upload-keystore.jks" -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" >/dev/null
-            echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/nepse-signing/upload-keystore.jks" >> "$GITHUB_ENV"
+            export ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/nepse-signing/upload-keystore.jks"
+            echo "ANDROID_KEYSTORE_PATH=$ANDROID_KEYSTORE_PATH" >> "$GITHUB_ENV"
             python3 - <<'PY'
           from pathlib import Path
           p = Path("android/app/build.gradle")
@@ -209,7 +210,9 @@ jobs:
           if "signingConfigs {" not in s:
               s = s.replace("    buildTypes {", block + "\n    buildTypes {", 1)
           if "signingConfig signingConfigs.release" not in s:
-              s = s.replace("release {", "release {\n            signingConfig signingConfigs.release", 1)
+              build_types = s.index("    buildTypes {")
+              release_pos = s.index("release {", build_types)
+              s = s[:release_pos] + s[release_pos:].replace("release {", "release {\n            signingConfig signingConfigs.release", 1)
           p.write_text(s)
           PY
             echo "Release signing configured."
