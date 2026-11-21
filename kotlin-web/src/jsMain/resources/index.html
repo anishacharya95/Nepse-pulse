@@ -1,15 +1,45 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#081426">
-  <meta name="description" content="NEPSE Pulse — Nepal market intelligence">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#070d16">
+  <meta name="description" content="NEPSE Pulse — live Nepal stock market intelligence, research and portfolio tools.">
+  <meta name="color-scheme" content="dark light">
   <title>NEPSE Pulse</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;550;600;650;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="icon" href="nepse-pulse-exact-icon.png" type="image/png">
+  <link rel="apple-touch-icon" href="nepse-pulse-exact-icon.png">
   <link rel="stylesheet" href="styles.css">
+  <script>
+    try {
+      var saved = localStorage.getItem('np.theme');
+      var theme = saved === 'light' || saved === 'dark'
+        ? saved
+        : (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+      document.documentElement.setAttribute('data-theme', theme);
+    } catch (e) {}
+  </script>
 </head>
 <body>
-  <div id="app"><main class="shell"><h1>NEPSE Pulse</h1><p>Loading Kotlin application…</p></main></div>
+  <div id="app">
+    <div class="boot">
+      <div class="boot-mark">N</div>
+      <div class="boot-title">NEPSE PULSE</div>
+      <div class="boot-copy">Connecting to the market engine…</div>
+    </div>
+  </div>
+  <noscript>
+    <div style="padding:24px;font-family:system-ui">NEPSE Pulse needs JavaScript enabled to load live market data.</div>
+  </noscript>
+  <style>
+    .boot{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;font-family:Inter,system-ui,sans-serif}
+    .boot-mark{width:56px;height:56px;border-radius:18px;display:grid;place-items:center;font-weight:800;font-size:26px;color:#04121f;background:linear-gradient(145deg,#2fd6b0,#4f9cf9)}
+    .boot-title{font-size:13px;font-weight:800;letter-spacing:.18em}
+    .boot-copy{font-size:11px;color:#8698ae}
+  </style>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="auth-config.js"></script>
   <script src="kotlin-web.js"></script>
