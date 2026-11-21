@@ -67,3 +67,16 @@
 .policy-links a{color:#8fb2ce;text-decoration:none;font-size:10px}
 .policy-links a:hover{text-decoration:underline;color:#d8e9f8}
 @media(max-width:620px){.policy-links{justify-content:flex-start}}
+
+/* Login-first experience shared by the Kotlin web app and Android WebView. */
+.shell.auth-required{min-height:100vh;max-width:620px;display:flex;flex-direction:column;justify-content:center;padding:28px 22px}
+.shell.auth-required .topbar{justify-content:center;border:0;padding:0}
+.shell.auth-required .live-state,.shell.auth-required .header-actions{display:none}
+.account-panel.login-screen{width:100%;margin:24px auto 0;padding:clamp(22px,5vw,38px);border-color:#315a78;border-radius:20px;background:linear-gradient(145deg,rgba(16,42,66,.98),rgba(8,23,40,.98));box-shadow:0 24px 80px rgba(0,0,0,.34)}
+.account-panel.login-screen h2{font-size:clamp(24px,5vw,32px);letter-spacing:-.04em;margin:12px 0}
+.account-panel.login-screen .account-copy{font-size:13px;line-height:1.65;margin-bottom:22px}
+.account-panel.login-screen .account-fields{grid-template-columns:1fr}
+.account-panel.login-screen .account-fields input{min-height:46px;font-size:14px}
+.account-panel.login-screen .account-action{min-height:42px;padding:11px 16px;font-size:12px}
+.account-panel.login-screen .account-action.primary{min-width:120px}
+@media(max-width:620px){.shell.auth-required{padding:22px 16px}.account-panel.login-screen{padding:23px 18px}}
