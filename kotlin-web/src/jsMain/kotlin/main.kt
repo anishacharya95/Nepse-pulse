@@ -28,6 +28,7 @@ val ROUTES = listOf(
 private val groups = listOf("Markets", "Research", "Flow", "Personal", "Primary market", "Account")
 
 var currentRoute: String = "dashboard"
+private var authGateActive: Boolean = true
 var currentSymbol: String = ""
 private var refreshHook: (() -> Unit)? = null
 private var shellView: HTMLElement? = null
@@ -291,6 +292,12 @@ fun openSymbol(symbol: String) {
 }
 
 fun go(route: String) {
+    if (!Auth.ready || !Auth.signedIn) {
+        currentRoute = "profile"
+        currentSymbol = ""
+        render()
+        return
+    }
     currentRoute = if (ROUTES.any { it.id == route }) route else "dashboard"
     if (currentRoute != "xray") currentSymbol = ""
     refreshHook = null
@@ -302,6 +309,20 @@ fun go(route: String) {
 }
 
 fun render() {
+    val appRoot = document.getElementById("app") as? HTMLElement
+    if (!Auth.ready || !Auth.signedIn) {
+        authGateActive = true
+        currentRoute = "profile"
+        currentSymbol = ""
+        appRoot?.classList?.add("auth-required")
+    } else {
+        appRoot?.classList?.remove("auth-required")
+        if (authGateActive) {
+            currentRoute = "dashboard"
+            currentSymbol = ""
+            authGateActive = false
+        }
+    }
     val view = shellView ?: return
     view.innerHTML = ""
     val screen = when (currentRoute) {
@@ -383,7 +404,8 @@ fun main() {
     Auth.init()
     Auth.onChange {
         updateAccountChip()
-        if (currentRoute == "profile") render()
+        // Re-apply the auth gate immediately if a session expires or the user signs out elsewhere.
+        if (!Auth.signedIn || currentRoute == "profile") render()
     }
     parseHash()
     buildShell()

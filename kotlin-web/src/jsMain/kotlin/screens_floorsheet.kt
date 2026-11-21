@@ -3,24 +3,44 @@ import kotlin.math.abs
 
 fun renderTrades(target: HTMLElement, rows: List<dynamic>, filter: String) {
     val trades = rows.filter { filter.isBlank() || (text(pick(it, "symbol")) ?: "").contains(filter, true) }
-    val table = dataTable(listOf("SYMBOL", "BUYER", "SELLER", "QTY", "RATE", "AMOUNT", "TIME"), setOf(3, 4, 5, 6))
-    if (trades.isEmpty()) {
-        table.empty("No contracts match this filter.")
-    } else {
-        for (trade in trades.take(100)) {
-            val symbol = text(pick(trade, "symbol"))
-            table.row(listOf(
-                el("div", "symbol-cell", symbol ?: "—"),
-                el("div", "small", text(pick(trade, "buyerBrokerName", "buyerBroker")) ?: "—"),
-                el("div", "small", text(pick(trade, "sellerBrokerName", "sellerBroker")) ?: "—"),
-                el("div", "mono", integer(num(pick(trade, "quantity", "contractQuantity")))),
-                el("div", "mono", price(num(pick(trade, "rate", "contractRate")))),
-                el("div", "mono", rupees(num(pick(trade, "amount", "contractAmount")))),
-                el("div", "mono small", clockTime(text(pick(trade, "tradeTime"))))
-            )) { if (symbol != null) openSymbol(symbol) }
+    val pageSize = 100
+    var page = 0
+
+    fun paintPage() {
+        target.innerHTML = ""
+        val table = dataTable(listOf("SYMBOL", "BUYER", "SELLER", "QTY", "RATE", "AMOUNT", "TIME"), setOf(3, 4, 5, 6))
+        if (trades.isEmpty()) {
+            table.empty("No contracts match this filter.")
+        } else {
+            val startIndex = page * pageSize
+            for (trade in trades.drop(startIndex).take(pageSize)) {
+                val symbol = text(pick(trade, "symbol"))
+                table.row(listOf(
+                    el("div", "symbol-cell", symbol ?: "—"),
+                    el("div", "small", text(pick(trade, "buyerBrokerName", "buyerBroker")) ?: "—"),
+                    el("div", "small", text(pick(trade, "sellerBrokerName", "sellerBroker")) ?: "—"),
+                    el("div", "mono", integer(num(pick(trade, "quantity", "contractQuantity")))),
+                    el("div", "mono", price(num(pick(trade, "rate", "contractRate")))),
+                    el("div", "mono", rupees(num(pick(trade, "amount", "contractAmount")))),
+                    el("div", "mono small", clockTime(text(pick(trade, "tradeTime"))))
+                )) { if (symbol != null) openSymbol(symbol) }
+            }
+        }
+        target.appendChild(table.root.parentElement as HTMLElement)
+        if (trades.isNotEmpty()) {
+            val totalPages = ((trades.size + pageSize - 1) / pageSize).coerceAtLeast(1)
+            val controls = el("div", "toolbar pagination-controls")
+            controls.appendChild(el("span", "muted small", "Showing " + (page * pageSize + 1) + "–" + minOf((page + 1) * pageSize, trades.size) + " of " + trades.size + " trades"))
+            controls.appendChild(actionButton("Previous", "ghost", "chevron-left") {
+                if (page > 0) { page--; paintPage() }
+            })
+            controls.appendChild(actionButton("Next", "ghost", "chevron-right") {
+                if (page + 1 < totalPages) { page++; paintPage() }
+            })
+            target.appendChild(controls)
         }
     }
-    target.appendChild(table.root.parentElement as HTMLElement)
+    paintPage()
 }
 
 fun renderBrokerAggregates(target: HTMLElement, rows: List<dynamic>, filter: String) {

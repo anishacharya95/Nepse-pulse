@@ -663,10 +663,10 @@ fun profileScreen(): HTMLElement {
         } else {
             renderAccount()
         }
-        renderAppInfo()
     }
 
     renderAuth = {
+        body.innerHTML = ""
         val panel = card("auth-card")
         panel.appendChild(cardHead("Sign in to NEPSE Pulse", "Use the existing Supabase project — no new account system"))
         val tabs = el("div", "tabs")
