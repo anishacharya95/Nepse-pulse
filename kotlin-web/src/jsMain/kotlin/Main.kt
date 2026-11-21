@@ -185,6 +185,10 @@ private fun render(root: HTMLElement, payload: dynamic, search: String = "", sel
     shell.appendChild(header)
 
     val accountPanel = el("section", "account-panel")
+    if (!authChecked || authenticatedUser == null) {
+        shell.classList.add("auth-required")
+        accountPanel.classList.add("login-screen")
+    }
     accountPanel.style.display = if (authenticatedUser == null || !authChecked || accountExpanded) "block" else "none"
     accountButton.style.display = if (authenticatedUser == null) "none" else "inline-flex"
     accountPanel.appendChild(el("div", "eyebrow", "SUPABASE ACCOUNT"))
