@@ -147,7 +147,7 @@ private fun render(root: HTMLElement, payload: dynamic, search: String = "") {
         rowNode.appendChild(nameCell)
         rowNode.appendChild(el("div", "table-cell numeric", fmt(ltp)))
         rowNode.appendChild(el("div", "table-cell numeric " + if ((delta ?: 0.0) >= 0) "positive" else "negative",
-            delta?.let { (if (it > 0) "+" else "") + "%.2f".format(it) } ?: "—"))
+            delta?.let { (if (it > 0) "+" else "") + fixed(it) } ?: "—"))
         rowNode.appendChild(el("div", "table-cell numeric " + if ((changePct ?: 0.0) >= 0) "positive" else "negative", pct(changePct)))
         rowNode.appendChild(el("div", "table-cell numeric", fmt(volume)))
         table.appendChild(rowNode)
