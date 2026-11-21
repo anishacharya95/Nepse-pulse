@@ -382,6 +382,40 @@ private fun render(root: HTMLElement, payload: dynamic, search: String = "", sel
             title.appendChild(el("h2", "", pick(selected, "symbol", "stockSymbol", "ticker", "code")?.toString() ?: selectedSymbol))
             title.appendChild(el("p", "stock-company", pick(selected, "company", "companyName", "name", "securityName")?.toString() ?: "Company details from live feed"))
             detailHead.appendChild(title)
+            val watchlistWrap = el("div", "watchlist-action-wrap")
+            val watchlistButton = el("button", "watchlist-add", "☆ Add to cloud watchlist")
+            val watchlistStatus = el("div", "watchlist-status")
+            watchlistButton.addEventListener("click", { _ ->
+                if (supabaseClient == null) {
+                    watchlistStatus.textContent = "Sign in to sync your watchlist."
+                } else {
+                    (supabaseClient.auth.getSession() as Promise<dynamic>).then { sessionResult: dynamic ->
+                        val user = sessionResult.data?.session?.user
+                        if (user == null) {
+                            watchlistStatus.textContent = "Sign in to sync your watchlist."
+                        } else {
+                            val record = js("({})")
+                            record.user_id = user.id
+                            record.symbol = selectedSymbol
+                            val options = js("({ onConflict: 'user_id,symbol' })")
+                            (supabaseClient.from("watchlists").upsert(record, options) as Promise<dynamic>).then { result: dynamic ->
+                                watchlistStatus.textContent = if (result.error != null) result.error.message.toString() else "Saved to your cloud watchlist."
+                                null
+                            }.catch { error: Throwable ->
+                                watchlistStatus.textContent = error.message ?: "Could not save watchlist item."
+                                null
+                            }
+                        }
+                        null
+                    }.catch { error: Throwable ->
+                        watchlistStatus.textContent = error.message ?: "Could not check your session."
+                        null
+                    }
+                }
+            })
+            watchlistWrap.appendChild(watchlistButton)
+            watchlistWrap.appendChild(watchlistStatus)
+            detailHead.appendChild(watchlistWrap)
             val closeButton = el("button", "detail-close", "Close")
             closeButton.addEventListener("click", { _ -> render(root, payload, search, "", filterMode) })
             detailHead.appendChild(closeButton)
