@@ -47,10 +47,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          DIST="kotlin-web/build/dist/js/productionExecutable"
-          test -d "$DIST"
+          test -d "kotlin-web/build"
           mkdir -p android-web
-          JS_FILE="$(find "$DIST" -maxdepth 2 -type f -name 'kotlin-web.js' -print -quit)"
+          JS_FILE="$(find kotlin-web/build -type f -name 'kotlin-web.js' -print -quit)"
           if [ -z "$JS_FILE" ]; then
             echo "Kotlin/JS production bundle kotlin-web.js was not found."
             find "$DIST" -maxdepth 2 -type f -print
