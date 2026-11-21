@@ -14,8 +14,8 @@ class MainActivity : Activity() {
 
     private lateinit var webView: WebView
 
-    private val homeUrl =
-        "https://anishacharya95.github.io/Nepse-pulse/"
+    // Load the compiled Kotlin/JS app packaged into android_asset/www by CI.
+    private val homeUrl = "file:///android_asset/www/index.html"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
