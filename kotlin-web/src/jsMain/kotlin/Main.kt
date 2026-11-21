@@ -297,7 +297,7 @@ private fun render(root: HTMLElement, payload: dynamic, search: String = "", sel
     }
     accountAction("Sign out", "account-action") {
         if (supabaseClient == null) accountStatus.textContent = "Supabase is not configured."
-        else (supabaseClient.auth.signOut() as Promise<dynamic>).then {
+        else (supabaseClient.auth.signOut() as Promise<dynamic>).then { _: dynamic ->
             accountStatus.textContent = "Signed out."
             null
         }.catch { error: Throwable ->
