@@ -108,9 +108,9 @@ jobs:
               lines = variables.read_text().splitlines()
               for i, line in enumerate(lines):
                   for key, value in (("minSdkVersion", 24), ("targetSdkVersion", 36), ("compileSdkVersion", 36)):
-                      if re.match(r"^\\s*" + key + r"\\s*=", line):
-                          lines[i] = re.sub(r"=\\s*\\d+", "= " + str(value), line)
-              variables.write_text("\\n".join(lines) + "\\n")
+                      if re.match(r"^\s*" + key + r"\s*=", line):
+                          lines[i] = re.sub(r"=\s*\d+", "= " + str(value), line)
+              variables.write_text("\n".join(lines) + "\n")
 
           gradle = Path("android/app/build.gradle")
           lines = gradle.read_text().splitlines()
@@ -125,7 +125,7 @@ jobs:
                   lines[i] = indent + 'versionName "2.0.0"'
           if not version_code_set:
               raise SystemExit("Could not set Android versionCode")
-          gradle.write_text("\\n".join(lines) + "\\n")
+          gradle.write_text("\n".join(lines) + "\n")
           print("Configured minSdk 24, target/compile SDK 36, versionCode 10.")
           PY
 
