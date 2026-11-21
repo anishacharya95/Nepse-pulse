@@ -19,9 +19,21 @@ class MainActivity : Activity() {
     private lateinit var webView: WebView
     private var pendingAuthCallback: String? = null
 
-    class AndroidAppBridge {
+    inner class AndroidAppBridge {
         @JavascriptInterface
         fun isNative(): Boolean = true
+
+        @JavascriptInterface
+        fun openAuthUrl(url: String) {
+            runOnUiThread {
+                try {
+                    val authIntent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                    startActivity(authIntent)
+                } catch (error: Exception) {
+                    android.util.Log.e("NEPSE-Pulse", "Unable to open OAuth browser", error)
+                }
+            }
+        }
     }
 
     private fun dispatchAuthCallback(url: String) {

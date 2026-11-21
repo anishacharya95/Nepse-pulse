@@ -188,11 +188,11 @@ object Auth {
         val redirect = js("({})")
         redirect.redirectTo = oauthRedirect()
         options.options = redirect
-        if (nativePlatform()) {
-            val browser = window.asDynamic().NP_CAP_BROWSER
-            if (browser != null && browser != undefined) {
-                redirect.skipBrowserRedirect = true
-            }
+        val isNative = nativePlatform()
+        if (isNative) {
+            // The Android WebView must not navigate itself into OAuth. Keep the
+            // PKCE verifier in this app's origin and hand the URL to Android.
+            redirect.skipBrowserRedirect = true
         }
         (client.auth.signInWithOAuth(options)).then(
             { result ->
@@ -200,14 +200,13 @@ object Auth {
                     done(result.error.message.toString())
                 } else {
                     val url = text(result?.data?.url)
-                    if (url != null && nativePlatform()) {
-                        val browser = window.asDynamic().NP_CAP_BROWSER
-                        if (browser != null && browser != undefined) {
-                            val openOptions = js("({})")
-                            openOptions.url = url
-                            browser.open(openOptions)
+                    if (url != null && isNative) {
+                        val bridge = window.asDynamic().AndroidAppBridge
+                        if (bridge != null && bridge != undefined && bridge.openAuthUrl != null) {
+                            bridge.openAuthUrl(url)
                         } else {
-                            window.location.href = url
+                            done("Android browser bridge is unavailable. Please update the app.")
+                            return@then null
                         }
                     }
                     done(null)
