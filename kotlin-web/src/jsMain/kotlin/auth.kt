@@ -120,9 +120,12 @@ object Auth {
     }
 
     private fun nativePlatform(): Boolean {
-        val capacitor = window.asDynamic().Capacitor
-        return capacitor != null && capacitor != undefined &&
+        val w = window.asDynamic()
+        val capacitor = w.Capacitor
+        val capacitorNative = capacitor != null && capacitor != undefined &&
             capacitor.isNativePlatform != null && capacitor.isNativePlatform() == true
+        val androidBridge = w.AndroidAppBridge
+        return capacitorNative || (androidBridge != null && androidBridge != undefined)
     }
 
     fun oauthRedirect(): String {
@@ -134,10 +137,8 @@ object Auth {
     }
 
     private fun registerDeepLinks() {
-        val app = window.asDynamic().NP_CAP_APP
-        if (app == null || app == undefined || client == null) return
-        val listener: (dynamic) -> Unit = { event ->
-            val url = event?.url?.toString() ?: ""
+        if (client == null) return
+        val handleCallback: (String) -> Unit = { url ->
             if (url.startsWith("com.nepsepulse.app://login-callback")) {
                 (client.auth.exchangeCodeForSession(url)).then(
                     { result ->
@@ -156,14 +157,24 @@ object Auth {
             }
         }
         try {
-            app.addListener("appUrlOpen", listener)
-            val browser = window.asDynamic().NP_CAP_BROWSER
-            if (browser != null && browser != undefined) {
-                val closed: (dynamic) -> Unit = { refreshSession() }
-                browser.addListener("browserFinished", closed)
+            val callback: (dynamic) -> Unit = { event ->
+                val url = event?.detail?.toString() ?: ""
+                if (url.isNotBlank()) handleCallback(url)
             }
+            window.addEventListener("np-auth-callback", callback)
         } catch (error: dynamic) {
-            logError("deep link listener", error)
+            logError("native auth callback listener", error)
+        }
+        val app = window.asDynamic().NP_CAP_APP
+        if (app != null && app != undefined) {
+            val listener: (dynamic) -> Unit = { event ->
+                handleCallback(event?.url?.toString() ?: "")
+            }
+            try {
+                app.addListener("appUrlOpen", listener)
+            } catch (error: dynamic) {
+                logError("Capacitor deep link listener", error)
+            }
         }
     }
 

@@ -9,11 +9,52 @@ import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.content.Intent
+import android.net.Uri
+import android.webkit.JavascriptInterface
+import org.json.JSONObject
 import android.view.ViewGroup
 
 class MainActivity : Activity() {
 
     private lateinit var webView: WebView
+    private var pendingAuthCallback: String? = null
+
+    class AndroidAppBridge {
+        @JavascriptInterface
+        fun isNative(): Boolean = true
+    }
+
+    private fun dispatchAuthCallback(url: String) {
+        if (!::webView.isInitialized) {
+            pendingAuthCallback = url
+            return
+        }
+        webView.post {
+            webView.evaluateJavascript(
+                "window.dispatchEvent(new CustomEvent('np-auth-callback',{detail:" +
+                    JSONObject.quote(url) + "}));",
+                null
+            )
+        }
+    }
+
+    private fun handleAuthIntent(intent: Intent?) {
+        val uri = intent?.data ?: return
+        if (uri.scheme == "com.nepsepulse.app" && uri.host == "login-callback") {
+            pendingAuthCallback = uri.toString()
+            if (::webView.isInitialized) {
+                val callback = pendingAuthCallback
+                pendingAuthCallback = null
+                if (callback != null) dispatchAuthCallback(callback)
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleAuthIntent(intent)
+    }
 
     // Load the compiled Kotlin/JS app packaged into android_asset/www by CI.
     private val homeUrl = "https://anishacharya95.github.io/Nepse-pulse/"
@@ -22,6 +63,7 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
 
         webView = WebView(this)
+        webView.addJavascriptInterface(AndroidAppBridge(), "AndroidAppBridge")
 
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true
@@ -84,6 +126,16 @@ class MainActivity : Activity() {
         }
 
         webView.webChromeClient = WebChromeClient()
+        webView.webViewClient = object : WebViewClient() {
+            override fun onPageFinished(view: WebView, url: String) {
+                super.onPageFinished(view, url)
+                val callback = pendingAuthCallback
+                if (callback != null) {
+                    pendingAuthCallback = null
+                    dispatchAuthCallback(callback)
+                }
+            }
+        }
 
         setContentView(
             webView,
@@ -95,6 +147,7 @@ class MainActivity : Activity() {
 
         applySystemBarInsets()
 
+        handleAuthIntent(intent)
         if (savedInstanceState == null) {
             webView.loadUrl(homeUrl)
         } else {
