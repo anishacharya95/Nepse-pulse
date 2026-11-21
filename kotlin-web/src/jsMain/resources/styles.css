@@ -16,3 +16,17 @@
 .mover-quote{text-align:right;font-variant-numeric:tabular-nums}
 .mover-empty{font-size:11px;color:#829ab4;padding:12px 0}
 @media(max-width:620px){.movers-grid{grid-template-columns:1fr;margin-top:-12px}.mover-panel{padding:16px}}
+
+.market-table .table-row:not(.table-header){cursor:pointer;transition:background .16s ease}
+.market-table .table-row:not(.table-header):hover{background:rgba(24,53,78,.72)}
+.market-table .table-row[role=button]:focus-visible{outline:2px solid #38bdf8;outline-offset:-2px}
+.stock-detail{margin:22px 0 38px;padding:22px;border:1px solid #29445f;border-radius:16px;background:linear-gradient(145deg,rgba(17,38,60,.98),rgba(9,23,39,.98))}
+.stock-detail-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:20px}
+.stock-detail-head h2{margin:7px 0 4px;font-size:25px;letter-spacing:-.04em}
+.stock-company{margin:0;color:#91a8c0;font-size:12px}
+.detail-close{border:1px solid #38536d;background:#142b43;color:#dce8f5;border-radius:9px;padding:9px 13px;font:inherit;font-size:12px;cursor:pointer}
+.stock-detail-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+.detail-field{padding:14px;border-radius:10px;background:rgba(5,17,31,.72);min-width:0}
+.detail-field .metric-label{font-size:9px}
+.detail-value{margin-top:9px;font-size:17px;font-weight:650;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+@media(max-width:700px){.stock-detail{padding:16px}.stock-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.stock-detail-head h2{font-size:21px}}
