@@ -87,7 +87,7 @@ private fun rowsOf(value: dynamic): List<dynamic> {
     return (0 until length).map { value[it] }
 }
 
-private fun render(root: HTMLElement, payload: dynamic, search: String = "") {
+private fun render(root: HTMLElement, payload: dynamic, search: String = "", selectedSymbol: String = "") {
     val data = if (payload.data != null && payload.data != undefined) payload.data else payload
     val live = rowsOf(data.live)
     val indexRows = rowsOf(data.index)
@@ -226,11 +226,57 @@ private fun render(root: HTMLElement, payload: dynamic, search: String = "") {
             delta?.let { (if (it > 0) "+" else "") + fixed(it) } ?: "—"))
         rowNode.appendChild(el("div", "table-cell numeric " + if ((changePct ?: 0.0) >= 0) "positive" else "negative", pct(changePct)))
         rowNode.appendChild(el("div", "table-cell numeric", fmt(volume)))
+        rowNode.addEventListener("click", { _ -> render(root, payload, search, symbol) })
+        rowNode.setAttribute("role", "button")
+        rowNode.setAttribute("tabindex", "0")
         table.appendChild(rowNode)
     }
     if (filtered.isEmpty()) table.appendChild(el("div", "empty-state", if (live.isEmpty()) "Market data is not available yet. Retrying automatically…" else "No symbols match your search."))
     tableCard.appendChild(table)
     shell.appendChild(tableCard)
+
+    if (selectedSymbol.isNotBlank()) {
+        val selected = live.firstOrNull { row ->
+            pick(row, "symbol", "stockSymbol", "ticker", "code")?.toString()?.equals(selectedSymbol, true) == true
+        }
+        if (selected != null) {
+            val detail = el("section", "stock-detail")
+            val detailHead = el("div", "stock-detail-head")
+            val title = el("div")
+            title.appendChild(el("div", "eyebrow", "STOCK X-RAY"))
+            title.appendChild(el("h2", "", pick(selected, "symbol", "stockSymbol", "ticker", "code")?.toString() ?: selectedSymbol))
+            title.appendChild(el("p", "stock-company", pick(selected, "company", "companyName", "name", "securityName")?.toString() ?: "Company details from live feed"))
+            detailHead.appendChild(title)
+            val closeButton = el("button", "detail-close", "Close")
+            closeButton.addEventListener("click", { _ -> render(root, payload, search) })
+            detailHead.appendChild(closeButton)
+            detail.appendChild(detailHead)
+
+            val fields = listOf(
+                "LAST TRADED PRICE" to pick(selected, "ltp", "lastTradedPrice", "close", "price"),
+                "POINT CHANGE" to pick(selected, "change", "pointChange", "changeValue"),
+                "PERCENT CHANGE" to pick(selected, "percentChange", "percentageChange", "changePercent", "perChange"),
+                "OPEN" to pick(selected, "open", "openPrice"),
+                "HIGH" to pick(selected, "high", "highPrice"),
+                "LOW" to pick(selected, "low", "lowPrice"),
+                "PREVIOUS CLOSE" to pick(selected, "previousClose", "previousDayClosePrice", "prevClose"),
+                "VOLUME" to pick(selected, "volume", "tradedShares", "quantity"),
+                "TURNOVER" to pick(selected, "turnover", "totalTradedAmount", "amount"),
+                "TRADES" to pick(selected, "trades", "totalTrades", "numberOfTrades")
+            )
+            val fieldGrid = el("div", "stock-detail-grid")
+            fields.forEach { (label, value) ->
+                val cell = el("div", "detail-field")
+                cell.appendChild(el("div", "metric-label", label))
+                val numeric = number(value)
+                val display = if (numeric != null) fmt(numeric) else value?.toString() ?: "—"
+                cell.appendChild(el("div", "detail-value", display))
+                fieldGrid.appendChild(cell)
+            }
+            detail.appendChild(fieldGrid)
+            shell.appendChild(detail)
+        }
+    }
 
     val footer = el("footer", "footer")
     footer.appendChild(el("span", "", "NEPSE PULSE  ·  MARKET DATA PROVIDED BY CONNECTED FEEDS"))
@@ -238,7 +284,7 @@ private fun render(root: HTMLElement, payload: dynamic, search: String = "") {
     shell.appendChild(footer)
     root.appendChild(shell)
 
-    searchInput.addEventListener("input", { _ -> render(root, payload, searchInput.value) })
+    searchInput.addEventListener("input", { _ -> render(root, payload, searchInput.value, selectedSymbol) })
 }
 
 private fun showError(root: HTMLElement, message: String) {
