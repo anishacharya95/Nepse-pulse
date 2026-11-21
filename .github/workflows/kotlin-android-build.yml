@@ -66,7 +66,7 @@ jobs:
           from pathlib import Path
           p = Path("android-web/index.html")
           html = p.read_text()
-          html = html.replace('  <script src="kotlin-web.js"></script>', '  <script src="./np-capacitor-plugins.bundle.js"></script>\\n  <script src="kotlin-web.js"></script>\\n  <script src="./np-admob-banner.js"></script>')
+          html = html.replace('  <script src="kotlin-web.js"></script>', '  <script src="./np-capacitor-plugins.bundle.js"></script>\n  <script src="kotlin-web.js"></script>\n  <script src="./np-admob-banner.js"></script>')
           if "np-capacitor-plugins.bundle.js" not in html or "np-admob-banner.js" not in html:
               raise SystemExit("Native plugin scripts were not injected into Kotlin app HTML")
           p.write_text(html)
@@ -134,7 +134,7 @@ jobs:
           root_gradle = Path("android/build.gradle")
           root_text = root_gradle.read_text()
           root_text = re.sub(
-              r"com\\.android\\.tools\\.build:gradle:[0-9.]+",
+              r"com\.android\.tools\.build:gradle:[0-9.]+",
               "com.android.tools.build:gradle:8.9.2",
               root_text,
           )
