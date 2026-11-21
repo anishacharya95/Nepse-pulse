@@ -6,11 +6,6 @@ on:
     paths:
       - "kotlin-web/**"
       - ".github/workflows/kotlin-android-build.yml"
-  pull_request:
-    branches: [main]
-    paths:
-      - "kotlin-web/**"
-      - ".github/workflows/kotlin-android-build.yml"
   workflow_dispatch:
 
 permissions:
