@@ -62,3 +62,8 @@
 .cloud-watchlist{margin-top:16px;padding-top:15px;border-top:1px solid #29445f}
 .watchlist-items{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px;color:#8fa8c2;font-size:11px}
 .watchlist-symbol{padding:6px 9px;border-radius:7px;background:#17344e;color:#d8eaf7;font-size:10px;font-weight:650}
+
+.policy-links{display:flex;gap:14px;justify-content:flex-end}
+.policy-links a{color:#8fb2ce;text-decoration:none;font-size:10px}
+.policy-links a:hover{text-decoration:underline;color:#d8e9f8}
+@media(max-width:620px){.policy-links{justify-content:flex-start}}
