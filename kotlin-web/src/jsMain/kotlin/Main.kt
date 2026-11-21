@@ -87,7 +87,7 @@ private fun rowsOf(value: dynamic): List<dynamic> {
     return (0 until length).map { value[it] }
 }
 
-private fun render(root: HTMLElement, payload: dynamic, search: String = "", selectedSymbol: String = "") {
+private fun render(root: HTMLElement, payload: dynamic, search: String = "", selectedSymbol: String = "", filterMode: String = "all") {
     val data = if (payload.data != null && payload.data != undefined) payload.data else payload
     val live = rowsOf(data.live)
     val indexRows = rowsOf(data.index)
@@ -188,6 +188,13 @@ private fun render(root: HTMLElement, payload: dynamic, search: String = "", sel
     sectionTitle.appendChild(el("div", "eyebrow", "MARKET WATCH"))
     sectionTitle.appendChild(el("h2", "", "Live market"))
     sectionHead.appendChild(sectionTitle)
+    val filters = el("div", "market-filters")
+    listOf("all" to "All", "gainers" to "Gainers", "losers" to "Losers").forEach { (mode, label) ->
+        val chip = el("button", if (filterMode == mode) "filter-chip active" else "filter-chip", label)
+        chip.addEventListener("click", { _ -> render(root, payload, search, selectedSymbol, mode) })
+        filters.appendChild(chip)
+    }
+    sectionHead.appendChild(filters)
     val searchWrap = el("label", "search-wrap")
     val searchInput = document.createElement("input") as HTMLInputElement
     searchInput.type = "search"
@@ -204,10 +211,17 @@ private fun render(root: HTMLElement, payload: dynamic, search: String = "", sel
         tableHeader.appendChild(el("div", "table-cell", it))
     }
     table.appendChild(tableHeader)
+    val moverSymbols = when (filterMode) {
+        "gainers" -> rowsOf(data.gainers).mapNotNull { pick(it, "symbol", "stockSymbol", "ticker", "code")?.toString()?.uppercase() }.toSet()
+        "losers" -> rowsOf(data.losers).mapNotNull { pick(it, "symbol", "stockSymbol", "ticker", "code")?.toString()?.uppercase() }.toSet()
+        else -> emptySet()
+    }
     val filtered = live.filter { row ->
         val symbol = pick(row, "symbol", "stockSymbol", "ticker", "code")?.toString() ?: ""
         val company = pick(row, "company", "companyName", "name", "securityName")?.toString() ?: ""
-        (symbol + " " + company).contains(search, ignoreCase = true)
+        val matchesSearch = (symbol + " " + company).contains(search, ignoreCase = true)
+        val matchesFilter = filterMode == "all" || symbol.uppercase() in moverSymbols
+        matchesSearch && matchesFilter
     }.take(60)
     filtered.forEach { row ->
         val symbol = pick(row, "symbol", "stockSymbol", "ticker", "code")?.toString() ?: "—"
@@ -284,7 +298,7 @@ private fun render(root: HTMLElement, payload: dynamic, search: String = "", sel
     shell.appendChild(footer)
     root.appendChild(shell)
 
-    searchInput.addEventListener("input", { _ -> render(root, payload, searchInput.value, selectedSymbol) })
+    searchInput.addEventListener("input", { _ -> render(root, payload, searchInput.value, selectedSymbol, filterMode) })
 }
 
 private fun showError(root: HTMLElement, message: String) {
