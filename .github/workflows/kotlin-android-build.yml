@@ -44,12 +44,16 @@ jobs:
           set -euo pipefail
           test -d "kotlin-web/build"
           mkdir -p android-web
-          JS_FILE="$(find kotlin-web/build -type f -name 'kotlin-web.js' -print -quit)"
-          if [ -z "$JS_FILE" ]; then
+          JS_FILE="kotlin-web/build/kotlin-webpack/js/productionExecutable/kotlin-web.js"
+          if [ ! -s "$JS_FILE" ]; then
+            JS_FILE="$(find kotlin-web/build -type f -name 'kotlin-web.js' | grep -v 'node_modules' | head -1)"
+          fi
+          if [ ! -s "$JS_FILE" ]; then
             echo "Kotlin/JS production bundle kotlin-web.js was not found."
-            find "$DIST" -maxdepth 2 -type f -print
+            find kotlin-web/build -maxdepth 4 -type f -name '*.js' -print | head -20
             exit 1
           fi
+          echo "Using Kotlin/JS bundle: $JS_FILE ($(wc -c < "$JS_FILE") bytes)"
           cp "$JS_FILE" android-web/kotlin-web.js
           cp kotlin-web/src/jsMain/resources/index.html android-web/index.html
           cp kotlin-web/src/jsMain/resources/styles.css android-web/styles.css
@@ -57,6 +61,7 @@ jobs:
           cp kotlin-web/src/jsMain/resources/np-admob-banner.js android-web/np-admob-banner.js
           cp privacy-policy.html android-web/privacy-policy.html
           cp delete-account.html android-web/delete-account.html
+          cp nepse-pulse-exact-icon.png android-web/nepse-pulse-exact-icon.png
           python3 - <<'PY'
           from pathlib import Path
           p = Path("android-web/index.html")
@@ -73,7 +78,7 @@ jobs:
         run: |
           npm init -y
           npm install @capacitor/core@7 @capacitor/android@7 @capacitor/app@7 @capacitor/browser@7 @capacitor-community/admob@7
-          npm install --save-dev @capacitor/cli@7 esbuild
+          npm install --save-dev @capacitor/cli@7 esbuild @capacitor/assets
 
       - name: Bundle Capacitor plugin bridge
         run: |
@@ -95,6 +100,14 @@ jobs:
           npx cap init "NEPSE Pulse" "com.nepsepulse.app" --web-dir android-web
           npx cap add android
           npx cap sync android
+
+      - name: Generate launcher icon and splash screen
+        run: |
+          test -s resources/icon.png
+          test -s resources/splash.png
+          npx @capacitor/assets generate --android --assetPath resources \
+            --iconBackgroundColor "#061020" --splashBackgroundColor "#061020"
+          echo "Generated adaptive launcher icon and splash screen from project artwork."
 
 
       - name: Set Android SDK levels and Play Store version
@@ -119,14 +132,14 @@ jobs:
               stripped = line.strip()
               indent = line[:len(line) - len(line.lstrip())]
               if stripped.startswith("versionCode "):
-                  lines[i] = indent + "versionCode 10"
+                  lines[i] = indent + "versionCode 11"
                   version_code_set = True
               elif stripped.startswith("versionName "):
-                  lines[i] = indent + 'versionName "2.0.0"'
+                  lines[i] = indent + 'versionName "2.1.0"'
           if not version_code_set:
               raise SystemExit("Could not set Android versionCode")
           gradle.write_text("\n".join(lines) + "\n")
-          print("Configured minSdk 24, target/compile SDK 36, versionCode 10.")
+          print("Configured minSdk 24, target/compile SDK 36, versionCode 11, versionName 2.1.0.")
           PY
 
       - name: Configure AdMob app ID and release optimization
@@ -176,6 +189,16 @@ jobs:
               text = text.replace("proguard-android.txt", "proguard-android-optimize.txt")
           gradle.write_text(text)
           print("AdMob app ID and release optimization configured.")
+
+          manifest_text = manifest.read_text()
+          manifest_text = manifest_text.replace(
+              '<uses-permission android:name="android.permission.INTERNET" />',
+              '<uses-permission android:name="android.permission.INTERNET" />\n'
+              '    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />'
+          )
+          manifest_text = manifest_text.replace('android:usesCleartextTraffic="true"', 'android:usesCleartextTraffic="false"')
+          manifest.write_text(manifest_text)
+          print("Android permissions and cleartext policy configured.")
           PY
 
 
