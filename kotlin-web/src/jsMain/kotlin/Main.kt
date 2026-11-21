@@ -24,6 +24,27 @@ private fun initializeSupabase() {
     }
 }
 
+private fun oauthRedirect(): String {
+    val capacitor = window.asDynamic().Capacitor
+    val native = capacitor != null && capacitor != undefined &&
+        capacitor.isNativePlatform != null && capacitor.isNativePlatform() == true
+    return if (native) "com.nepsepulse.app://login-callback" else window.location.href
+}
+
+private fun registerOAuthDeepLink() {
+    val app = window.asDynamic().NP_CAP_APP
+    if (app == null || app == undefined || supabaseClient == null) return
+    app.addListener("appUrlOpen", { event: dynamic ->
+        val url = event.url?.toString() ?: ""
+        if (url.startsWith("com.nepsepulse.app://login-callback")) {
+            (supabaseClient.auth.exchangeCodeForSession(url) as Promise<dynamic>).then { result: dynamic ->
+                if (result.error == null) window.location.reload()
+                null
+            }.catch { _: Throwable -> null }
+        }
+    })
+}
+
 private fun el(tag: String, className: String = "", text: String = ""): HTMLElement {
     val node = document.createElement(tag) as HTMLElement
     node.className = className
@@ -208,7 +229,7 @@ private fun render(root: HTMLElement, payload: dynamic, search: String = "", sel
             val options = js("({})")
             options.provider = "google"
             val oauthOptions = js("({})")
-            oauthOptions.redirectTo = window.location.href
+            oauthOptions.redirectTo = oauthRedirect()
             options.options = oauthOptions
             (supabaseClient.auth.signInWithOAuth(options) as Promise<dynamic>).then { result: dynamic ->
                 if (result.error != null) accountStatus.textContent = result.error.message.toString()
@@ -597,6 +618,7 @@ private fun refresh(root: HTMLElement) {
 
 fun main() {
     initializeSupabase()
+    registerOAuthDeepLink()
     val root = document.getElementById("app") as? HTMLElement ?: return
     refresh(root)
     window.setInterval({ refresh(root) }, 30000)
