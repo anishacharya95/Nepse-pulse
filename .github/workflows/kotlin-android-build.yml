@@ -183,42 +183,39 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          import re
+          import xml.etree.ElementTree as ET
 
+          ET.register_namespace("android", "http://schemas.android.com/apk/res/android")
           p = Path("android/app/src/main/AndroidManifest.xml")
-          s = p.read_text()
-          callback = """
-                  <intent-filter>
-                      <action android:name="android.intent.action.VIEW" />
-                      <category android:name="android.intent.category.DEFAULT" />
-                      <category android:name="android.intent.category.BROWSABLE" />
-                      <data android:scheme="com.nepsepulse.app" android:host="login-callback" />
-                  </intent-filter>
-          """
-          if 'android:host="login-callback"' not in s:
-              pattern = re.compile(
-                  r'(<activity\\b[^>]*>.*?'
-                  r'<action android:name="android.intent.action.MAIN"\\s*/>.*?'
-                  r'<category android:name="android.intent.category.LAUNCHER"\\s*/>.*?</activity>)',
-                  re.S
-              )
-              match = pattern.search(s)
-              if not match:
-                  raise SystemExit("Could not find launcher activity")
-              activity = match.group(1)
-              opening = re.search(r"<activity\\b[^>]*>", activity)
-              if opening and "android:launchMode=" not in opening.group(0):
-                  tag = opening.group(0)
-                  activity = activity.replace(tag, tag[:-1] + ' android:launchMode="singleTask">', 1)
-              elif opening:
-                  activity = re.sub(r'android:launchMode="[^"]+"', 'android:launchMode="singleTask"', activity, count=1)
-              activity = activity.replace("</activity>", callback + "\\n    </activity>")
-              s = s[:match.start()] + activity + s[match.end():]
-              p.write_text(s)
-          manifest = p.read_text()
-          if 'android:host="login-callback"' not in manifest or 'android:launchMode="singleTask"' not in manifest:
-              raise SystemExit("Supabase OAuth callback is not configured")
-          print("Supabase OAuth deep-link callback configured.")
+          tree = ET.parse(p)
+          root = tree.getroot()
+          app = root.find("application")
+          if app is None:
+              raise SystemExit("Android application element is missing")
+          ns = "{http://schemas.android.com/apk/res/android}"
+          activity = next((node for node in app.findall("activity")
+                           if "MainActivity" in node.get(ns + "name", "")), None)
+          if activity is None:
+              raise SystemExit("Capacitor MainActivity not found")
+          activity.set(ns + "launchMode", "singleTask")
+          already = any(
+              data.get(ns + "scheme") == "com.nepsepulse.app" and
+              data.get(ns + "host") == "login-callback"
+              for intent in activity.findall("intent-filter")
+              for data in intent.findall("data")
+          )
+          if not already:
+              intent = ET.SubElement(activity, "intent-filter")
+              ET.SubElement(intent, "action", {ns + "name": "android.intent.action.VIEW"})
+              ET.SubElement(intent, "category", {ns + "name": "android.intent.category.DEFAULT"})
+              ET.SubElement(intent, "category", {ns + "name": "android.intent.category.BROWSABLE"})
+              ET.SubElement(intent, "data", {
+                  ns + "scheme": "com.nepsepulse.app",
+                  ns + "host": "login-callback"
+              })
+          ET.indent(tree, space="    ")
+          tree.write(p, encoding="utf-8", xml_declaration=True)
+          print("Supabase OAuth deep-link callback configured on Capacitor MainActivity.")
           PY
 
       - name: Build Debug APK with Google test ad units
