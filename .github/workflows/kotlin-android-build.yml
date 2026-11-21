@@ -1,0 +1,87 @@
+name: NEPSE Pulse Kotlin Android Build
+
+on:
+  push:
+    branches: [kotlin-migration]
+    paths:
+      - "kotlin-web/**"
+      - "android-app/**"
+      - ".github/workflows/kotlin-android-build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout migration branch
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.14.4"
+
+      - name: Compile Kotlin/JS production bundle
+        working-directory: kotlin-web
+        run: gradle jsBrowserProductionWebpack --no-daemon
+
+      - name: Package Kotlin/JS web assets into Android app
+        shell: bash
+        run: |
+          set -euo pipefail
+          DIST="kotlin-web/build/dist/js/productionExecutable"
+          test -d "$DIST"
+          mkdir -p android-app/app/src/main/assets/www
+          JS_FILE="$(find "$DIST" -maxdepth 2 -type f -name 'kotlin-web.js' -print -quit)"
+          if [ -z "$JS_FILE" ]; then
+            echo "Kotlin/JS production bundle kotlin-web.js was not found."
+            find "$DIST" -maxdepth 2 -type f -print
+            exit 1
+          fi
+          cp "$JS_FILE" android-app/app/src/main/assets/www/kotlin-web.js
+          cp kotlin-web/src/jsMain/resources/index.html android-app/app/src/main/assets/www/index.html
+          cp kotlin-web/src/jsMain/resources/styles.css android-app/app/src/main/assets/www/styles.css
+          test -s android-app/app/src/main/assets/www/kotlin-web.js
+          echo "Packaged $(wc -c < android-app/app/src/main/assets/www/kotlin-web.js) bytes of Kotlin/JS."
+
+      - name: Configure release signing when secrets are available
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -n "${ANDROID_KEYSTORE_BASE64:-}" ] && [ -n "${ANDROID_KEYSTORE_PASSWORD:-}" ] && [ -n "${ANDROID_KEY_ALIAS:-}" ] && [ -n "${ANDROID_KEY_PASSWORD:-}" ]; then
+            mkdir -p "$RUNNER_TEMP/nepse-signing"
+            printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/nepse-signing/upload-keystore.jks"
+            keytool -list -keystore "$RUNNER_TEMP/nepse-signing/upload-keystore.jks" -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" >/dev/null
+            echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/nepse-signing/upload-keystore.jks" >> "$GITHUB_ENV"
+            echo "Release signing key validated."
+          else
+            echo "Release signing secrets are not configured; release outputs will be unsigned."
+            echo "ANDROID_KEYSTORE_PATH=" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build Android APK and App Bundle
+        working-directory: android-app
+        run: gradle assembleDebug assembleRelease bundleRelease --no-daemon
+
+      - name: Upload APK and AAB artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: NEPSE-Pulse-Kotlin-Android
+          path: |
+            android-app/app/build/outputs/apk/debug/*.apk
+            android-app/app/build/outputs/apk/release/*.apk
+            android-app/app/build/outputs/bundle/release/*.aab
+          if-no-files-found: error
