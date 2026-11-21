@@ -122,7 +122,7 @@ jobs:
                   lines[i] = indent + "versionCode 10"
                   version_code_set = True
               elif stripped.startswith("versionName "):
-                  lines[i] = indent + 'versionName "2.0.0"'
+                  lines[i] = indent + 'versionName "3.0.0"'
           if not version_code_set:
               raise SystemExit("Could not set Android versionCode")
           gradle.write_text("\n".join(lines) + "\n")

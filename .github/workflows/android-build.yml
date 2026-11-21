@@ -3722,17 +3722,18 @@ jobs:
                       print(f"Set {key} to {value} in {gradle}")
               gradle.write_text(text)
 
-          # Set the Play Store release versionCode to 9.
+          # Set the Play Store release versionCode to 10 (versionName 3.0.0).
           app_gradle = Path("android/app/build.gradle")
           if not app_gradle.exists():
               app_gradle = Path("android/app/build.gradle.kts")
           if not app_gradle.exists():
               raise SystemExit("Could not find app/build.gradle or app/build.gradle.kts")
           text = app_gradle.read_text()
-          updated, count = re.subn(r"(?m)^(\s*versionCode\s*(?:=|\s)\s*)\d+(\s*(?://.*)?)$", r"\g<1>9\g<2>", text, count=1)
+          updated, count = re.subn(r"(?m)^(\s*versionCode\s*(?:=|\s)\s*)\d+(\s*(?://.*)?)$", r"\g<1>10\g<2>", text, count=1)
+          updated, name_count = re.subn(r"(?m)^(\s*versionName\s*(?:=|\s)\s*)[\"'][^\"']*[\"'](\s*(?://.*)?)$", r'\g<1>"3.0.0"\g<2>', updated, count=1)
           if count:
               app_gradle.write_text(updated)
-              print("Set versionCode to 9")
+              print("Set versionCode to 10 and versionName to 3.0.0 (name matches: %d)" % name_count)
           else:
               print("No numeric versionCode found; leaving version code unchanged")
 
