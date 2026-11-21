@@ -14,6 +14,9 @@ private var authEmailDraft = ""
 private var authPasswordDraft = ""
 private var authPhoneDraft = ""
 private var authOtpDraft = ""
+private var authChecked = false
+private var authCheckInFlight = false
+private var authenticatedUser: dynamic = null
 
 private fun initializeSupabase() {
     val host = window.asDynamic()
@@ -130,6 +133,22 @@ private fun render(root: HTMLElement, payload: dynamic, search: String = "", sel
     currentSearch = search
     currentSelectedSymbol = selectedSymbol
     currentFilterMode = filterMode
+    if (supabaseClient != null && !authChecked && !authCheckInFlight) {
+        authCheckInFlight = true
+        (supabaseClient.auth.getSession() as Promise<dynamic>).then { sessionResult: dynamic ->
+            authenticatedUser = sessionResult.data?.session?.user
+            authChecked = true
+            authCheckInFlight = false
+            render(root, payload, search, selectedSymbol, filterMode)
+            null
+        }.catch { _: Throwable ->
+            authenticatedUser = null
+            authChecked = true
+            authCheckInFlight = false
+            render(root, payload, search, selectedSymbol, filterMode)
+            null
+        }
+    }
     val data = if (payload.data != null && payload.data != undefined) payload.data else payload
     val live = rowsOf(data.live)
     val indexRows = rowsOf(data.index)
@@ -166,7 +185,8 @@ private fun render(root: HTMLElement, payload: dynamic, search: String = "", sel
     shell.appendChild(header)
 
     val accountPanel = el("section", "account-panel")
-    accountPanel.style.display = if (accountExpanded) "block" else "none"
+    accountPanel.style.display = if (authenticatedUser == null || !authChecked || accountExpanded) "block" else "none"
+    accountButton.style.display = if (authenticatedUser == null) "none" else "inline-flex"
     accountPanel.appendChild(el("div", "eyebrow", "SUPABASE ACCOUNT"))
     accountPanel.appendChild(el("h2", "", "Sign in to NEPSE Pulse"))
     accountPanel.appendChild(el("p", "account-copy", "Use your existing NEPSE Pulse account to access cloud features."))
@@ -200,7 +220,18 @@ private fun render(root: HTMLElement, payload: dynamic, search: String = "", sel
             credentials.email = emailInput.value.trim()
             credentials.password = passwordInput.value
             (supabaseClient.auth.signInWithPassword(credentials) as Promise<dynamic>).then { result: dynamic ->
-                accountStatus.textContent = if (result.error != null) result.error.message.toString() else "Signed in successfully."
+                if (result.error != null) {
+                    accountStatus.textContent = result.error.message.toString()
+                } else {
+                    (supabaseClient.auth.getSession() as Promise<dynamic>).then { sessionResult: dynamic ->
+                        authenticatedUser = sessionResult.data?.session?.user
+                        authChecked = true
+                        accountExpanded = false
+                        render(root, payload, search, selectedSymbol, filterMode)
+                        null
+                    }
+                    accountStatus.textContent = "Signed in successfully."
+                }
                 null
             }.catch { error: Throwable ->
                 accountStatus.textContent = error.message ?: "Sign-in failed."
@@ -308,7 +339,18 @@ private fun render(root: HTMLElement, payload: dynamic, search: String = "", sel
             credentials.token = otpInput.value.trim()
             credentials.type = "sms"
             (supabaseClient.auth.verifyOtp(credentials) as Promise<dynamic>).then { result: dynamic ->
-                accountStatus.textContent = if (result.error != null) result.error.message.toString() else "Phone sign-in successful."
+                if (result.error != null) {
+                    accountStatus.textContent = result.error.message.toString()
+                } else {
+                    (supabaseClient.auth.getSession() as Promise<dynamic>).then { sessionResult: dynamic ->
+                        authenticatedUser = sessionResult.data?.session?.user
+                        authChecked = true
+                        accountExpanded = false
+                        render(root, payload, search, selectedSymbol, filterMode)
+                        null
+                    }
+                    accountStatus.textContent = "Phone sign-in successful."
+                }
                 null
             }.catch { error: Throwable ->
                 accountStatus.textContent = error.message ?: "Phone verification failed."
@@ -319,7 +361,10 @@ private fun render(root: HTMLElement, payload: dynamic, search: String = "", sel
     accountAction("Sign out", "account-action") {
         if (supabaseClient == null) accountStatus.textContent = "Supabase is not configured."
         else (supabaseClient.auth.signOut() as Promise<dynamic>).then { _: dynamic ->
-            accountStatus.textContent = "Signed out."
+            authenticatedUser = null
+            authChecked = true
+            accountExpanded = true
+            render(root, payload, search, selectedSymbol, filterMode)
             null
         }.catch { error: Throwable ->
             accountStatus.textContent = error.message ?: "Sign-out failed."
@@ -334,30 +379,34 @@ private fun render(root: HTMLElement, payload: dynamic, search: String = "", sel
         accountExpanded = !accountExpanded
         accountPanel.style.display = if (accountExpanded) "block" else "none"
     })
-    if (supabaseClient != null) {
-        (supabaseClient.auth.getSession() as Promise<dynamic>).then { result: dynamic ->
-            val user = result.data?.session?.user
-            accountStatus.textContent = if (user != null) "Signed in as " + user.email.toString() else "Not signed in."
-            if (user != null) {
-                (supabaseClient.from("watchlists").select("symbol").order("symbol") as Promise<dynamic>).then { watchResult: dynamic ->
-                    val items = cloudWatchlist.querySelector(".watchlist-items") as? HTMLElement
-                    if (items != null) {
-                        items.textContent = ""
-                        val symbols = rowsOf(watchResult.data).mapNotNull { pick(it, "symbol")?.toString() }
-                        if (symbols.isEmpty()) items.textContent = "No saved symbols yet."
-                        else symbols.forEach { symbol -> items.appendChild(el("span", "watchlist-symbol", symbol)) }
-                    }
-                    null
-                }.catch { error: Throwable ->
-                    val items = cloudWatchlist.querySelector(".watchlist-items") as? HTMLElement
-                    if (items != null) items.textContent = error.message ?: "Could not load watchlist."
-                    null
-                }
-            }
-            null
-        }.catch { _ -> null }
+    accountStatus.textContent = when {
+        supabaseClient == null -> "Supabase is unavailable. Check auth-config.js and network access."
+        !authChecked -> "Checking your session…"
+        authenticatedUser == null -> "Sign in to continue to NEPSE Pulse."
+        else -> "Signed in as " + (authenticatedUser.email?.toString() ?: "your account")
     }
     shell.appendChild(accountPanel)
+
+    // Never render market content until Supabase has confirmed an authenticated session.
+    if (!authChecked || authenticatedUser == null) {
+        root.appendChild(shell)
+        return
+    }
+
+    (supabaseClient.from("watchlists").select("symbol").order("symbol") as Promise<dynamic>).then { watchResult: dynamic ->
+        val items = cloudWatchlist.querySelector(".watchlist-items") as? HTMLElement
+        if (items != null) {
+            items.textContent = ""
+            val symbols = rowsOf(watchResult.data).mapNotNull { pick(it, "symbol")?.toString() }
+            if (symbols.isEmpty()) items.textContent = "No saved symbols yet."
+            else symbols.forEach { symbol -> items.appendChild(el("span", "watchlist-symbol", symbol)) }
+        }
+        null
+    }.catch { error: Throwable ->
+        val items = cloudWatchlist.querySelector(".watchlist-items") as? HTMLElement
+        if (items != null) items.textContent = error.message ?: "Could not load watchlist."
+        null
+    }
 
     val hero = el("section", "hero")
     val heroCopy = el("div", "hero-copy")
