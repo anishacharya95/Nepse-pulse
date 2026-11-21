@@ -53,3 +53,8 @@
 .account-action.oauth{background:#1b3651}
 .account-status{margin:10px 0;color:#91b6ce;font-size:11px;overflow-wrap:anywhere}
 @media(max-width:620px){.account-fields{grid-template-columns:1fr}.topbar{flex-wrap:wrap}}
+
+.watchlist-action-wrap{display:flex;flex-direction:column;align-items:flex-end;gap:6px;margin-top:10px}
+.watchlist-add{border:1px solid #2c927e;border-radius:9px;padding:9px 12px;background:rgba(17,119,98,.18);color:#baf2df;font:inherit;font-size:11px;cursor:pointer}
+.watchlist-status{max-width:210px;color:#91b6ce;font-size:10px;text-align:right;overflow-wrap:anywhere}
+@media(max-width:620px){.watchlist-action-wrap{align-items:flex-start}.watchlist-status{text-align:left}}
