@@ -131,8 +131,12 @@ jobs:
 
           gradle = Path("android/app/build.gradle")
           text = gradle.read_text()
+          text = text.replace("minifyEnabled false", "minifyEnabled true")
+          text = text.replace("shrinkResources false", "shrinkResources true")
           if "minifyEnabled true" not in text:
-              text = text.replace("release {", "release {\n            minifyEnabled true\n            shrinkResources true", 1)
+              text = text.replace("release {", "release {\n            minifyEnabled true", 1)
+          if "shrinkResources true" not in text:
+              text = text.replace("release {", "release {\n            shrinkResources true", 1)
           if "proguard-android-optimize.txt" not in text:
               text = text.replace("proguard-android.txt", "proguard-android-optimize.txt")
           gradle.write_text(text)
