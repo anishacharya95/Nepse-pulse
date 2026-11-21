@@ -59,7 +59,7 @@ jobs:
           from pathlib import Path
           p = Path("android-web/index.html")
           html = p.read_text()
-          html = html.replace("</body>", '  <script src="./np-capacitor-plugins.bundle.js"></script>\n  <script src="./np-admob-banner.js"></script>\n</body>')
+          html = html.replace('  <script src="kotlin-web.js"></script>', '  <script src="./np-capacitor-plugins.bundle.js"></script>\\n  <script src="kotlin-web.js"></script>\\n  <script src="./np-admob-banner.js"></script>')
           if "np-capacitor-plugins.bundle.js" not in html or "np-admob-banner.js" not in html:
               raise SystemExit("Native plugin scripts were not injected into Kotlin app HTML")
           p.write_text(html)
@@ -141,6 +141,49 @@ jobs:
               text = text.replace("proguard-android.txt", "proguard-android-optimize.txt")
           gradle.write_text(text)
           print("AdMob app ID and release optimization configured.")
+          PY
+
+
+      - name: Register Android Supabase OAuth callback
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path("android/app/src/main/AndroidManifest.xml")
+          s = p.read_text()
+          callback = """
+                  <intent-filter>
+                      <action android:name="android.intent.action.VIEW" />
+                      <category android:name="android.intent.category.DEFAULT" />
+                      <category android:name="android.intent.category.BROWSABLE" />
+                      <data android:scheme="com.nepsepulse.app" android:host="login-callback" />
+                  </intent-filter>
+          """
+          if 'android:host="login-callback"' not in s:
+              pattern = re.compile(
+                  r'(<activity\\b[^>]*>.*?'
+                  r'<action android:name="android.intent.action.MAIN"\\s*/>.*?'
+                  r'<category android:name="android.intent.category.LAUNCHER"\\s*/>.*?</activity>)',
+                  re.S
+              )
+              match = pattern.search(s)
+              if not match:
+                  raise SystemExit("Could not find launcher activity")
+              activity = match.group(1)
+              opening = re.search(r"<activity\\b[^>]*>", activity)
+              if opening and "android:launchMode=" not in opening.group(0):
+                  tag = opening.group(0)
+                  activity = activity.replace(tag, tag[:-1] + ' android:launchMode="singleTask">', 1)
+              elif opening:
+                  activity = re.sub(r'android:launchMode="[^"]+"', 'android:launchMode="singleTask"', activity, count=1)
+              activity = activity.replace("</activity>", callback + "\\n    </activity>")
+              s = s[:match.start()] + activity + s[match.end():]
+              p.write_text(s)
+          manifest = p.read_text()
+          if 'android:host="login-callback"' not in manifest or 'android:launchMode="singleTask"' not in manifest:
+              raise SystemExit("Supabase OAuth callback is not configured")
+          print("Supabase OAuth deep-link callback configured.")
           PY
 
       - name: Build Debug APK with Google test ad units
