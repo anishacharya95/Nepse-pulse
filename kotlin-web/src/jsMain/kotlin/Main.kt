@@ -582,6 +582,16 @@ private fun render(root: HTMLElement, payload: dynamic, search: String = "", sel
     val footer = el("footer", "footer")
     footer.appendChild(el("span", "", "NEPSE PULSE  ·  MARKET DATA PROVIDED BY CONNECTED FEEDS"))
     footer.appendChild(el("span", "", "Auto refresh: 30 seconds"))
+    val policyLinks = el("div", "policy-links")
+    val privacyLink = document.createElement("a") as HTMLElement
+    privacyLink.textContent = "Privacy Policy"
+    privacyLink.setAttribute("href", "privacy-policy.html")
+    val deletionLink = document.createElement("a") as HTMLElement
+    deletionLink.textContent = "Account deletion"
+    deletionLink.setAttribute("href", "delete-account.html")
+    policyLinks.appendChild(privacyLink)
+    policyLinks.appendChild(deletionLink)
+    footer.appendChild(policyLinks)
     shell.appendChild(footer)
     root.appendChild(shell)
 
