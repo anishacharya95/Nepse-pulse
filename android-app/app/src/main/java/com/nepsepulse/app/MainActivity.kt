@@ -123,10 +123,7 @@ class MainActivity : Activity() {
 
                 return true
             }
-        }
 
-        webView.webChromeClient = WebChromeClient()
-        webView.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView, url: String) {
                 super.onPageFinished(view, url)
                 val callback = pendingAuthCallback
@@ -136,6 +133,8 @@ class MainActivity : Activity() {
                 }
             }
         }
+
+        webView.webChromeClient = WebChromeClient()
 
         setContentView(
             webView,
