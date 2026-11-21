@@ -5,6 +5,16 @@ import org.w3c.dom.HTMLInputElement
 import kotlin.js.Promise
 
 private const val API_BASE = "https://nepse-pulse-1.onrender.com"
+private var supabaseClient: dynamic = null
+
+private fun initializeSupabase() {
+    val host = window.asDynamic()
+    val config = host.NEPSE_PULSE_AUTH
+    val library = host.supabase
+    if (config != null && config != undefined && library != null && library != undefined) {
+        supabaseClient = library.createClient(config.supabaseUrl, config.supabaseAnonKey)
+    }
+}
 
 private fun el(tag: String, className: String = "", text: String = ""): HTMLElement {
     val node = document.createElement(tag) as HTMLElement
@@ -113,11 +123,122 @@ private fun render(root: HTMLElement, payload: dynamic, search: String = "", sel
     brandText.appendChild(el("div", "tagline", "NEPAL STOCK MARKET INTELLIGENCE"))
     identity.appendChild(brandText)
     header.appendChild(identity)
+    val headerActions = el("div", "header-actions")
+    val accountButton = el("button", "account-toggle", "Account")
+    headerActions.appendChild(accountButton)
     val state = el("div", "live-state")
     state.appendChild(el("span", "pulse-dot"))
     state.appendChild(el("span", "live-label", if (live.isNotEmpty()) "LIVE DATA" else "CONNECTING"))
     header.appendChild(state)
+    header.appendChild(headerActions)
     shell.appendChild(header)
+
+    val accountPanel = el("section", "account-panel")
+    accountPanel.style.display = "none"
+    accountPanel.appendChild(el("div", "eyebrow", "SUPABASE ACCOUNT"))
+    accountPanel.appendChild(el("h2", "", "Sign in to NEPSE Pulse"))
+    accountPanel.appendChild(el("p", "account-copy", "Use your existing NEPSE Pulse account to access cloud features."))
+    val emailInput = document.createElement("input") as HTMLInputElement
+    emailInput.type = "email"
+    emailInput.placeholder = "Email address"
+    emailInput.autocomplete = "email"
+    val passwordInput = document.createElement("input") as HTMLInputElement
+    passwordInput.type = "password"
+    passwordInput.placeholder = "Password"
+    passwordInput.autocomplete = "current-password"
+    val accountFields = el("div", "account-fields")
+    accountFields.appendChild(emailInput)
+    accountFields.appendChild(passwordInput)
+    accountPanel.appendChild(accountFields)
+    val accountStatus = el("div", "account-status", if (supabaseClient == null) "Supabase client is unavailable. Check your connection." else "Checking your session…")
+    accountPanel.appendChild(accountStatus)
+    fun accountAction(label: String, style: String, action: () -> Unit) {
+        val button = el("button", style, label)
+        button.addEventListener("click", { _ -> action() })
+        accountPanel.appendChild(button)
+    }
+    accountAction("Sign in", "account-action primary") {
+        if (supabaseClient == null) accountStatus.textContent = "Supabase is not configured."
+        else {
+            val credentials = js("({})")
+            credentials.email = emailInput.value.trim()
+            credentials.password = passwordInput.value
+            (supabaseClient.auth.signInWithPassword(credentials) as Promise<dynamic>).then { result: dynamic ->
+                accountStatus.textContent = if (result.error != null) result.error.message.toString() else "Signed in successfully."
+                null
+            }.catch { error: Throwable ->
+                accountStatus.textContent = error.message ?: "Sign-in failed."
+                null
+            }
+        }
+    }
+    accountAction("Create account", "account-action") {
+        if (supabaseClient == null) accountStatus.textContent = "Supabase is not configured."
+        else {
+            val credentials = js("({})")
+            credentials.email = emailInput.value.trim()
+            credentials.password = passwordInput.value
+            (supabaseClient.auth.signUp(credentials) as Promise<dynamic>).then { result: dynamic ->
+                accountStatus.textContent = if (result.error != null) result.error.message.toString() else "Account request sent. Check your email if confirmation is enabled."
+                null
+            }.catch { error: Throwable ->
+                accountStatus.textContent = error.message ?: "Sign-up failed."
+                null
+            }
+        }
+    }
+    accountAction("Continue with Google", "account-action oauth") {
+        if (supabaseClient == null) accountStatus.textContent = "Supabase is not configured."
+        else {
+            val options = js("({})")
+            options.provider = "google"
+            val oauthOptions = js("({})")
+            oauthOptions.redirectTo = window.location.href
+            options.options = oauthOptions
+            (supabaseClient.auth.signInWithOAuth(options) as Promise<dynamic>).then { result: dynamic ->
+                if (result.error != null) accountStatus.textContent = result.error.message.toString()
+                null
+            }.catch { error: Throwable ->
+                accountStatus.textContent = error.message ?: "Google sign-in failed."
+                null
+            }
+        }
+    }
+    accountAction("Reset password", "account-action") {
+        if (supabaseClient == null) accountStatus.textContent = "Supabase is not configured."
+        else {
+            val options = js("({})")
+            options.redirectTo = window.location.href
+            (supabaseClient.auth.resetPasswordForEmail(emailInput.value.trim(), options) as Promise<dynamic>).then { result: dynamic ->
+                accountStatus.textContent = if (result.error != null) result.error.message.toString() else "Password reset email requested."
+                null
+            }.catch { error: Throwable ->
+                accountStatus.textContent = error.message ?: "Password reset failed."
+                null
+            }
+        }
+    }
+    accountAction("Sign out", "account-action") {
+        if (supabaseClient == null) accountStatus.textContent = "Supabase is not configured."
+        else (supabaseClient.auth.signOut() as Promise<dynamic>).then {
+            accountStatus.textContent = "Signed out."
+            null
+        }.catch { error: Throwable ->
+            accountStatus.textContent = error.message ?: "Sign-out failed."
+            null
+        }
+    }
+    accountButton.addEventListener("click", { _ ->
+        accountPanel.style.display = if (accountPanel.style.display == "none") "block" else "none"
+    })
+    if (supabaseClient != null) {
+        (supabaseClient.auth.getSession() as Promise<dynamic>).then { result: dynamic ->
+            val user = result.data?.session?.user
+            accountStatus.textContent = if (user != null) "Signed in as " + user.email.toString() else "Not signed in."
+            null
+        }.catch { _ -> null }
+    }
+    shell.appendChild(accountPanel)
 
     val hero = el("section", "hero")
     val heroCopy = el("div", "hero-copy")
@@ -343,6 +464,7 @@ private fun refresh(root: HTMLElement) {
 }
 
 fun main() {
+    initializeSupabase()
     val root = document.getElementById("app") as? HTMLElement ?: return
     refresh(root)
     window.setInterval({ refresh(root) }, 30000)
