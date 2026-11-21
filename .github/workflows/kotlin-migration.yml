@@ -1,0 +1,36 @@
+name: Kotlin migration validation
+
+on:
+  push:
+    branches: [kotlin-migration]
+    paths:
+      - "kotlin-web/**"
+      - ".github/workflows/kotlin-migration.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "kotlin-web/**"
+      - ".github/workflows/kotlin-migration.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  kotlin-js:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.14.4"
+      - name: Compile Kotlin/JS production bundle
+        working-directory: kotlin-web
+        run: gradle jsBrowserProductionWebpack --no-daemon

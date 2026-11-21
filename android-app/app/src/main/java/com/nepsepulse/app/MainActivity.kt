@@ -7,6 +7,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.content.Intent
 import android.view.ViewGroup
 
@@ -14,8 +15,8 @@ class MainActivity : Activity() {
 
     private lateinit var webView: WebView
 
-    private val homeUrl =
-        "https://anishacharya95.github.io/Nepse-pulse/"
+    // Load the compiled Kotlin/JS app packaged into android_asset/www by CI.
+    private val homeUrl = "https://anishacharya95.github.io/Nepse-pulse/"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -28,6 +29,34 @@ class MainActivity : Activity() {
         webView.settings.allowContentAccess = false
 
         webView.webViewClient = object : WebViewClient() {
+            // Keep the established HTTPS origin for Supabase OAuth/CORS while
+            // serving the migrated Kotlin bundle from the APK itself.
+            override fun shouldInterceptRequest(
+                view: WebView,
+                request: WebResourceRequest
+            ): WebResourceResponse? {
+                val uri = request.url
+                if (uri.host != "anishacharya95.github.io" || !uri.path.orEmpty().startsWith("/Nepse-pulse")) {
+                    return super.shouldInterceptRequest(view, request)
+                }
+                val asset = when (uri.path.orEmpty().removePrefix("/Nepse-pulse").ifEmpty { "/" }) {
+                    "/", "/index.html" -> "www/index.html"
+                    "/kotlin-web.js" -> "www/kotlin-web.js"
+                    "/styles.css" -> "www/styles.css"
+                    else -> return null
+                }
+                val mime = when {
+                    asset.endsWith(".js") -> "application/javascript"
+                    asset.endsWith(".css") -> "text/css"
+                    else -> "text/html"
+                }
+                return try {
+                    WebResourceResponse(mime, "UTF-8", assets.open(asset))
+                } catch (_: Exception) {
+                    null
+                }
+            }
+
             override fun shouldOverrideUrlLoading(
                 view: WebView,
                 request: WebResourceRequest
