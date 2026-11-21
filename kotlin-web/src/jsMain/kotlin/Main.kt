@@ -240,7 +240,7 @@ private fun render(root: HTMLElement, payload: dynamic, search: String = "", sel
             delta?.let { (if (it > 0) "+" else "") + fixed(it) } ?: "—"))
         rowNode.appendChild(el("div", "table-cell numeric " + if ((changePct ?: 0.0) >= 0) "positive" else "negative", pct(changePct)))
         rowNode.appendChild(el("div", "table-cell numeric", fmt(volume)))
-        rowNode.addEventListener("click", { _ -> render(root, payload, search, symbol) })
+        rowNode.addEventListener("click", { _ -> render(root, payload, search, symbol, filterMode) })
         rowNode.setAttribute("role", "button")
         rowNode.setAttribute("tabindex", "0")
         table.appendChild(rowNode)
@@ -262,7 +262,7 @@ private fun render(root: HTMLElement, payload: dynamic, search: String = "", sel
             title.appendChild(el("p", "stock-company", pick(selected, "company", "companyName", "name", "securityName")?.toString() ?: "Company details from live feed"))
             detailHead.appendChild(title)
             val closeButton = el("button", "detail-close", "Close")
-            closeButton.addEventListener("click", { _ -> render(root, payload, search) })
+            closeButton.addEventListener("click", { _ -> render(root, payload, search, "", filterMode) })
             detailHead.appendChild(closeButton)
             detail.appendChild(detailHead)
 
