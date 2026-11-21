@@ -288,6 +288,19 @@ private fun render(root: HTMLElement, payload: dynamic, search: String = "", sel
                 fieldGrid.appendChild(cell)
             }
             detail.appendChild(fieldGrid)
+
+            val chartTitle = el("div", "chart-heading")
+            chartTitle.appendChild(el("div", "eyebrow", "TRADINGVIEW CHART"))
+            chartTitle.appendChild(el("h3", "", "Price history · Daily"))
+            detail.appendChild(chartTitle)
+            val chartFrame = document.createElement("iframe")
+            chartFrame.setAttribute("title", "TradingView chart for $selectedSymbol")
+            chartFrame.setAttribute("loading", "lazy")
+            chartFrame.setAttribute("allowtransparency", "true")
+            chartFrame.setAttribute("frameborder", "0")
+            chartFrame.setAttribute("src", "https://www.tradingview.com/widgetembed/?symbol=NEPSE%3A$selectedSymbol&interval=D&theme=dark&style=1&locale=en&hide_top_toolbar=false&hide_side_toolbar=true&allow_symbol_change=true&save_image=false&calendar=false&support_host=https%3A%2F%2Fwww.tradingview.com")
+            chartFrame.className = "tradingview-frame"
+            detail.appendChild(chartFrame)
             shell.appendChild(detail)
         }
     }
