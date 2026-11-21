@@ -204,6 +204,23 @@ private fun render(root: HTMLElement, payload: dynamic, search: String = "", sel
             }
         }
     }
+    accountAction("Continue with Facebook", "account-action oauth") {
+        if (supabaseClient == null) accountStatus.textContent = "Supabase is not configured."
+        else {
+            val options = js("({})")
+            options.provider = "facebook"
+            val oauthOptions = js("({})")
+            oauthOptions.redirectTo = window.location.href
+            options.options = oauthOptions
+            (supabaseClient.auth.signInWithOAuth(options) as Promise<dynamic>).then { result: dynamic ->
+                if (result.error != null) accountStatus.textContent = result.error.message.toString()
+                null
+            }.catch { error: Throwable ->
+                accountStatus.textContent = error.message ?: "Facebook sign-in failed."
+                null
+            }
+        }
+    }
     accountAction("Reset password", "account-action") {
         if (supabaseClient == null) accountStatus.textContent = "Supabase is not configured."
         else {
@@ -214,6 +231,47 @@ private fun render(root: HTMLElement, payload: dynamic, search: String = "", sel
                 null
             }.catch { error: Throwable ->
                 accountStatus.textContent = error.message ?: "Password reset failed."
+                null
+            }
+        }
+    }
+    val phoneFields = el("div", "account-fields phone-fields")
+    val phoneInput = document.createElement("input") as HTMLInputElement
+    phoneInput.type = "tel"
+    phoneInput.placeholder = "Phone number with country code"
+    val otpInput = document.createElement("input") as HTMLInputElement
+    otpInput.type = "text"
+    otpInput.inputMode = "numeric"
+    otpInput.placeholder = "SMS verification code"
+    phoneFields.appendChild(phoneInput)
+    phoneFields.appendChild(otpInput)
+    accountPanel.appendChild(phoneFields)
+    accountAction("Send phone code", "account-action") {
+        if (supabaseClient == null) accountStatus.textContent = "Supabase is not configured."
+        else {
+            val credentials = js("({})")
+            credentials.phone = phoneInput.value.trim()
+            (supabaseClient.auth.signInWithOtp(credentials) as Promise<dynamic>).then { result: dynamic ->
+                accountStatus.textContent = if (result.error != null) result.error.message.toString() else "Verification code sent if this phone is enabled."
+                null
+            }.catch { error: Throwable ->
+                accountStatus.textContent = error.message ?: "Could not send phone code."
+                null
+            }
+        }
+    }
+    accountAction("Verify phone code", "account-action") {
+        if (supabaseClient == null) accountStatus.textContent = "Supabase is not configured."
+        else {
+            val credentials = js("({})")
+            credentials.phone = phoneInput.value.trim()
+            credentials.token = otpInput.value.trim()
+            credentials.type = "sms"
+            (supabaseClient.auth.verifyOtp(credentials) as Promise<dynamic>).then { result: dynamic ->
+                accountStatus.textContent = if (result.error != null) result.error.message.toString() else "Phone sign-in successful."
+                null
+            }.catch { error: Throwable ->
+                accountStatus.textContent = error.message ?: "Phone verification failed."
                 null
             }
         }
