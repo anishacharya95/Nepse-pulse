@@ -8,4 +8,4 @@ dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories { mavenCentral() }
 }
-rootProject.name = "nepse-pulse-kotlin-web"
+rootProject.name = "kotlin-web"
