@@ -120,12 +120,9 @@ object Auth {
     }
 
     private fun nativePlatform(): Boolean {
-        val w = window.asDynamic()
-        val capacitor = w.Capacitor
-        val capacitorNative = capacitor != null && capacitor != undefined &&
+        val capacitor = window.asDynamic().Capacitor
+        return capacitor != null && capacitor != undefined &&
             capacitor.isNativePlatform != null && capacitor.isNativePlatform() == true
-        val androidBridge = w.AndroidAppBridge
-        return capacitorNative || (androidBridge != null && androidBridge != undefined)
     }
 
     fun oauthRedirect(): String {
@@ -183,17 +180,19 @@ object Auth {
             done("Supabase is not configured for this build.")
             return
         }
+
+        val isNative = nativePlatform()
         val options = js("({})")
         options.provider = provider
         val redirect = js("({})")
         redirect.redirectTo = oauthRedirect()
-        options.options = redirect
-        val isNative = nativePlatform()
         if (isNative) {
-            // The Android WebView must not navigate itself into OAuth. Keep the
-            // PKCE verifier in this app's origin and hand the URL to Android.
+            // Keep the PKCE verifier in the app WebView storage and open
+            // the provider URL with the bundled Capacitor Browser plugin.
             redirect.skipBrowserRedirect = true
         }
+        options.options = redirect
+
         (client.auth.signInWithOAuth(options)).then(
             { result ->
                 if (result?.error != null) {
@@ -201,13 +200,14 @@ object Auth {
                 } else {
                     val url = text(result?.data?.url)
                     if (url != null && isNative) {
-                        val bridge = window.asDynamic().AndroidAppBridge
-                        if (bridge != null && bridge != undefined && bridge.openAuthUrl != null) {
-                            bridge.openAuthUrl(url)
-                        } else {
-                            done("Android browser bridge is unavailable. Please update the app.")
+                        val browser = window.asDynamic().NP_CAP_BROWSER
+                        if (browser == null || browser == undefined || browser.open == null) {
+                            done("The in-app browser plugin is unavailable. Please reinstall the latest NEPSE Pulse build.")
                             return@then null
                         }
+                        val openOptions = js("({})")
+                        openOptions.url = url
+                        browser.open(openOptions)
                     }
                     done(null)
                 }

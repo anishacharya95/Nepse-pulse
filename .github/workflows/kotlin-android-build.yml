@@ -101,13 +101,35 @@ jobs:
           npx cap add android
           npx cap sync android
 
+      - name: Prepare branded NEPSE Pulse launch screen
+        run: |
+          python3 -m pip install --quiet Pillow
+          python3 - <<'PY'
+          from pathlib import Path
+          from PIL import Image
+
+          icon_path = Path("resources/icon.png")
+          splash_path = Path("resources/splash.png")
+          if not icon_path.is_file():
+              raise SystemExit("NEPSE Pulse icon is missing: resources/icon.png")
+
+          icon = Image.open(icon_path).convert("RGBA")
+          icon.thumbnail((1050, 1050), Image.Resampling.LANCZOS)
+          canvas = Image.new("RGBA", (2732, 2732), "#061020")
+          x = (canvas.width - icon.width) // 2
+          y = (canvas.height - icon.height) // 2
+          canvas.alpha_composite(icon, (x, y))
+          canvas.convert("RGB").save(splash_path, "PNG", optimize=True)
+          print("Created branded Android launch artwork from resources/icon.png")
+          PY
+
       - name: Generate launcher icon and splash screen
         run: |
           test -s resources/icon.png
           test -s resources/splash.png
           npx @capacitor/assets generate --android --assetPath resources \
             --iconBackgroundColor "#061020" --splashBackgroundColor "#061020"
-          echo "Generated adaptive launcher icon and splash screen from project artwork."
+          echo "Generated adaptive launcher icon and branded NEPSE Pulse splash screen."
 
 
       - name: Set Android SDK levels and Play Store version
