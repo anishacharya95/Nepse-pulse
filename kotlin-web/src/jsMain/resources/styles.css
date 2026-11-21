@@ -30,3 +30,8 @@
 .detail-field .metric-label{font-size:9px}
 .detail-value{margin-top:9px;font-size:17px;font-weight:650;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 @media(max-width:700px){.stock-detail{padding:16px}.stock-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.stock-detail-head h2{font-size:21px}}
+
+.market-filters{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.filter-chip{border:1px solid #29445f;border-radius:999px;padding:8px 12px;background:rgba(10,25,42,.72);color:#9bb0c7;font:inherit;font-size:11px;cursor:pointer}
+.filter-chip.active{border-color:#2d9a83;background:rgba(20,120,101,.18);color:#b8f5df}
+@media(max-width:620px){.section-head{align-items:flex-start;flex-wrap:wrap}.market-filters{order:3;width:100%}.search-wrap{max-width:100%;width:100%}}
