@@ -55,6 +55,8 @@ jobs:
           cp kotlin-web/src/jsMain/resources/styles.css android-web/styles.css
           cp kotlin-web/src/jsMain/resources/auth-config.js android-web/auth-config.js
           cp kotlin-web/src/jsMain/resources/np-admob-banner.js android-web/np-admob-banner.js
+          cp privacy-policy.html android-web/privacy-policy.html
+          cp delete-account.html android-web/delete-account.html
           python3 - <<'PY'
           from pathlib import Path
           p = Path("android-web/index.html")
