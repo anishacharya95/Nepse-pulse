@@ -225,12 +225,12 @@ jobs:
           # verified on-device. R8/resource shrinking previously made it too
           # easy to ship an incomplete-looking package when generated resources
           # were not retained as expected.
-          text = re.sub(r"(?m)^(\\s*)minifyEnabled\\s+(?:true|false)\\s*$", r"\\1minifyEnabled false", text)
-          text = re.sub(r"(?m)^(\\s*)shrinkResources\\s+(?:true|false)\\s*$", r"\\1shrinkResources false", text)
-          if not re.search(r"(?m)^\\s*minifyEnabled\\s+", text):
-              text = text.replace("release {", "release {\\n            minifyEnabled false", 1)
-          if not re.search(r"(?m)^\\s*shrinkResources\\s+", text):
-              text = text.replace("release {", "release {\\n            shrinkResources false", 1)
+          text = re.sub(r"(?m)^(\s*)minifyEnabled\s+(?:true|false)\s*$", r"\1minifyEnabled false", text)
+          text = re.sub(r"(?m)^(\s*)shrinkResources\s+(?:true|false)\s*$", r"\1shrinkResources false", text)
+          if not re.search(r"(?m)^\s*minifyEnabled\s+", text):
+              text = text.replace("release {", "release {\n            minifyEnabled false", 1)
+          if not re.search(r"(?m)^\s*shrinkResources\s+", text):
+              text = text.replace("release {", "release {\n            shrinkResources false", 1)
           gradle.write_text(text)
           print("AdMob app ID and release optimization configured.")
 
