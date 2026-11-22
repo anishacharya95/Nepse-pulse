@@ -221,14 +221,16 @@ jobs:
 
           gradle = Path("android/app/build.gradle")
           text = gradle.read_text()
-          text = text.replace("minifyEnabled false", "minifyEnabled true")
-          text = text.replace("shrinkResources false", "shrinkResources true")
-          if "minifyEnabled true" not in text:
-              text = text.replace("release {", "release {\n            minifyEnabled true", 1)
-          if "shrinkResources true" not in text:
-              text = text.replace("release {", "release {\n            shrinkResources true", 1)
-          if "proguard-android-optimize.txt" not in text:
-              text = text.replace("proguard-android.txt", "proguard-android-optimize.txt")
+          # Keep release resources intact while the launcher/splash pipeline is
+          # verified on-device. R8/resource shrinking previously made it too
+          # easy to ship an incomplete-looking package when generated resources
+          # were not retained as expected.
+          text = re.sub(r"(?m)^(\\s*)minifyEnabled\\s+(?:true|false)\\s*$", r"\\1minifyEnabled false", text)
+          text = re.sub(r"(?m)^(\\s*)shrinkResources\\s+(?:true|false)\\s*$", r"\\1shrinkResources false", text)
+          if not re.search(r"(?m)^\\s*minifyEnabled\\s+", text):
+              text = text.replace("release {", "release {\\n            minifyEnabled false", 1)
+          if not re.search(r"(?m)^\\s*shrinkResources\\s+", text):
+              text = text.replace("release {", "release {\\n            shrinkResources false", 1)
           gradle.write_text(text)
           print("AdMob app ID and release optimization configured.")
 
@@ -425,6 +427,66 @@ jobs:
           fi
           cd android
           ./gradlew assembleRelease bundleRelease
+
+      - name: Verify release APK and AAB contain the real app bundle and launcher branding
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$(find android/app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -print -quit)"
+          AAB="$(find android/app/build/outputs/bundle/release -maxdepth 1 -type f -name '*.aab' -print -quit)"
+          test -n "$APK" && test -s "$APK" || { echo "Release APK missing or empty"; exit 1; }
+          test -n "$AAB" && test -s "$AAB" || { echo "Release AAB missing or empty"; exit 1; }
+          test -s android/app/src/main/assets/public/kotlin-web.js || { echo "Kotlin/JS app bundle missing from Android assets"; exit 1; }
+          for ARCHIVE in "$APK" "$AAB"; do
+            echo "Checking $ARCHIVE ($(du -h "$ARCHIVE" | cut -f1))"
+            LIST="$(unzip -Z1 "$ARCHIVE")"
+            echo "$LIST" | grep -Eq '(^|/)mipmap-[^/]+/ic_launcher\.png        uses: actions/upload-artifact@v4
+        with:
+          name: NEPSE-Pulse-Kotlin-Android
+          path: |
+            android/app/build/outputs/apk/debug/*.apk
+            android/app/build/outputs/apk/release/*.apk
+            android/app/build/outputs/bundle/release/*.aab
+          if-no-files-found: error
+ || { echo "Launcher icon PNG missing from $ARCHIVE"; exit 1; }
+            echo "$LIST" | grep -Eq '(^|/)mipmap-[^/]+/ic_launcher_round\.png        uses: actions/upload-artifact@v4
+        with:
+          name: NEPSE-Pulse-Kotlin-Android
+          path: |
+            android/app/build/outputs/apk/debug/*.apk
+            android/app/build/outputs/apk/release/*.apk
+            android/app/build/outputs/bundle/release/*.aab
+          if-no-files-found: error
+ || { echo "Round launcher icon PNG missing from $ARCHIVE"; exit 1; }
+            echo "$LIST" | grep -Eq '(^|/)mipmap-[^/]+/ic_launcher_foreground\.png        uses: actions/upload-artifact@v4
+        with:
+          name: NEPSE-Pulse-Kotlin-Android
+          path: |
+            android/app/build/outputs/apk/debug/*.apk
+            android/app/build/outputs/apk/release/*.apk
+            android/app/build/outputs/bundle/release/*.aab
+          if-no-files-found: error
+ || { echo "Adaptive launcher foreground missing from $ARCHIVE"; exit 1; }
+            echo "$LIST" | grep -Eq '(^|/)mipmap-anydpi-v26/ic_launcher\.xml        uses: actions/upload-artifact@v4
+        with:
+          name: NEPSE-Pulse-Kotlin-Android
+          path: |
+            android/app/build/outputs/apk/debug/*.apk
+            android/app/build/outputs/apk/release/*.apk
+            android/app/build/outputs/bundle/release/*.aab
+          if-no-files-found: error
+ || { echo "Adaptive launcher XML missing from $ARCHIVE"; exit 1; }
+            echo "$LIST" | grep -Eq '(^|/)kotlin-web\.js        uses: actions/upload-artifact@v4
+        with:
+          name: NEPSE-Pulse-Kotlin-Android
+          path: |
+            android/app/build/outputs/apk/debug/*.apk
+            android/app/build/outputs/apk/release/*.apk
+            android/app/build/outputs/bundle/release/*.aab
+          if-no-files-found: error
+ || { echo "Kotlin/JS production bundle missing from $ARCHIVE"; exit 1; }
+          done
+          echo "Release APK and AAB both contain launcher artwork and the Kotlin/JS application bundle."
 
       - name: Upload APK and AAB artifacts
         uses: actions/upload-artifact@v4
