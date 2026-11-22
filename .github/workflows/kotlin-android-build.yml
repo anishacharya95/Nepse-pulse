@@ -114,6 +114,31 @@ jobs:
           echo "Branded launcher and splash resources generated from nepse-pulse-exact-icon.png."
 
 
+      - name: Enforce NEPSE Pulse launcher icon in Android manifest
+        run: |
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          manifest = Path("android/app/src/main/AndroidManifest.xml")
+          tree = ET.parse(manifest)
+          app = tree.getroot().find("application")
+          if app is None:
+              raise SystemExit("Android application element is missing")
+          ns = "{http://schemas.android.com/apk/res/android}"
+          app.set(ns + "icon", "@mipmap/ic_launcher")
+          app.set(ns + "roundIcon", "@mipmap/ic_launcher_round")
+          ET.indent(tree, space="    ")
+          tree.write(manifest, encoding="utf-8", xml_declaration=True)
+
+          res = Path("android/app/src/main/res")
+          for density in ("mdpi", "hdpi", "xhdpi", "xxhdpi", "xxxhdpi"):
+              for name in ("ic_launcher.png", "ic_launcher_round.png", "ic_launcher_foreground.png"):
+                  if not (res / f"mipmap-{density}" / name).is_file():
+                      raise SystemExit(f"Missing launcher artwork: mipmap-{density}/{name}")
+          print("Manifest explicitly references the NEPSE Pulse launcher and round icons.")
+          PY
+
       - name: Set Android SDK levels and Play Store version
         run: |
           python3 - <<'PY'
