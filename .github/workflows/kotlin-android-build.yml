@@ -439,11 +439,20 @@ jobs:
           test -s android/app/src/main/assets/public/kotlin-web.js || { echo "Kotlin/JS app bundle missing from Android assets"; exit 1; }
           APK_LIST="$(unzip -Z1 "$APK")"
           echo "$APK_LIST" | grep -Eq '(^|/)kotlin-web\.js$' || { echo "Kotlin/JS production bundle missing from release APK"; exit 1; }
-          echo "$APK_LIST" | grep -Eq '(^|/)ic_launcher[^/]*\.(png|webp)$' || { echo "Launcher artwork missing from release APK"; exit 1; }
           AAB_LIST="$(unzip -Z1 "$AAB")"
           echo "$AAB_LIST" | grep -Eq '(^|/)assets/.*kotlin-web\.js$' || { echo "Kotlin/JS production bundle missing from release AAB"; exit 1; }
-          echo "Release APK and AAB contain the Kotlin/JS application bundle; APK launcher artwork is present."
-          
+          # Compiled Android resources may re-encode source PNGs as WebP or
+          # store launcher assets in resources.arsc; inspect the resource table.
+          AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -1)"
+          test -n "$AAPT" || { echo "Android aapt tool not found"; exit 1; }
+          "$AAPT" dump resources "$APK" > "$RUNNER_TEMP/apk-resources.txt"
+          grep -Eq 'mipmap/ic_launcher(_round)?([[:space:]:]|$)' "$RUNNER_TEMP/apk-resources.txt" || {
+            echo "NEPSE Pulse launcher resources are missing from the compiled APK resource table."
+            grep -i 'launcher' "$RUNNER_TEMP/apk-resources.txt" | head -30 || true
+            exit 1
+          }
+          echo "Release APK and AAB contain the Kotlin/JS application bundle; compiled launcher resources are present."
+
       - name: Upload APK and AAB artifacts
         uses: actions/upload-artifact@v4
         with:
