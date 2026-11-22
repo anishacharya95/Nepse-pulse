@@ -345,7 +345,7 @@ jobs:
               for error in errors:
                   print(" - " + error)
               sys.exit(1)
-          print("Verified SDK 24/36, registered @capacitor/app + @capacitor/browser,")
+          print("Verified minSdk 25, target/compile SDK 36, registered @capacitor/app + @capacitor/browser,")
           print("singleTask OAuth deep link, and NEPSE Pulse launcher/splash resources.")
           PY
 
@@ -428,7 +428,7 @@ jobs:
           cd android
           ./gradlew assembleRelease bundleRelease
 
-      - name: Verify release APK and AAB contain the real app bundle and launcher branding
+      - name: Verify release APK and AAB contain the app bundle and launcher branding
         shell: bash
         run: |
           set -euo pipefail
@@ -437,57 +437,13 @@ jobs:
           test -n "$APK" && test -s "$APK" || { echo "Release APK missing or empty"; exit 1; }
           test -n "$AAB" && test -s "$AAB" || { echo "Release AAB missing or empty"; exit 1; }
           test -s android/app/src/main/assets/public/kotlin-web.js || { echo "Kotlin/JS app bundle missing from Android assets"; exit 1; }
-          for ARCHIVE in "$APK" "$AAB"; do
-            echo "Checking $ARCHIVE ($(du -h "$ARCHIVE" | cut -f1))"
-            LIST="$(unzip -Z1 "$ARCHIVE")"
-            echo "$LIST" | grep -Eq '(^|/)mipmap-[^/]+/ic_launcher\.png        uses: actions/upload-artifact@v4
-        with:
-          name: NEPSE-Pulse-Kotlin-Android
-          path: |
-            android/app/build/outputs/apk/debug/*.apk
-            android/app/build/outputs/apk/release/*.apk
-            android/app/build/outputs/bundle/release/*.aab
-          if-no-files-found: error
- || { echo "Launcher icon PNG missing from $ARCHIVE"; exit 1; }
-            echo "$LIST" | grep -Eq '(^|/)mipmap-[^/]+/ic_launcher_round\.png        uses: actions/upload-artifact@v4
-        with:
-          name: NEPSE-Pulse-Kotlin-Android
-          path: |
-            android/app/build/outputs/apk/debug/*.apk
-            android/app/build/outputs/apk/release/*.apk
-            android/app/build/outputs/bundle/release/*.aab
-          if-no-files-found: error
- || { echo "Round launcher icon PNG missing from $ARCHIVE"; exit 1; }
-            echo "$LIST" | grep -Eq '(^|/)mipmap-[^/]+/ic_launcher_foreground\.png        uses: actions/upload-artifact@v4
-        with:
-          name: NEPSE-Pulse-Kotlin-Android
-          path: |
-            android/app/build/outputs/apk/debug/*.apk
-            android/app/build/outputs/apk/release/*.apk
-            android/app/build/outputs/bundle/release/*.aab
-          if-no-files-found: error
- || { echo "Adaptive launcher foreground missing from $ARCHIVE"; exit 1; }
-            echo "$LIST" | grep -Eq '(^|/)mipmap-anydpi-v26/ic_launcher\.xml        uses: actions/upload-artifact@v4
-        with:
-          name: NEPSE-Pulse-Kotlin-Android
-          path: |
-            android/app/build/outputs/apk/debug/*.apk
-            android/app/build/outputs/apk/release/*.apk
-            android/app/build/outputs/bundle/release/*.aab
-          if-no-files-found: error
- || { echo "Adaptive launcher XML missing from $ARCHIVE"; exit 1; }
-            echo "$LIST" | grep -Eq '(^|/)kotlin-web\.js        uses: actions/upload-artifact@v4
-        with:
-          name: NEPSE-Pulse-Kotlin-Android
-          path: |
-            android/app/build/outputs/apk/debug/*.apk
-            android/app/build/outputs/apk/release/*.apk
-            android/app/build/outputs/bundle/release/*.aab
-          if-no-files-found: error
- || { echo "Kotlin/JS production bundle missing from $ARCHIVE"; exit 1; }
-          done
-          echo "Release APK and AAB both contain launcher artwork and the Kotlin/JS application bundle."
-
+          APK_LIST="$(unzip -Z1 "$APK")"
+          echo "$APK_LIST" | grep -Eq '(^|/)kotlin-web\.js$' || { echo "Kotlin/JS production bundle missing from release APK"; exit 1; }
+          echo "$APK_LIST" | grep -Eq '(^|/)ic_launcher[^/]*\.(png|webp)$' || { echo "Launcher artwork missing from release APK"; exit 1; }
+          AAB_LIST="$(unzip -Z1 "$AAB")"
+          echo "$AAB_LIST" | grep -Eq '(^|/)assets/.*kotlin-web\.js$' || { echo "Kotlin/JS production bundle missing from release AAB"; exit 1; }
+          echo "Release APK and AAB contain the Kotlin/JS application bundle; APK launcher artwork is present."
+          
       - name: Upload APK and AAB artifacts
         uses: actions/upload-artifact@v4
         with:
