@@ -8,10 +8,10 @@ android {
 
     defaultConfig {
         applicationId = "com.nepsepulse.app"
-        minSdk = 24
+        minSdk = 25
         targetSdk = 36
         versionCode = 10
-        versionName = "3.0.0"
+        versionName = "1"
     }
 
     signingConfigs {

@@ -44,6 +44,7 @@ fun taRowOf(row: dynamic): TaRow = TaRow(
 
 object TaStore {
     var rows: List<TaRow> = emptyList()
+    var listed: List<Pair<String, String>> = emptyList()
     var at: Double = 0.0
     var universe: Int = 0
     var source: String = ""
@@ -51,29 +52,93 @@ object TaStore {
     var error: String? = null
 }
 
+/**
+ * The complete NEPSE listed directory (every active security), used as the
+ * screener universe so the screen is not capped to the number of symbols that
+ * happen to have a live tick in the current snapshot.
+ */
+fun loadListedUniverse(force: Boolean = false, onDone: (List<Pair<String, String>>) -> Unit = {}) {
+    Http.get("/api/screener-feed", ttlMs = 300_000.0, force = force, timeoutMs = 60_000, onData = { payload ->
+        val rows = rowsOf(payload?.companies)
+        val listed = rows.mapNotNull { row ->
+            val symbol = text(pick(row, "symbol", "stockSymbol"))?.uppercase() ?: return@mapNotNull null
+            val name = text(pick(row, "securityName", "companyName", "name")) ?: symbol
+            symbol to name
+        }.distinctBy { it.first }
+        if (listed.isNotEmpty()) TaStore.listed = listed
+        onDone(TaStore.listed)
+    }, onError = {
+        onDone(TaStore.listed)
+    })
+}
+
+/**
+ * Loads technical metrics for the whole traded universe with true server-side
+ * paging (limit/offset). Every page is merged by symbol so repeated rows can
+ * never duplicate a security, and paging continues until the reported universe
+ * is covered instead of stopping at a fixed 250-row cap.
+ */
 fun loadTechnical(force: Boolean = false, done: (Boolean, String?) -> Unit) {
     if (!force && TaStore.rows.isNotEmpty() && nowMs() - TaStore.at < 180_000.0) {
         done(true, null)
         return
     }
-    Http.get("/api/technical-screener?limit=250&technical=true&timeframe=D", ttlMs = 300_000.0, force = force, timeoutMs = 120_000, onData = { payload ->
-        if (payload == null || payload == undefined || payload.ok == false) {
-            TaStore.error = text(pick(payload, "error")) ?: "Technical screener returned no data"
-            done(false, TaStore.error)
-            return@get
+    loadListedUniverse(force)
+    val pageSize = 100
+    val found = LinkedHashMap<String, TaRow>()
+    var offset = 0
+    var universe = 0
+    var pages = 0
+    var lastError: String? = null
+    var settled = false
+
+    fun finish(ok: Boolean) {
+        if (settled) return
+        settled = true
+        if (ok) {
+            TaStore.rows = found.values.toList()
+            TaStore.at = nowMs()
         }
-        val rows = rowsOf(payload.data).map { taRowOf(it) }.filter { it.symbol != "—" }
-        TaStore.rows = rows
-        TaStore.at = nowMs()
-        TaStore.universe = num(pick(payload, "universeCount"))?.toInt() ?: rows.size
-        TaStore.source = text(pick(payload, "source")) ?: "NEPSE technical screener"
-        TaStore.updated = text(pick(payload, "updatedAt")) ?: ""
-        TaStore.error = null
-        done(true, null)
-    }, onError = { message ->
-        TaStore.error = message
-        done(false, message)
-    })
+        TaStore.universe = maxOf(TaStore.listed.size, maxOf(universe, found.size))
+        TaStore.error = if (ok) null else lastError
+        done(ok, TaStore.error)
+    }
+
+    fun step() {
+        Http.get(
+            "/api/technical-screener?limit=" + pageSize + "&offset=" + offset + "&technical=true&timeframe=D",
+            ttlMs = 300_000.0,
+            force = force,
+            timeoutMs = 120_000,
+            onData = { payload ->
+                pages += 1
+                if (payload == null || payload == undefined || payload.ok == false) {
+                    lastError = text(pick(payload, "error")) ?: "Technical screener returned no data"
+                    finish(found.isNotEmpty())
+                    return@get
+                }
+                val reported = num(pick(payload, "universeCount"))?.toInt() ?: 0
+                if (reported > 0) universe = reported
+                if (pages == 1) {
+                    TaStore.source = text(pick(payload, "source")) ?: "NEPSE technical screener"
+                    TaStore.updated = text(pick(payload, "updatedAt")) ?: ""
+                }
+                val batch = rowsOf(payload.data).map { taRowOf(it) }.filter { it.symbol != "—" }
+                val before = found.size
+                for (row in batch) if (!found.containsKey(row.symbol)) found[row.symbol] = row
+                val added = found.size - before
+                offset += pageSize
+                val target = if (universe > 0) universe else Int.MAX_VALUE
+                val hasMore = batch.size >= pageSize && added > 0 && found.size < target && pages < 12
+                if (hasMore) step() else finish(found.isNotEmpty())
+            },
+            onError = { message ->
+                lastError = message
+                finish(found.isNotEmpty())
+            }
+        )
+    }
+    step()
 }
 
 // ---------------------------------------------------------------- screener
@@ -92,6 +157,8 @@ fun screenerScreen(): HTMLElement {
     var minRsi = ""
     var maxRsi = ""
     var sortBy = "change"
+    var visible = 40
+    var paintRows: () -> Unit = { }
 
     val presets = listOf(
         "all" to "All stocks",
@@ -118,7 +185,7 @@ fun screenerScreen(): HTMLElement {
             val controlCard = card("toolbar-card")
             val chips = el("div", "toolbar-chips wrap")
             for ((key, label) in presets) {
-                chips.appendChild(chipButton(label, preset == key) { preset = key; paint() })
+                chips.appendChild(chipButton(label, preset == key) { preset = key; visible = 40; paintRows() })
             }
             controlCard.appendChild(chips)
             val row = el("div", "toolbar")
@@ -129,16 +196,20 @@ fun screenerScreen(): HTMLElement {
             val trendSelect = selectField(
                 listOf("all" to "Any trend", "Uptrend" to "Uptrend", "Mild uptrend" to "Mild uptrend", "Mild downtrend" to "Mild downtrend", "Downtrend" to "Downtrend", "Mixed" to "Mixed"),
                 trendFilter
-            ) { value -> trendFilter = value; paint() }
+            ) { value -> trendFilter = value; visible = 40; paintRows() }
             val sortSelect = selectField(
                 listOf("change" to "Sort: % change", "rsi" to "Sort: RSI", "volume" to "Sort: relative volume", "price" to "Sort: price"),
                 sortBy
-            ) { value -> sortBy = value; paint() }
-            row.add(minInput, maxInput, trendSelect, sortSelect, actionButton("Apply", "primary", "filter") { paint() })
+            ) { value -> sortBy = value; visible = 40; paintRows() }
+            row.add(minInput, maxInput, trendSelect, sortSelect, actionButton("Apply", "primary", "filter") {
+                visible = 40
+                paintRows()
+            })
             controlCard.appendChild(row)
             controlCard.appendChild(el(
                 "p", "muted small",
-                "Universe: " + integer(TaStore.universe.toDouble()) + " securities · " + TaStore.source +
+                "Universe: " + integer(max(TaStore.listed.size, TaStore.universe).toDouble()) + " listed securities · " +
+                    integer(TaStore.rows.size.toDouble()) + " with live technicals · " + TaStore.source +
                     (if (TaStore.updated.isNotBlank()) " · updated " + updatedTime(TaStore.updated) else "")
             ))
             wrap.appendChild(controlCard)
@@ -158,47 +229,90 @@ fun screenerScreen(): HTMLElement {
                 return true
             }
 
-            var rows = TaStore.rows.filter { passes(it) }
-            rows = when (sortBy) {
-                "rsi" -> rows.sortedBy { it.rsi ?: Double.MAX_VALUE }
-                "volume" -> rows.sortedByDescending { it.relVolume ?: 0.0 }
-                "price" -> rows.sortedByDescending { it.price ?: 0.0 }
-                else -> rows.sortedByDescending { it.change ?: -999.0 }
-            }
-            val resultCard = card()
-            resultCard.appendChild(cardHead(
-                "Screen results",
-                integer(rows.size.toDouble()) + " securities match the active filters",
-                actionButton("Reset", "ghost", "refresh") {
-                    preset = "all"; trendFilter = "all"; minRsi = ""; maxRsi = ""; sortBy = "change"; paint()
+            val techBySymbol = TaStore.rows.associateBy { it.symbol }
+            val universeRows: List<TaRow> = if (TaStore.listed.isNotEmpty()) {
+                TaStore.listed.map { entry ->
+                    techBySymbol[entry.first] ?: TaRow(
+                        symbol = entry.first,
+                        name = entry.second,
+                        price = null,
+                        change = null,
+                        rsi = null,
+                        sma20 = null,
+                        sma50 = null,
+                        sma200 = null,
+                        relVolume = null,
+                        volume = null,
+                        high52 = null,
+                        low52 = null,
+                        trend = "No live technicals",
+                        adx = null,
+                        macdHistogram = null
+                    )
                 }
-            ))
-            val table = dataTable(listOf("SYMBOL", "LTP", "CHG %", "RSI", "SMA 20", "SMA 50", "REL VOL", "TREND"), setOf(1, 2, 3, 4, 5, 6))
-            if (rows.isEmpty()) {
-                table.empty("No securities match these filters. Widen the RSI range or choose another preset.")
             } else {
-                for (row in rows.take(120)) {
-                    val symbolCell = el("div", "symbol-cell")
-                    symbolCell.appendChild(el("strong", "", row.symbol))
-                    symbolCell.appendChild(el("small", "", row.name.take(34)))
-                    val rsiCell = el("div", "mono", row.rsi?.let { fixed(it, 1) } ?: "—")
-                    if ((row.rsi ?: 50.0) < 30.0) rsiCell.classList.add("tone-up")
-                    if ((row.rsi ?: 50.0) > 70.0) rsiCell.classList.add("tone-down")
-                    table.row(listOf(
-                        symbolCell,
-                        el("div", "mono", price(row.price)),
-                        el("div", "mono tone-" + toneOf(row.change), percent(row.change)),
-                        rsiCell,
-                        el("div", "mono", price(row.sma20)),
-                        el("div", "mono", price(row.sma50)),
-                        el("div", "mono", row.relVolume?.let { fixed(it, 2) + "×" } ?: "—"),
-                        el("div", "small", row.trend)
-                    )) { openSymbol(row.symbol) }
-                }
+                TaStore.rows
             }
-            resultCard.appendChild(table.root.parentElement as HTMLElement)
-            wrap.appendChild(resultCard)
+            val resultHost = el("div")
+            wrap.appendChild(resultHost)
             host.appendChild(wrap)
+
+            paintRows = {
+                resultHost.innerHTML = ""
+                var rows = universeRows.filter { passes(it) }
+                rows = when (sortBy) {
+                    "rsi" -> rows.sortedBy { it.rsi ?: Double.MAX_VALUE }
+                    "volume" -> rows.sortedByDescending { it.relVolume ?: 0.0 }
+                    "price" -> rows.sortedByDescending { it.price ?: 0.0 }
+                    else -> rows.sortedByDescending { it.change ?: -999.0 }
+                }
+                val resultCard = card()
+                val shown = min(visible, rows.size)
+                resultCard.appendChild(cardHead(
+                    "Screen results",
+                    integer(rows.size.toDouble()) + " of " + integer(universeRows.size.toDouble()) +
+                        " listed securities match · showing " + integer(shown.toDouble()),
+                    actionButton("Reset", "ghost", "refresh") {
+                        preset = "all"; trendFilter = "all"; minRsi = ""; maxRsi = ""; sortBy = "change"; visible = 40; paintRows()
+                    }
+                ))
+                val table = dataTable(listOf("SYMBOL", "LTP", "CHG %", "RSI", "SMA 20", "SMA 50", "REL VOL", "TREND"), setOf(1, 2, 3, 4, 5, 6))
+                if (rows.isEmpty()) {
+                    table.empty("No securities match these filters. Widen the RSI range or choose another preset.")
+                } else {
+                    for (row in rows.take(visible)) {
+                        val symbolCell = el("div", "symbol-cell")
+                        symbolCell.appendChild(el("strong", "", row.symbol))
+                        symbolCell.appendChild(el("small", "", row.name.take(34)))
+                        val rsiCell = el("div", "mono", row.rsi?.let { fixed(it, 1) } ?: "—")
+                        if ((row.rsi ?: 50.0) < 30.0) rsiCell.classList.add("tone-up")
+                        if ((row.rsi ?: 50.0) > 70.0) rsiCell.classList.add("tone-down")
+                        table.row(listOf(
+                            symbolCell,
+                            el("div", "mono", price(row.price)),
+                            el("div", "mono tone-" + toneOf(row.change), percent(row.change)),
+                            rsiCell,
+                            el("div", "mono", price(row.sma20)),
+                            el("div", "mono", price(row.sma50)),
+                            el("div", "mono", row.relVolume?.let { fixed(it, 2) + "×" } ?: "—"),
+                            el("div", "small", row.trend)
+                        )) { openSymbol(row.symbol) }
+                    }
+                }
+                resultCard.appendChild(table.root.parentElement as HTMLElement)
+                if (rows.size > visible) {
+                    resultCard.appendChild(actionButton(
+                        "Load more stocks (" + integer((rows.size - visible).toDouble()) + " remaining)",
+                        "secondary",
+                        "plus"
+                    ) {
+                        visible += 60
+                        paintRows()
+                    })
+                }
+                resultHost.appendChild(resultCard)
+            }
+            paintRows()
         }
     }
     paint()

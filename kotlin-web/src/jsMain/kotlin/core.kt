@@ -305,6 +305,7 @@ data class Quote(
     val prev: Double?,
     val volume: Double?,
     val turnover: Double?,
+    val trades: Double? = null,
     val sector: String = ""
 ) {
     val isUp: Boolean get() = (pct ?: change ?: 0.0) > 0
@@ -341,6 +342,7 @@ fun quoteOf(row: dynamic): Quote {
         prev = prev,
         volume = num(pick(row, "totalTradeQuantity", "volume", "tradedShares", "quantity", "lastTradedVolume")),
         turnover = num(pick(row, "totalTradeValue", "turnover", "amount", "totalTradedAmount")),
+        trades = num(pick(row, "totalTrades", "totalTransactions", "numberOfTrades", "trades", "noOfTransactions", "transactionCount")),
         sector = text(pick(row, "sector", "sectorName", "indexName")) ?: ""
     )
 }

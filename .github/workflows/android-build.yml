@@ -3698,7 +3698,7 @@ jobs:
           changed_sdk = False
           if variables.exists():
               text = variables.read_text()
-              for key, value in (("minSdkVersion", 24), ("targetSdkVersion", 36)):
+              for key, value in (("minSdkVersion", 25), ("targetSdkVersion", 36)):
                   pattern = rf"(?m)^(\s*{key}\s*(?:=|:)\s*)\d+(\s*(?://.*)?)$"
                   updated, count = re.subn(pattern, rf"\g<1>{value}\g<2>", text)
                   if count:
@@ -3713,7 +3713,7 @@ jobs:
               if not gradle.exists():
                   continue
               text = gradle.read_text()
-              for key, value in (("minSdk", 24), ("minSdkVersion", 24), ("targetSdk", 36), ("targetSdkVersion", 36)):
+              for key, value in (("minSdk", 25), ("minSdkVersion", 25), ("targetSdk", 36), ("targetSdkVersion", 36)):
                   pattern = rf"(?m)^(\s*{key}\s*(?:=|\s)\s*)\d+(\s*(?://.*)?)$"
                   updated, count = re.subn(pattern, rf"\g<1>{value}\g<2>", text)
                   if count:

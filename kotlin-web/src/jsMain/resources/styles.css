@@ -501,6 +501,13 @@ h3 { font-size: 14px; margin: 0; }
 .badge-live { color: var(--accent); border-color: rgba(47, 214, 176, 0.34); background: var(--accent-soft); }
 
 .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.flow-host { display: flex; min-width: 0; }
+.flow-host > .card { width: 100%; }
+.flow-card .table { min-width: 0; }
+.flow-card .tr { gap: 7px; padding: 9px 4px; }
+.flow-card .td { font-size: 10.5px; }
+.flow-card .td:first-child { flex: 1.5 1 0; }
+.flow-card .card-hint { max-width: 320px; }
 .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
 .grid-2-wide { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 16px; }
 
@@ -516,7 +523,7 @@ h3 { font-size: 14px; margin: 0; }
 .index-status { display: flex; flex-direction: column; align-items: flex-end; gap: 7px; }
 .index-updated { font-size: 10px; color: var(--muted); }
 .index-chart { margin: 14px -6px 4px; }
-.index-range { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
+.index-range { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
 .index-range .pair { flex-direction: column; align-items: flex-start; gap: 3px; border: 0; padding: 0; }
 .index-range .pair-label { font-size: 9px; }
 .index-range .pair-value { font-size: 11.5px; }
@@ -576,6 +583,9 @@ h3 { font-size: 14px; margin: 0; }
 .mover-name { font-size: 10.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mover-price { font-family: var(--font-mono); font-size: 11.5px; }
 .mover-change { font-family: var(--font-mono); font-size: 11px; min-width: 58px; text-align: right; }
+.mover-change.up { color: var(--up) !important; }
+.mover-change.down { color: var(--down) !important; }
+.mover-change.flat { color: var(--muted) !important; }
 
 .news-card { display: flex; flex-direction: column; }
 .news-body { display: flex; flex-direction: column; gap: 2px; }

@@ -36,12 +36,6 @@ fun marketStatusLabel(): String {
     return if (payload.marketOpen == true) "Market open" else "Market closed"
 }
 
-fun marketSourceLabel(): String {
-    val payload = Ctx.market ?: return "NEPSE Pulse engine"
-    val source = text(pick(payload, "source", "summarySource"))
-    return source ?: "NEPSE Pulse engine"
-}
-
 fun updatedLabel(): String {
     val payload = Ctx.market ?: return "—"
     val stamp = text(pick(payload, "updatedAt"))
@@ -88,7 +82,7 @@ fun marketStatCards(payload: dynamic): HTMLElement {
     val scrips = summaryDouble(payload, "total scrips traded", "scrips")
     val marketCap = summaryDouble(payload, "total market capitalization", "market capitalization")
     val floatCap = summaryDouble(payload, "total float market capitalization", "float market capitalization")
-    grid.appendChild(statTile("TURNOVER", rupees(turnover), "Provider-reported session value"))
+    grid.appendChild(statTile("TURNOVER", rupees(turnover), "Reported traded value this session"))
     grid.appendChild(statTile("TRANSACTIONS", integer(transactions), "Executed contracts"))
     grid.appendChild(statTile("SHARES TRADED", integer(shares), "Total traded quantity"))
     grid.appendChild(statTile("SCRIPS TRADED", integer(scrips), "Listed securities active"))
@@ -116,6 +110,192 @@ fun moversCard(title: String, hint: String, rows: List<Quote>, positive: Boolean
         for (quote in rows.take(6)) panel.appendChild(moverRow(quote))
     }
     return panel
+}
+
+// ---------------------------------------------------------------- volume & transaction leaders
+
+object TransactionStats {
+    var counts: Map<String, Int> = emptyMap()
+    var at: Double = 0.0
+    var loading: Boolean = false
+    var error: String? = null
+    private val waiting = ArrayList<(Boolean, String?) -> Unit>()
+
+    fun isFresh(): Boolean = counts.isNotEmpty() && nowMs() - at < 300_000.0
+
+    fun addListener(listener: (Boolean, String?) -> Unit) {
+        waiting.add(listener)
+    }
+
+    fun finish(ok: Boolean) {
+        at = nowMs()
+        loading = false
+        val listeners = waiting.toList()
+        waiting.clear()
+        for (listener in listeners) listener(ok, error)
+    }
+}
+
+fun transactionCountFor(symbol: String): Int? = TransactionStats.counts[symbol.uppercase()]
+
+/**
+ * Exact per-symbol transaction counts from the executed NEPSE floorsheet cache.
+ * The market snapshot carries no contract count, so every traded symbol is
+ * resolved with /api/floorsheet-cache?symbol=…&limit=1 and its reported total is
+ * used. Requests run with bounded concurrency and are cached for five minutes;
+ * nothing is estimated or synthesised.
+ */
+fun loadTransactionCounts(force: Boolean = false, onDone: (Boolean, String?) -> Unit = { _, _ -> }) {
+    val symbols = Ctx.quotes
+        .filter { (it.volume ?: 0.0) > 0.0 && it.symbol != "—" }
+        .map { it.symbol.uppercase() }
+        .distinct()
+    if (symbols.isEmpty()) {
+        onDone(false, "No traded securities in this market snapshot")
+        return
+    }
+    if (!force && TransactionStats.isFresh()) {
+        onDone(true, null)
+        return
+    }
+    TransactionStats.addListener(onDone)
+    if (TransactionStats.loading) return
+    TransactionStats.loading = true
+    TransactionStats.error = null
+    val found = LinkedHashMap<String, Int>()
+    var index = 0
+    var active = 0
+    var settled = false
+
+    fun settle() {
+        if (index < symbols.size || active > 0 || settled) return
+        settled = true
+        TransactionStats.counts = found.toMap()
+        TransactionStats.error = if (found.isEmpty()) "The floorsheet cache did not return contract totals." else null
+        TransactionStats.finish(found.isNotEmpty())
+    }
+
+    fun release() {
+        active -= 1
+        settle()
+    }
+
+    lateinit var pump: () -> Unit
+    pump = {
+        while (active < 6 && index < symbols.size) {
+            val symbol = symbols[index]
+            index += 1
+            active += 1
+            Http.get(
+                "/api/floorsheet-cache?symbol=" + encode(symbol) + "&limit=1",
+                ttlMs = 600_000.0,
+                force = force,
+                timeoutMs = 25_000,
+                onData = { payload ->
+                    val total = num(pick(payload, "total", "count"))?.toInt()
+                    if (total != null && total >= 0) found[symbol] = total
+                    release()
+                    pump()
+                },
+                onError = {
+                    release()
+                    pump()
+                }
+            )
+        }
+        settle()
+    }
+    pump()
+}
+
+data class FlowRow(val quote: Quote, val metric: String)
+
+fun volumeLeaders(): List<FlowRow> = Ctx.quotes
+    .filter { (it.volume ?: 0.0) > 0.0 }
+    .sortedByDescending { it.volume ?: 0.0 }
+    .map { FlowRow(it, integer(it.volume)) }
+
+fun transactionLeaders(): List<FlowRow> = Ctx.quotes
+    .mapNotNull { quote -> transactionCountFor(quote.symbol)?.let { quote to it } }
+    .sortedByDescending { it.second }
+    .map { FlowRow(it.first, integer(it.second.toDouble())) }
+
+fun flowCard(
+    title: String,
+    hint: String,
+    metricHeader: String,
+    rows: List<FlowRow>,
+    loading: Boolean = false,
+    error: String? = null,
+    emptyMessage: String = "",
+    viewAll: (() -> Unit)? = null
+): HTMLElement {
+    val panel = card("flow-card")
+    val trailing = if (viewAll == null || rows.isEmpty()) null else actionButton("View all", "ghost", null) { viewAll() }
+    panel.appendChild(cardHead(title, hint, trailing))
+    if (loading) {
+        panel.appendChild(skeleton(132))
+        panel.appendChild(el("p", "muted small", "Reading executed contracts from the NEPSE floorsheet…"))
+        return panel
+    }
+    if (rows.isEmpty()) {
+        panel.appendChild(emptyState(
+            if (error != null) "Transaction counts unavailable" else "No securities to rank",
+            error ?: emptyMessage
+        ))
+        return panel
+    }
+    val table = dataTable(listOf("SYMBOL / COMPANY", "LTP", metricHeader, "% CHANGE"), setOf(1, 2, 3))
+    for (row in rows.take(6)) {
+        val quote = row.quote
+        val symbolCell = el("div", "symbol-cell")
+        symbolCell.appendChild(el("strong", "", quote.symbol))
+        symbolCell.appendChild(el("small", "", quote.name.take(34)))
+        table.row(listOf(
+            symbolCell,
+            el("div", "mono", price(quote.ltp)),
+            el("div", "mono", row.metric),
+            el("div", "mono tone-" + toneOf(quote.pct), percent(quote.pct))
+        )) { openSymbol(quote.symbol) }
+    }
+    panel.appendChild(table.root.parentElement as HTMLElement)
+    panel.appendChild(el("p", "muted small", integer(rows.size.toDouble()) + " ranked securities"))
+    return panel
+}
+
+fun openFlowList(title: String, metricHeader: String, rows: List<FlowRow>) {
+    modal(title) { body ->
+        val host = el("div")
+        body.appendChild(host)
+        var visible = 60
+        lateinit var paintList: () -> Unit
+        paintList = {
+            host.innerHTML = ""
+            val table = dataTable(listOf("SYMBOL / COMPANY", "LTP", metricHeader, "% CHANGE"), setOf(1, 2, 3))
+            for (row in rows.take(visible)) {
+                val quote = row.quote
+                val symbolCell = el("div", "symbol-cell")
+                symbolCell.appendChild(el("strong", "", quote.symbol))
+                symbolCell.appendChild(el("small", "", quote.name.take(40)))
+                table.row(listOf(
+                    symbolCell,
+                    el("div", "mono", price(quote.ltp)),
+                    el("div", "mono", row.metric),
+                    el("div", "mono tone-" + toneOf(quote.pct), percent(quote.pct))
+                )) { openSymbol(quote.symbol) }
+            }
+            host.appendChild(table.root.parentElement as HTMLElement)
+            host.appendChild(el("p", "muted small",
+                "Showing " + integer(min(visible, rows.size).toDouble()) + " of " + integer(rows.size.toDouble()) + " securities"))
+            if (rows.size > visible) {
+                host.appendChild(actionButton("Show more", "secondary", "plus") {
+                    visible += 100
+                    paintList()
+                })
+            }
+        }
+        paintList()
+    }
 }
 
 // ---------------------------------------------------------------- news feed
@@ -191,7 +371,7 @@ object NewsCache {
 
 fun newsCard(): HTMLElement {
     val panel = card("news-card")
-    panel.appendChild(cardHead("Market news & updates", "Notices and disclosures from the connected NEPSE provider"))
+    panel.appendChild(cardHead("Market news & updates", "Latest notices and disclosures"))
     val body = el("div", "news-body")
     body.appendChild(skeleton(90))
     panel.appendChild(body)
@@ -291,7 +471,6 @@ fun dashboardScreen(): HTMLElement {
             range.appendChild(pair("Day high", price(index["high"])))
             range.appendChild(pair("Day low", price(index["low"])))
             range.appendChild(pair("Previous close", price(index["prev"])))
-            range.appendChild(pair("Source", marketSourceLabel()))
             indexCard.appendChild(range)
             hero.appendChild(indexCard)
 
@@ -347,6 +526,40 @@ fun dashboardScreen(): HTMLElement {
             movers.appendChild(moversCard("Top losers", "Weakest verified moves this session", if (apiLosers.isNotEmpty()) apiLosers else losers, false))
             wrap.appendChild(movers)
 
+            val volumeRows = volumeLeaders()
+            val flowCards = el("div", "grid-2")
+            flowCards.appendChild(flowCard(
+                title = "Top volume",
+                hint = "Most actively traded securities by share quantity",
+                metricHeader = "VOLUME",
+                rows = volumeRows,
+                emptyMessage = "The provider did not report traded volume for this session.",
+                viewAll = { openFlowList("Top volume", "VOLUME", volumeRows) }
+            ))
+            val transactionHost = el("div", "flow-host")
+            flowCards.appendChild(transactionHost)
+            fun paintTransactions() {
+                transactionHost.innerHTML = ""
+                val rows = transactionLeaders()
+                transactionHost.appendChild(flowCard(
+                    title = "Top transactions",
+                    hint = "Highest number of executed contracts this session",
+                    metricHeader = "TRADES",
+                    rows = rows,
+                    loading = TransactionStats.loading && rows.isEmpty(),
+                    error = TransactionStats.error,
+                    emptyMessage = "No executed contracts were reported for this session.",
+                    viewAll = { openFlowList("Top transactions", "TRADES", rows) }
+                ))
+            }
+            paintTransactions()
+            if (!TransactionStats.isFresh()) {
+                loadTransactionCounts { _, _ ->
+                    if (transactionHost.parentElement != null) paintTransactions()
+                }
+            }
+            wrap.appendChild(flowCards)
+
             val flow = el("div", "grid-2-wide")
             val turnoverCard = card("turnover-card")
             turnoverCard.appendChild(cardHead("Turnover leaders", "Liquidity concentration by traded value", actionButton("All stocks", "ghost", null) { go("market") }))
@@ -355,7 +568,7 @@ fun dashboardScreen(): HTMLElement {
                 Ctx.quotes.sortedByDescending { it.turnover ?: 0.0 }.take(6)
             }
             if (leaders.isEmpty()) {
-                turnTable.empty("No turnover data returned by the provider.")
+                turnTable.empty("No turnover data available for this session.")
             } else {
                 for (quote in leaders.take(6)) {
                     turnTable.row(listOf(
