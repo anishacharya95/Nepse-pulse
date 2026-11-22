@@ -401,8 +401,10 @@ private fun cssVar(name: String, fallback: String): String {
     return if (text.isEmpty()) fallback else text
 }
 
+private val chartDateFactory: dynamic = js("(function(t){return new Date(t)})")
+
 fun chartTime(ms: Double, intraday: Boolean): String {
-    val date = js("new Date")(ms)
+    val date = chartDateFactory(ms)
     return if (intraday) {
         date.toLocaleTimeString("en-GB", js("({hour:'2-digit',minute:'2-digit'})")) as String
     } else {
@@ -411,7 +413,7 @@ fun chartTime(ms: Double, intraday: Boolean): String {
 }
 
 fun chartDay(ms: Double): String {
-    val date = js("new Date")(ms)
+    val date = chartDateFactory(ms)
     return date.toLocaleDateString("en-GB", js("({day:'2-digit',month:'short',year:'numeric'})")) as String
 }
 

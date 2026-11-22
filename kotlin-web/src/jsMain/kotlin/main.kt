@@ -3,7 +3,7 @@ import kotlinx.browser.window
 import org.w3c.dom.HTMLInputElement
 import org.w3c.dom.HTMLElement
 
-data class Route(val id: String, val label: String, val icon: String, val group: String)
+data class Route(val id: String, val label: String, val icon: String, val group: String, val nav: Boolean = true)
 
 val ROUTES = listOf(
     Route("dashboard", "Dashboard", "dashboard", "Markets"),
@@ -17,6 +17,14 @@ val ROUTES = listOf(
     Route("traders", "Traders zone", "traders", "Research"),
     Route("floorsheet", "Floorsheet & brokers", "floorsheet", "Flow"),
     Route("brokers", "Broker analytics", "brokers", "Flow"),
+    Route("tools", "Tools hub", "layers", "Tools"),
+    Route("charts", "Advanced charts", "chart", "Tools"),
+    Route("replay", "Chart replay", "clock", "Tools"),
+    Route("risk", "Risk calculator", "shield", "Tools", false),
+    Route("portfolio-risk", "Portfolio risk", "portfolio", "Tools", false),
+    Route("scenario", "Scenario simulator", "spark", "Tools", false),
+    Route("hypo", "Hypothetical positions", "layers", "Tools", false),
+    Route("compare", "Stock comparison", "market", "Tools", false),
     Route("portfolio", "Portfolio", "portfolio", "Personal"),
     Route("watchlist", "Watchlist", "watchlist", "Personal"),
     Route("alerts", "Price alerts", "alerts", "Personal"),
@@ -25,7 +33,7 @@ val ROUTES = listOf(
     Route("profile", "Profile & settings", "profile", "Account")
 )
 
-private val groups = listOf("Markets", "Research", "Flow", "Personal", "Primary market", "Account")
+private val groups = listOf("Markets", "Research", "Flow", "Tools", "Personal", "Primary market", "Account")
 
 var currentRoute: String = "dashboard"
 private var authGateActive: Boolean = true
@@ -74,7 +82,7 @@ private fun buildSidebar(): HTMLElement {
 
     val nav = el("nav", "nav")
     for (group in groups) {
-        val routes = ROUTES.filter { it.group == group }
+        val routes = ROUTES.filter { it.group == group && it.nav }
         if (routes.isEmpty()) continue
         nav.appendChild(el("div", "nav-group-label", group.uppercase()))
         for (route in routes) nav.appendChild(navLink(route))
@@ -267,7 +275,7 @@ private fun buildBottomNav(): HTMLElement {
 private fun openMoreSheet() {
     modal("All sections") { body ->
         for (group in groups) {
-            val routes = ROUTES.filter { it.group == group }
+            val routes = ROUTES.filter { it.group == group && it.nav }
             if (routes.isEmpty()) continue
             body.appendChild(el("div", "nav-group-label", group.uppercase()))
             val grid = el("div", "more-grid")
@@ -309,6 +317,8 @@ fun go(route: String) {
 }
 
 fun render() {
+    stopReplayPlayback()
+    NpChartRegistry.reset()
     val appRoot = document.getElementById("app") as? HTMLElement
     if (!Auth.ready || !Auth.signedIn) {
         authGateActive = true
@@ -330,8 +340,16 @@ fun render() {
         "xray" -> stockXrayScreen(currentSymbol)
         "screener" -> screenerScreen()
         "quant" -> quantScreen()
-        "floorsheet" -> floorsheetScreen()
+        "floorsheet" -> floorsheetV10Screen()
         "brokers" -> brokerAnalyticsScreen()
+        "tools" -> toolsHubScreen()
+        "charts" -> advancedChartScreen()
+        "replay" -> replayScreen()
+        "risk" -> riskCalculatorScreen()
+        "portfolio-risk" -> portfolioRiskScreen()
+        "scenario" -> scenarioSimulatorScreen()
+        "hypo" -> hypotheticalScreen()
+        "compare" -> comparisonScreen()
         "sectors" -> sectorsScreen()
         "structure" -> marketStructureScreen()
         "traders" -> tradersScreen()
@@ -434,6 +452,12 @@ fun main() {
         updateMarketPill()
         null
     }, 15_000)
+
+    // Keep every mounted chart in step with layout changes.
+    window.setInterval({
+        NpChartRegistry.tick()
+        null
+    }, 900)
 
     window.addEventListener("hashchange", {
         val previous = currentRoute

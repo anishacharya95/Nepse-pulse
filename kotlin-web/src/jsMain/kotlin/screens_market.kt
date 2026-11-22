@@ -394,6 +394,23 @@ fun dashboardScreen(): HTMLElement {
                 }
             }
             wrap.appendChild(sectorCard)
+
+            val toolsCard = card("tools-strip-card")
+            toolsCard.appendChild(cardHead("Decision tools", "Replay, risk and comparison computed from real market data", actionButton("All tools", "ghost", "layers") { go("tools") }))
+            val toolsStrip = el("div", "tools-strip")
+            for (entry in listOf(
+                "replay" to "Chart replay",
+                "risk" to "Risk calculator",
+                "scenario" to "Scenario",
+                "compare" to "Compare stocks"
+            )) {
+                val chip = el("button", "sector-chip tools-chip")
+                chip.appendChild(el("span", "sector-chip-name", entry.second))
+                chip.onClick { go(entry.first) }
+                toolsStrip.appendChild(chip)
+            }
+            toolsCard.appendChild(toolsStrip)
+            wrap.appendChild(toolsCard)
             return@withMarket wrap
         }
     }

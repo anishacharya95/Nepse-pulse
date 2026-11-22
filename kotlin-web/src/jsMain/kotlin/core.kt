@@ -7,7 +7,7 @@ import kotlin.math.round
 import kotlin.math.roundToLong
 
 const val API_BASE = "https://nepse-pulse-1.onrender.com"
-const val APP_VERSION = "2.1.0"
+const val APP_VERSION = "3.0.0"
 const val BRAND = "NEPSE Pulse"
 
 private val objectKeys: dynamic = js("Object.keys")
